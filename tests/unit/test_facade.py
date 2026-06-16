@@ -115,12 +115,15 @@ async def test_fake_send_returns_scripted_finished_result() -> None:
 @pytest.mark.asyncio
 async def test_fake_busy_hook_send_in_progress_event() -> None:
     """send_in_progress is set during send and cleared after."""
-    facade = FakeSdkFacade()
+    release = asyncio.Event()
+    facade = FakeSdkFacade(send_release=release)
     agent_id = await facade.create_agent(workspace="/tmp/ws")
 
     send_task = asyncio.create_task(facade.send(agent_id, "hold"))
     await asyncio.wait_for(facade.send_in_progress.wait(), timeout=1.0)
+    assert not send_task.done()
     assert facade.send_in_progress.is_set() is True
+    release.set()
     result = await send_task
     assert facade.send_in_progress.is_set() is False
     assert result.status is RunStatus.FINISHED
