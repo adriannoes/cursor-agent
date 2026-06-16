@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Project runtime
+.sessions/
+*.db
+*.sqlite3
+logs/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Cursor local agent state (if created in-repo during dev)
+.cursor-agent-state/
+
+# Git worktrees (see .cursor/skills/using-git-worktrees/SKILL.md)
+.worktrees/
+worktrees/
