@@ -335,12 +335,15 @@ class FakeSdkFacade:
         scripted_replies: dict[str, str] | None = None,
         scripted_tool_events: list[tuple[str, dict[str, Any]]] | None = None,
         default_reply: str = "fake reply",
+        send_release: asyncio.Event | None = None,
     ) -> None:
         self._scripted_replies = scripted_replies or {}
         self._scripted_tool_events = scripted_tool_events or []
         self._default_reply = default_reply
         self._messages_by_agent: dict[str, list[dict[str, str]]] = {}
         self._agent_profiles: dict[str, str] = {}
+        # When set, ``send`` blocks until ``send_release`` is set (deterministic busy tests).
+        self._send_release = send_release
         self.send_in_progress = asyncio.Event()
         self._logger = _MODULE_LOGGER
         self._closed = False
@@ -393,9 +396,10 @@ class FakeSdkFacade:
         emit_send_start(self._logger, agent_id=agent_id, log_context=log_context)
         started = time.perf_counter()
         self.send_in_progress.set()
-        await asyncio.sleep(0)
         run_id = f"fake-run-{uuid.uuid4().hex[:8]}"
         try:
+            if self._send_release is not None:
+                await self._send_release.wait()
             history = self._messages_by_agent[agent_id]
             history.append({"role": "user", "content": message})
 
