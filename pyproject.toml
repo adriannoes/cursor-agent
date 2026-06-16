@@ -1,0 +1,49 @@
+[project]
+name = "cursor-agent"
+version = "0.0.0"
+description = "Clean-room Cursor agent orchestration (Phase 0 SDK spike)"
+requires-python = ">=3.11"
+dependencies = [
+    "cursor-sdk==0.1.7",
+]
+
+[build-system]
+requires = ["hatchling>=1.26,<2"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0,<9",
+    "pytest-asyncio>=0.24,<1",
+    "pytest-cov>=5.0,<6",
+    "ruff>=0.8,<1",
+    "mypy>=1.13,<2",
+]
+
+[tool.pytest.ini_options]
+markers = ["integration: requires CURSOR_API_KEY"]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.format]
+# ruff format — no black
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["cursor_agent"]
+
+[tool.coverage.run]
+source = ["cursor_agent"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cursor_agent"]
