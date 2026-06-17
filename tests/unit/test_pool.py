@@ -335,6 +335,24 @@ async def test_lock_gateway_nonblocking_raises_agent_busy_error(
     await first_task
 
 
+@pytest.mark.asyncio
+async def test_send_rejects_whitespace_only_message_before_facade(
+    store: SessionStore,
+    config: CursorAgentConfig,
+) -> None:
+    """Whitespace-only messages raise ConfigError before facade.send is called."""
+    session_key = "cli:default:emptymsg"
+    facade = SendCapturingFacade()
+    await _seed_session(store, facade, session_key, title=None)
+
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+
+    with pytest.raises(ConfigError, match="message"):
+        await pool.send(session_key, "   \t\n  ")
+
+    assert facade.send_calls == []
+
+
 # --- Task 4.7: send wrapper and LogContext ---
 
 

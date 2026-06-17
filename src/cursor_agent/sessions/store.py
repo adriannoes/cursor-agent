@@ -294,23 +294,30 @@ class SessionStore:
     ) -> SessionRecord:
         """Update session metadata, optionally merging with the stored payload."""
         _metadata_to_json(metadata)
-
-        existing = await self._fetch_by_id(session_id)
-        if existing is None:
-            raise ValueError(
-                f"session not found: received session_id={session_id!r}, "
-                "expected existing session UUID"
-            )
-
-        if merge:
-            merged: dict[str, object] = {**existing.metadata, **dict(metadata)}
-        else:
-            merged = dict(metadata)
-
-        merged_json = _metadata_to_json(merged)
+        payload = dict(metadata)
 
         async with aiosqlite.connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute(
+                f"SELECT {_SELECT_COLUMNS} FROM sessions WHERE id = ?",
+                (session_id,),
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                await db.rollback()
+                raise ValueError(
+                    f"session not found: received session_id={session_id!r}, "
+                    "expected existing session UUID"
+                )
+
+            existing = _row_to_session_record(row)
+            if merge:
+                merged: dict[str, object] = {**existing.metadata, **payload}
+            else:
+                merged = payload
+
+            merged_json = _metadata_to_json(merged)
             cursor = await db.execute(
                 """
                 UPDATE sessions
@@ -320,6 +327,7 @@ class SessionStore:
                 (merged_json, session_id),
             )
             if cursor.rowcount == 0:
+                await db.rollback()
                 raise ValueError(
                     f"session not found: received session_id={session_id!r}, "
                     "expected existing session UUID"
@@ -329,11 +337,11 @@ class SessionStore:
                 f"SELECT {_SELECT_COLUMNS} FROM sessions WHERE id = ?",
                 (session_id,),
             )
-            row = await cursor.fetchone()
+            updated_row = await cursor.fetchone()
 
-        if row is None:
+        if updated_row is None:
             raise ValueError(
                 f"session not found after metadata update: "
                 f"received session_id={session_id!r}, expected existing session UUID"
             )
-        return _row_to_session_record(row)
+        return _row_to_session_record(updated_row)
