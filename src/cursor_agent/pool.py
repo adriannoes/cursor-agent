@@ -42,10 +42,20 @@ def _session_not_found_message(session_key: str, session_id: str | None) -> str:
     )
 
 
+_NONBLOCKING_LOCK_TIMEOUT_SECONDS = 0.001
+
+
 async def _try_acquire_lock(lock: asyncio.Lock) -> bool:
-    """Attempt non-blocking lock acquisition (ADR-008; no TOCTOU via ``locked()``)."""
+    """Attempt non-blocking lock acquisition (ADR-008).
+
+    Uses a minimal positive timeout because ``wait_for(..., timeout=0)`` never
+    schedules lock acquisition on Python 3.13+.
+    """
     try:
-        await asyncio.wait_for(lock.acquire(), timeout=0)
+        await asyncio.wait_for(
+            lock.acquire(),
+            timeout=_NONBLOCKING_LOCK_TIMEOUT_SECONDS,
+        )
     except TimeoutError:
         return False
     return True
@@ -175,13 +185,18 @@ class SessionAgentPool:
         message: str,
         *,
         session_id: str | None = None,
+        session_row: SessionRecord | None = None,
         callbacks: StreamCallbacks | None = None,
         blocking: bool = True,
         model_override: str | None = None,
     ) -> RunResult:
         """Send a message with per-key locking, logging context, and store updates."""
         _validate_send_message(message)
-        row = await self._resolve_or_raise(session_key, session_id)
+        row = (
+            session_row
+            if session_row is not None
+            else await self._resolve_or_raise(session_key, session_id)
+        )
         self._assert_runtime_match(row)
 
         lock = self._lock_for(session_key)

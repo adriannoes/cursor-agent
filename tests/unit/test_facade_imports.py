@@ -57,16 +57,13 @@ def _modules_importing_cursor_sdk() -> set[str]:
 
 
 def _async_sdk_facade_exists() -> bool:
-    """True once AsyncSdkFacade is implemented (task 5.x)."""
+    """Return True when ``AsyncSdkFacade`` is available in ``sdk_facade``."""
     sdk_facade = importlib.import_module("cursor_agent.sdk_facade")
     return hasattr(sdk_facade, "AsyncSdkFacade")
 
 
 def test_cursor_sdk_import_isolation() -> None:
-    """Before AsyncSdkFacade: no src module imports cursor_sdk.
-
-    After task 5.x: only cursor_agent.sdk_facade may import cursor_sdk.
-    """
+    """Only ``cursor_agent.sdk_facade`` may import ``cursor_sdk``."""
     offenders = _modules_importing_cursor_sdk()
     if _async_sdk_facade_exists():
         assert offenders == {"cursor_agent.sdk_facade"}, (
