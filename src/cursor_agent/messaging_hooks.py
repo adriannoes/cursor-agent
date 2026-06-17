@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import functools
+import hashlib
 import json
 import logging
 import shutil
@@ -11,6 +13,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from cursor_agent.errors import ConfigError
 from cursor_agent.facade_logging import emit_hook_deploy
 
 MESSAGING_HOOK_FILENAMES: tuple[str, ...] = (
@@ -77,7 +80,23 @@ def resolve_messaging_hook_source_dir() -> Path:
         f"messaging hook sources not found: searched [{searched}], "
         f"expected files {list(MESSAGING_HOOK_FILENAMES)!r}"
     )
-    raise FileNotFoundError(msg)
+    raise ConfigError(msg)
+
+
+@functools.lru_cache(maxsize=1)
+def messaging_hook_source_fingerprint() -> str:
+    """Return a stable content hash for the resolved messaging hook sources.
+
+    Example:
+        >>> fingerprint = messaging_hook_source_fingerprint()
+        >>> len(fingerprint) == 64
+        True
+    """
+    source_dir = resolve_messaging_hook_source_dir()
+    hasher = hashlib.sha256()
+    for filename in MESSAGING_HOOK_FILENAMES:
+        hasher.update((source_dir / filename).read_bytes())
+    return hasher.hexdigest()
 
 
 def _is_complete_hook_source_dir(directory: Path) -> bool:
@@ -98,7 +117,7 @@ def _copy_hook_tree(source_dir: Path, target_dir: Path) -> None:
                 f"missing messaging hook source file: expected {src!r} to exist "
                 f"before install to {target_dir!r}"
             )
-            raise FileNotFoundError(msg)
+            raise ConfigError(msg)
         shutil.copy2(src, dst)
         if filename.endswith(".sh"):
             mode = dst.stat().st_mode
@@ -169,7 +188,7 @@ def _copy_hook_scripts(source_dir: Path, target_dir: Path) -> None:
         dst = target_dir / filename
         if not src.is_file():
             msg = f"missing messaging hook script: expected {src!r} to exist"
-            raise FileNotFoundError(msg)
+            raise ConfigError(msg)
         shutil.copy2(src, dst)
         mode = dst.stat().st_mode
         dst.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
@@ -253,7 +272,7 @@ def _resolve_installed_hooks_dir(user_hooks_dir: Path | None) -> Path:
             f"messaging hooks not installed: expected {resolved!r} to contain "
             f"{list(MESSAGING_HOOK_FILENAMES)!r}; call ensure_messaging_hooks first"
         )
-        raise FileNotFoundError(msg)
+        raise ConfigError(msg)
     return resolved
 
 
