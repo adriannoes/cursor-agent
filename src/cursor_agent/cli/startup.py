@@ -1,0 +1,62 @@
+"""CLI startup bootstrap helpers (PRD-003)."""
+
+from __future__ import annotations
+
+import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from cursor_agent.config.loader import CursorAgentConfig
+from cursor_agent.pool import SessionAgentPool
+from cursor_agent.sdk_facade import AsyncSdkFacade, SdkFacade
+from cursor_agent.sessions.models import build_cli_session_key
+from cursor_agent.sessions.store import SessionStore
+
+DEFAULT_DB_PATH = Path.home() / ".cursor-agent" / "sessions.db"
+
+
+def resolve_workspace(config: CursorAgentConfig) -> str:
+    """Return absolute workspace path from config runtime cwd."""
+    return str(Path(config.runtime.local.cwd).resolve())
+
+
+def session_key_for(config: CursorAgentConfig) -> str:
+    """Return CLI session key for the config workspace (ADR-004)."""
+    return build_cli_session_key(config.runtime.local.cwd)
+
+
+def create_store(
+    config: CursorAgentConfig,
+    *,
+    store_path: Path | None = None,
+) -> SessionStore:
+    """Create a SessionStore at ``store_path`` or the default DB path."""
+    _ = config
+    return SessionStore(store_path or DEFAULT_DB_PATH)
+
+
+@asynccontextmanager
+async def repl_runtime(
+    config: CursorAgentConfig,
+    *,
+    store_path: Path | None = None,
+    facade: SdkFacade | None = None,
+) -> AsyncIterator[tuple[SessionAgentPool, str, SessionStore, SdkFacade]]:
+    """Bootstrap pool, session key, store, and facade for the interactive REPL."""
+    store = create_store(config, store_path=store_path)
+    await store.initialize()
+    session_key = session_key_for(config)
+
+    if facade is not None:
+        pool = SessionAgentPool(store=store, facade=facade, config=config)
+        try:
+            yield pool, session_key, store, facade
+        finally:
+            await facade.close()
+    else:
+        async with AsyncSdkFacade(  # pragma: no cover
+            api_key=os.environ.get("CURSOR_API_KEY"),
+        ) as real:
+            pool = SessionAgentPool(store=store, facade=real, config=config)
+            yield pool, session_key, store, real
