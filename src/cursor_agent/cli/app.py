@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
+from typing import Annotated
 
 import typer
 
@@ -13,7 +14,7 @@ from cursor_agent.cli.repl_session import run_repl
 from cursor_agent.cli.rich_display import RichDisplay
 from cursor_agent.cli.startup import create_store, repl_runtime, session_key_for
 from cursor_agent.cli.stream_renderer import build_display_stream_callbacks
-from cursor_agent.config.loader import CursorAgentConfig, load_config
+from cursor_agent.config.loader import CursorAgentConfig, ToolProfile, load_config
 from cursor_agent.errors import CursorAgentError
 from cursor_agent.sdk_facade import RunStatus
 from cursor_agent.sessions.models import SessionRecord
@@ -95,13 +96,31 @@ def sessions_list() -> None:
         _print_session_row(row)
 
 
+def _cli_overrides_for_profile(
+    profile: ToolProfile | None,
+) -> Mapping[str, object] | None:
+    """Build load_config CLI overrides when --profile is present."""
+    if profile is None:
+        return None
+    return {"tool_profile": profile}
+
+
 @app.callback(invoke_without_command=True)
-def cli_entry(ctx: typer.Context) -> None:
+def cli_entry(
+    ctx: typer.Context,
+    profile: Annotated[
+        ToolProfile | None,
+        typer.Option(
+            "--profile",
+            help="Tool profile override (coding or messaging).",
+        ),
+    ] = None,
+) -> None:
     """Interactive Cursor agent CLI."""
     if ctx.invoked_subcommand is not None:
         return
     try:
-        config = load_config()
+        config = load_config(cli_overrides=_cli_overrides_for_profile(profile))
         status = asyncio.run(run_default(config))
     except CursorAgentError as exc:
         # Startup/bootstrap failures (config, auth, bridge, network) -> exit 1 (FR-10).

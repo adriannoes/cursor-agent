@@ -196,3 +196,71 @@ def emit_command_end(
         outcome=outcome,
     )
     logger.info(json.dumps(payload, separators=(",", ":")))
+
+
+def emit_hook_deploy(
+    logger: logging.Logger,
+    *,
+    profile: str,
+    workspace: str,
+    status: str,
+    error: str | None = None,
+) -> None:
+    """Emit NDJSON ``hook_deploy`` after messaging hook workspace deployment.
+
+    Example:
+        emit_hook_deploy(
+            logger,
+            profile="messaging",
+            workspace="/tmp/project",
+            status="ok",
+        )
+    """
+    payload: dict[str, Any] = {
+        "v": _LOG_SCHEMA_VERSION,
+        "ts": _utc_timestamp(),
+        "level": "info" if status == "ok" else "error",
+        "event": "hook_deploy",
+        "profile": profile,
+        "workspace": workspace,
+        "status": status,
+    }
+    if error is not None:
+        payload["error"] = _redact(error)
+    logger.info(json.dumps(payload, separators=(",", ":")))
+
+
+def emit_hook_deny(
+    logger: logging.Logger,
+    *,
+    hook_name: str,
+    tool_name: str,
+    reason: str,
+    session_id: str | None = None,
+    session_key: str | None = None,
+    agent_id: str | None = None,
+) -> None:
+    """Emit NDJSON ``hook_deny`` for hook policy denials (not command_end).
+
+    Example:
+        emit_hook_deny(
+            logger,
+            hook_name="beforeShellExecution",
+            tool_name="Shell",
+            reason="denied destructive command",
+        )
+    """
+    payload: dict[str, Any] = {
+        "v": _LOG_SCHEMA_VERSION,
+        "ts": _utc_timestamp(),
+        "level": "info",
+        "event": "hook_deny",
+        "hook_name": hook_name,
+        "tool_name": tool_name,
+        "reason": _redact(reason),
+        "session_id": session_id,
+        "session_key": session_key,
+    }
+    if agent_id is not None:
+        payload["agent_id"] = _redact(agent_id)
+    logger.info(json.dumps(payload, separators=(",", ":")))

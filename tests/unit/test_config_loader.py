@@ -168,3 +168,38 @@ def test_precedence_nested_runtime_local_cli_over_env(
     }
     config = load_config(config_path=config_file, cli_overrides=cli_overrides)
     assert config.runtime.local.cwd == "/from/cli"
+
+
+def test_precedence_cli_tool_profile_over_env_and_yaml(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLI tool_profile override beats env and YAML (ADR-007)."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("tool_profile: coding\n", encoding="utf-8")
+    monkeypatch.setenv("CURSOR_AGENT__TOOL_PROFILE", "coding")
+    cli_overrides: dict[str, Any] = {"tool_profile": "messaging"}
+    config = load_config(config_path=config_file, cli_overrides=cli_overrides)
+    assert config.tool_profile == "messaging"
+
+
+def test_omitted_cli_tool_profile_preserves_env_over_yaml(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without CLI tool_profile override, env still wins over YAML."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("tool_profile: coding\n", encoding="utf-8")
+    monkeypatch.setenv("CURSOR_AGENT__TOOL_PROFILE", "messaging")
+    config = load_config(config_path=config_file)
+    assert config.tool_profile == "messaging"
+
+
+def test_omitted_cli_tool_profile_preserves_yaml_over_default(
+    tmp_path: Path,
+) -> None:
+    """Without CLI tool_profile override, YAML still wins over defaults."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("tool_profile: messaging\n", encoding="utf-8")
+    config = load_config(config_path=config_file)
+    assert config.tool_profile == "messaging"
