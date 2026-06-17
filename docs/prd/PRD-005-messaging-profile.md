@@ -84,6 +84,25 @@ Antes de expor o agente via gateway público (Fase 3), o cursor-agent precisa de
 - **Limitações:** sandbox não bloqueia file edit — depende de `preToolUse`; classifier auto-review não é security boundary.
 - **Teste destrutivo:** manual na Fase 2b; automatizar cenários críticos onde possível com mocks de hook response.
 
+### Learnings from PRD-004 (pre-implementation)
+
+> Recorded after PRD-004 Wave 7 documentation gate. English per repo docs convention.
+
+**CLI behavior carry-over**
+
+- [x] `/stop` is **cooperative only** — calls `facade.cancel(agent_id)` on the active session; SIGINT handling and gateway busy-state cancellation remain deferred to PRD-006.
+- [x] `/usage` reports **last-turn usage** from `ReplState.last_usage` only, not cumulative session totals. Gateway token reporting must define its own aggregation policy.
+- [x] `/compress` sets `metadata.status="compressing"`, swaps `agent_id` on the same SQLite session row, and rolls back store state on failure. Crash mid-saga cleanup and orphan SDK agent cleanup ([issue #7](https://github.com/adriannoes/cursor-agent/issues/7)) remain known risks — messaging hooks must not worsen rollback paths.
+
+**Observability and privacy (PRD-004 → PRD-005)**
+
+- [x] Command events emit NDJSON `command_start` / `command_end` (schema v1) with `command`, `session_id` / `session_key`, optional `agent_id`, `duration_ms`, and `outcome`. **Prompt bodies and tool args are omitted** — reuse this shape for gateway audit logs.
+- [x] Rich tool badges render **tool name + lifecycle state only**; raw tool args and payloads are intentionally not displayed. Gateway replies and structured logs should follow the same omission policy.
+
+**Config and runtime**
+
+- [x] Local `setting_sources` are threaded from `config.runtime.local.setting_sources` into `AsyncSdkFacade` `LocalAgentOptions` for **local runtime only**. Cloud runtime does not use local `setting_sources` — messaging gateway runs are expected to be local; do not assume project/user rules load on cloud agents.
+
 ## 8. Métricas de sucesso
 
 - Todos os 5 cenários de [gateway-security.md §6](../gateway-security.md#6-teste-de-aceite-fase-2b) passam manualmente.
@@ -94,9 +113,12 @@ Antes de expor o agente via gateway público (Fase 3), o cursor-agent precisa de
 
 ## 9. Questões em aberto
 
-- Hooks devem ser copiados também no CLI `coding` como template opt-in, ou só no fluxo messaging?
+- ~~Hooks devem ser copiados também no CLI `coding` como template opt-in, ou só no fluxo messaging?~~ **Resolvido (PRD-004):** README documents an optional `.cursor/hooks.json` dev template for `coding` only; automatic copy/deploy of deny hooks stays **messaging-only** in this PRD (see [gateway-security.md §4](../gateway-security.md#4-hooks-instalados)).
 - Workspace de teste dedicado para aceite destrutivo vs. `cwd` do desenvolvedor?
 - Versionar hooks no repo (`cursor-agent/hooks/messaging/`) além de `~/.cursor-agent/`?
+- **Novo (PRD-004):** Gateway runner must not expose `/stop`-style cooperative cancel as the only interrupt path — SIGINT and busy-session behavior are PRD-006 scope; document expected operator UX when a messaging turn is in flight.
+- **Novo (PRD-004):** Should gateway audit logs extend PRD-004 command events (schema v1) for hook deny outcomes, or introduce a separate `hook_deny` event type?
+- **Novo (PRD-004):** `/usage` last-turn semantics do not map to per-user Telegram billing — define whether gateway surfaces usage at all before PRD-007.
 
 ## 10. Tarefas de implementação
 
@@ -175,10 +197,32 @@ Ordem sugerida: testes unitários de deploy/config → implementar hooks → ace
 
 **Após concluir PRD-005 (gate 2b):** revisar e atualizar [PRD-006](PRD-006-gateway-core.md) (§7, §9, §11) antes do gateway.
 
-**Aprendizados a registrar:**
+### Learnings from PRD-004 (slash commands) — pre-PRD-005 gate
+
+> Input for this PRD from [PRD-004](PRD-004-slash-commands.md) implementation. English per repo docs convention.
+
+**Commands and gateway surface**
+
+- [x] `/stop` — cooperative `facade.cancel(agent_id)` only; no SIGINT or gateway busy handling yet. Messaging profile should assume destructive tools may still run until hook deny fires — do not treat `/stop` as a security control.
+- [x] `/usage` — shape is last-turn `RunResult.usage` cached in `ReplState.last_usage`, not session cumulative. Omit or redesign before exposing via Telegram.
+- [x] Command NDJSON events (`command_start`, `command_end`, schema v1) are the baseline audit trail; prompt bodies and tool args excluded by design.
+
+**Display and logging privacy**
+
+- [x] Rich tool badges: name + state only — no raw args/payloads in CLI output. Gateway bot replies and NDJSON logs must apply the same rule ([ADR-018](../decisions/ADR-018-observability-logs.md)).
+
+**Config limitations**
+
+- [x] `setting_sources` flow: `config.runtime.local.setting_sources` → facade `LocalAgentOptions` for local runtime; cloud agents ignore local setting sources. Messaging deploy and hook copy target local `cwd` only.
+
+**Compress saga risks (do not amplify in hooks deploy)**
+
+- [x] `/compress` rollback on failure is implemented in SQLite; crash mid-saga and orphan SDK agents remain open risks. Hook deploy and profile switch must not leave `metadata.status` stuck or duplicate agents.
+
+**Aprendizados a registrar (during PRD-005 implementation):**
 
 - [ ] Cenários de aceite que falharam e ajustes nos scripts
 - [ ] Latência dos hooks no caminho crítico do send
 - [ ] Path real de deploy (`cwd/.cursor/hooks/`) vs. documentação
 - [ ] Diferenças observadas `coding` vs. `messaging` na prática
-- [ ] Requisitos extras para runner gateway (SIGTERM, allowlist)
+- [ ] Requisitos extras para runner gateway (SIGTERM, allowlist, cooperative cancel vs hook deny ordering)

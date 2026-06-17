@@ -31,6 +31,18 @@ Decisions in STRATEGY §2 are expanded in ADRs (including rejected options with 
 - [Cursor API key](https://cursor.com/dashboard/api) → `CURSOR_API_KEY`
 - `cursor-sdk-bridge` on PATH (installed with `cursor-sdk`)
 
+## Development hooks (optional)
+
+For local work with `tool_profile: coding`, you may add an optional `.cursor/hooks.json` in your workspace to moderate tool behavior (for example, shell gates). **cursor-agent does not install this file** — it is a documented developer convenience only. See the [Cursor Hooks](https://cursor.com/docs/hooks) schema and wire hook scripts under `.cursor/hooks/` as needed.
+
+Messaging deny hooks, sandbox, and MCP policy are **not** covered here. Those are defined in [gateway-security.md](docs/gateway-security.md) and implemented in [PRD-005](docs/prd/PRD-005-messaging-profile.md).
+
+## Auto-approve risk (`coding` vs `messaging`)
+
+The default **`coding`** profile runs the local SDK with **auto-approve** — tools execute without interactive prompts. That posture is a **developer convenience**, not a security boundary for public gateways or untrusted input.
+
+For bots and gateways, use `tool_profile: messaging` with deny hooks, sandbox (network off), and empty MCP as specified in [gateway-security.md](docs/gateway-security.md). Do not rely on `coding` + auto-approve outside a trusted local dev session.
+
 ## License
 
 MIT — see [ADR-019](docs/decisions/ADR-019-packaging-license.md).
