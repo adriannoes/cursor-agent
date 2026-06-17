@@ -53,9 +53,6 @@ def test_cursor_agent_config_uses_pydantic_settings() -> None:
     assert issubclass(CursorAgentConfig, BaseSettings)
 
 
-# --- YAML and ${VAR} expansion (task 3.3) ---
-
-
 def test_yaml_file_values_are_loaded(tmp_path: Path) -> None:
     """ADR-007: YAML at config_path supplies field values."""
     config_file = tmp_path / "config.yaml"
@@ -98,9 +95,6 @@ def test_yaml_invalid_top_level_shape_raises_config_error(tmp_path: Path) -> Non
     config_file.write_text("- not-a-mapping\n", encoding="utf-8")
     with pytest.raises(ConfigError, match="mapping"):
         load_config(config_path=config_file)
-
-
-# --- Precedence CLI > env > YAML > defaults (task 3.5) ---
 
 
 def test_precedence_yaml_over_defaults(tmp_path: Path) -> None:
