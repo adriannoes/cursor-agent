@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from cursor_agent.cli.command_router import BuiltinMatch
+from cursor_agent.cli.slash_commands import build_repl_command_router
 from cursor_agent.cli.startup import session_key_for
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.errors import ConfigError, NetworkError
@@ -18,6 +20,18 @@ from tests.unit.cli_repl_helpers import (
     drive_repl,
     seed_session,
 )
+
+
+def test_build_repl_command_router_registers_core_slash_commands() -> None:
+    """Wave 3: /new, /resume, and /quit dispatch through CommandRouter."""
+    router = build_repl_command_router()
+    for command in ("new", "resume", "quit"):
+        resolved = router.resolve(f"/{command}")
+        assert isinstance(resolved, BuiltinMatch)
+        assert resolved.canonical_name == command
+    help_resolved = router.resolve("/help")
+    assert isinstance(help_resolved, BuiltinMatch)
+    assert help_resolved.canonical_name == "help"
 
 
 async def test_run_repl_free_text_send_uses_active_session_id(
@@ -219,8 +233,9 @@ async def test_run_repl_send_config_error_prints_guidance_and_continues(
         session_id: str | None = None,
         callbacks: StreamCallbacks | None = None,
         blocking: bool = True,
+        model_override: str | None = None,
     ) -> RunResult:
-        _ = session_key, message, session_id, callbacks, blocking
+        _ = session_key, message, session_id, callbacks, blocking, model_override
         raise ConfigError(
             "runtime mismatch: received 'cloud', expected 'local'; "
             "start a new session with /new"
@@ -263,8 +278,9 @@ async def test_run_repl_send_run_error_status_notifies_and_continues(
         session_id: str | None = None,
         callbacks: StreamCallbacks | None = None,
         blocking: bool = True,
+        model_override: str | None = None,
     ) -> RunResult:
-        _ = session_key, message, session_id, callbacks, blocking
+        _ = session_key, message, session_id, callbacks, blocking, model_override
         return RunResult(run_id="run-error", status=RunStatus.ERROR, text="boom")
 
     pool.send = error_send  # type: ignore[method-assign]
@@ -305,8 +321,9 @@ async def test_run_repl_send_network_error_prints_and_continues(
         session_id: str | None = None,
         callbacks: StreamCallbacks | None = None,
         blocking: bool = True,
+        model_override: str | None = None,
     ) -> RunResult:
-        _ = session_key, message, session_id, callbacks, blocking
+        _ = session_key, message, session_id, callbacks, blocking, model_override
         raise NetworkError("connection reset by peer")
 
     pool.send = network_failure_send  # type: ignore[method-assign]

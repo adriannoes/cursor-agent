@@ -68,6 +68,7 @@ class SendSpyPool(SessionAgentPool):
         session_id: str | None = None,
         callbacks: StreamCallbacks | None = None,
         blocking: bool = True,
+        model_override: str | None = None,
     ) -> RunResult:
         """Record send parameters and delegate to the parent pool."""
         self.send_calls.append(
@@ -77,6 +78,7 @@ class SendSpyPool(SessionAgentPool):
                 "session_id": session_id,
                 "callbacks": callbacks,
                 "blocking": blocking,
+                "model_override": model_override,
             }
         )
         return await super().send(
@@ -85,6 +87,7 @@ class SendSpyPool(SessionAgentPool):
             session_id=session_id,
             callbacks=callbacks,
             blocking=blocking,
+            model_override=model_override,
         )
 
 
@@ -99,10 +102,22 @@ class GetSpyPool(SessionAgentPool):
         self,
         session_key: str,
         session_id: str | None = None,
+        *,
+        model_override: str | None = None,
     ) -> object:
         """Record get parameters and delegate to the parent pool."""
-        self.get_calls.append({"session_key": session_key, "session_id": session_id})
-        return await super().get(session_key, session_id=session_id)
+        self.get_calls.append(
+            {
+                "session_key": session_key,
+                "session_id": session_id,
+                "model_override": model_override,
+            }
+        )
+        return await super().get(
+            session_key,
+            session_id=session_id,
+            model_override=model_override,
+        )
 
 
 class CreateAgentTrackingFacade(FakeSdkFacade):

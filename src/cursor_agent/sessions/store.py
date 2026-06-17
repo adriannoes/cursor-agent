@@ -285,6 +285,42 @@ class SessionStore:
             )
         return _row_to_session_record(row)
 
+    async def update_agent_id(self, session_id: str, agent_id: str) -> SessionRecord:
+        """Replace SDK agent id for an existing session and return the refreshed row."""
+        if not agent_id:
+            raise ValueError(
+                f"invalid agent_id: received {agent_id!r}, expected non-empty string"
+            )
+
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """
+                UPDATE sessions
+                SET agent_id = ?
+                WHERE id = ?
+                """,
+                (agent_id, session_id),
+            )
+            if cursor.rowcount == 0:
+                raise ValueError(
+                    f"session not found: received session_id={session_id!r}, "
+                    "expected existing session UUID"
+                )
+            await db.commit()
+            cursor = await db.execute(
+                f"SELECT {_SELECT_COLUMNS} FROM sessions WHERE id = ?",
+                (session_id,),
+            )
+            row = await cursor.fetchone()
+
+        if row is None:
+            raise ValueError(
+                f"session not found after agent_id update: received session_id={session_id!r}, "
+                "expected existing session UUID"
+            )
+        return _row_to_session_record(row)
+
     async def update_metadata(
         self,
         session_id: str,

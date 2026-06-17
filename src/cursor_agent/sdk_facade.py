@@ -80,6 +80,7 @@ class SdkFacade(Protocol):
         workspace: str,
         model: str | None = None,
         tool_profile: str | None = None,
+        runtime_mode: str = "local",
     ) -> str:
         """Resume an existing agent; returns internal handle key."""
         ...
@@ -370,9 +371,10 @@ class FakeSdkFacade:
         workspace: str,
         model: str | None = None,
         tool_profile: str | None = None,
+        runtime_mode: str = "local",
     ) -> str:
         """Resume a fake agent when it already exists."""
-        _ = workspace, model
+        _ = workspace, model, runtime_mode
         if agent_id not in self._messages_by_agent:
             msg = f"invalid fake agent_id: received {agent_id!r}, expected known agent"
             raise ValueError(msg)
@@ -454,6 +456,17 @@ class FakeSdkFacade:
 from cursor_sdk import AsyncClient, LocalAgentOptions  # noqa: E402
 
 
+def _build_local_agent_options(
+    *,
+    workspace: str,
+    setting_sources: list[str] | None,
+) -> LocalAgentOptions:
+    """Build SDK local options with explicit cwd and optional setting_sources."""
+    if setting_sources is None:
+        return LocalAgentOptions(cwd=workspace)
+    return LocalAgentOptions(cwd=workspace, setting_sources=setting_sources)
+
+
 class AsyncSdkFacade:
     """Production SdkFacade backed by the Cursor Python SDK bridge."""
 
@@ -462,10 +475,12 @@ class AsyncSdkFacade:
         *,
         api_key: str | None = None,
         bridge_options: dict[str, Any] | None = None,
+        local_setting_sources: list[str] | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
         self._api_key = api_key
         self._bridge_options = bridge_options or {}
+        self._local_setting_sources = local_setting_sources
         self._logger = logger or _MODULE_LOGGER
         self._client: AsyncClient | None = None
         self._agents: dict[str, Any] = {}
@@ -508,13 +523,18 @@ class AsyncSdkFacade:
         runtime_mode: str = "local",
     ) -> str:
         """Create a local SDK agent and register it by ``agent_id``."""
-        _ = runtime_mode
         client = self._require_client()
+        local_setting_sources = (
+            self._local_setting_sources if runtime_mode == "local" else None
+        )
 
         async def _create() -> str:
             agent = await client.agents.create(
                 model=model,
-                local=LocalAgentOptions(cwd=workspace),
+                local=_build_local_agent_options(
+                    workspace=workspace,
+                    setting_sources=local_setting_sources,
+                ),
                 api_key=self._api_key,
             )
             await agent.__aenter__()
@@ -534,12 +554,19 @@ class AsyncSdkFacade:
         workspace: str,
         model: str | None = None,
         tool_profile: str | None = None,
+        runtime_mode: str = "local",
     ) -> str:
         """Resume an SDK agent and re-inject MCP servers for the profile."""
         client = self._require_client()
         profile = tool_profile or self._agent_tool_profiles.get(agent_id, "coding")
+        local_setting_sources = (
+            self._local_setting_sources if runtime_mode == "local" else None
+        )
         options: dict[str, Any] = {
-            "local": LocalAgentOptions(cwd=workspace),
+            "local": _build_local_agent_options(
+                workspace=workspace,
+                setting_sources=local_setting_sources,
+            ),
             "mcp_servers": _resolve_mcp_servers(profile),
         }
         if model is not None:

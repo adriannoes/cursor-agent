@@ -10,7 +10,9 @@ import typer
 
 from cursor_agent.cli.exit_codes import exit_code_for_error, exit_code_for_status
 from cursor_agent.cli.repl_session import run_repl
+from cursor_agent.cli.rich_display import RichDisplay
 from cursor_agent.cli.startup import create_store, repl_runtime, session_key_for
+from cursor_agent.cli.stream_renderer import build_display_stream_callbacks
 from cursor_agent.config.loader import CursorAgentConfig, load_config
 from cursor_agent.errors import CursorAgentError
 from cursor_agent.sdk_facade import RunStatus
@@ -45,6 +47,10 @@ async def run_default(
 ) -> RunStatus | None:  # pragma: no cover
     """Open REPL runtime and run the default interactive session."""
     async with repl_runtime(config) as (pool, session_key, store, facade):
+        display = RichDisplay(
+            stream_writer=_echo_delta,
+            status_writer=typer.echo,
+        )
         return await run_repl(
             pool,
             session_key,
@@ -54,6 +60,7 @@ async def run_default(
             reader=_stdin_line_reader(),
             writer=typer.echo,
             stream_writer=_echo_delta,
+            stream_callbacks=build_display_stream_callbacks(display),
         )
 
 
