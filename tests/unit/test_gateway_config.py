@@ -276,3 +276,23 @@ def test_example_gateway_config_parses() -> None:
     assert config.tool_profile == "messaging"
     assert config.platforms.telegram.enabled is True
     assert config.platforms.telegram.allowed_users
+
+
+def test_load_gateway_config_error_redacts_bot_token(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Validation errors must not echo expanded bot_token values."""
+    monkeypatch.setenv("GATEWAY_TEST_BOT_TOKEN", "super-secret-token-value")
+    config_file = tmp_path / "gateway.yaml"
+    _write_gateway_yaml(
+        config_file,
+        _minimal_gateway_yaml(bot_token="${GATEWAY_TEST_BOT_TOKEN}")
+        + "    allowed_users: not-a-list\n",
+    )
+    with pytest.raises(ConfigError) as exc_info:
+        load_gateway_config(config_path=config_file)
+
+    message = str(exc_info.value)
+    assert "super-secret-token-value" not in message
+    assert "[REDACTED]" in message

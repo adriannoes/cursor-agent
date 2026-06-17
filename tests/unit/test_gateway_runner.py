@@ -293,8 +293,65 @@ async def test_dispatch_blocked_inbound_skips_pool_and_emits_auth_log(
     assert blocked[0]["session_key"] == session_key
 
 
+async def test_gateway_enabled_platform_without_adapter_fails_fast(
+    tmp_path: Path,
+) -> None:
+    """Enabled platforms in YAML require a matching adapter at startup."""
+    config = gateway_config()
+    facade = FakeSdkFacade()
+    db_path = tmp_path / "sessions.db"
+
+    with patch("cursor_agent.gateway.runner.bootstrap_messaging_hooks"):
+        with pytest.raises(ConfigError, match="no adapter registered"):
+            async with gateway_runtime(
+                gateway_config=config,
+                adapters=[],
+                facade=facade,
+                store_path=db_path,
+            ):
+                pytest.fail("gateway_runtime must not start without required adapters")
+
+
+async def test_gateway_disabled_platforms_without_adapters_logs_warning(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """All-disabled platform config may start with zero adapters after a warning."""
+    config = gateway_config()
+    disabled_config = config.model_copy(
+        update={
+            "platforms": config.platforms.model_copy(
+                update={
+                    "telegram": config.platforms.telegram.model_copy(
+                        update={"enabled": False},
+                    ),
+                },
+            ),
+        },
+    )
+    facade = FakeSdkFacade()
+    db_path = tmp_path / "sessions.db"
+
+    with (
+        patch("cursor_agent.gateway.runner.bootstrap_messaging_hooks"),
+        caplog.at_level(logging.WARNING, logger="cursor_agent.gateway.runner"),
+    ):
+        async with gateway_runtime(
+            gateway_config=disabled_config,
+            adapters=[],
+            facade=facade,
+            store_path=db_path,
+        ):
+            pass
+
+    assert any(
+        "no platform adapters registered" in record.message for record in caplog.records
+    )
+
+
 async def test_dispatch_missing_session_does_not_auto_create_or_call_pool(
     tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Missing session rows do not auto-create sessions or invoke the pool."""
     config = gateway_config()
@@ -310,7 +367,10 @@ async def test_dispatch_missing_session_does_not_auto_create_or_call_pool(
         store_path=db_path,
         pool_factory=SendSpyPool,
     ) as ctx:
-        with patch.object(ctx.store, "create", autospec=True) as mock_create:
+        with (
+            patch.object(ctx.store, "create", autospec=True) as mock_create,
+            caplog.at_level(logging.WARNING, logger="cursor_agent.gateway.runner"),
+        ):
             await adapter.simulate_inbound(
                 InboundMessage(
                     platform="telegram",
@@ -318,6 +378,14 @@ async def test_dispatch_missing_session_does_not_auto_create_or_call_pool(
                     session_key=session_key,
                     text="hello",
                 )
+            )
+            await _wait_for_condition(
+                lambda: any(
+                    "no session row" in record.message
+                    and session_key in record.message
+                    for record in caplog.records
+                ),
+                description="missing session warning log",
             )
             mock_create.assert_not_called()
 

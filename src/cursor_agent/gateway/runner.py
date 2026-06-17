@@ -12,8 +12,10 @@ from typing import TypeAlias
 
 from cursor_agent.cli.startup import bootstrap_messaging_hooks, create_store
 from cursor_agent.config.loader import CursorAgentConfig
+from cursor_agent.errors import ConfigError
 from cursor_agent.gateway.config import (
     GatewayConfig,
+    enabled_platform_names,
     load_gateway_config,
     resolve_gateway_startup_config,
 )
@@ -45,6 +47,28 @@ def _default_pool_factory(
     config: CursorAgentConfig,
 ) -> SessionAgentPool:
     return SessionAgentPool(store=store, facade=facade, config=config)
+
+
+def _validate_platform_adapters(
+    gateway_config: GatewayConfig,
+    adapters: Sequence[PlatformAdapter],
+    logger: logging.Logger,
+) -> None:
+    """Fail fast when YAML enables platforms without a registered adapter."""
+    registered = {adapter.platform for adapter in adapters}
+    missing = [
+        name for name in enabled_platform_names(gateway_config) if name not in registered
+    ]
+    if missing:
+        raise ConfigError(
+            "gateway startup: platform(s) enabled in config but no adapter registered: "
+            f"{missing!r}, registered adapters={sorted(registered)!r}",
+        )
+    if not adapters:
+        logger.warning(
+            "gateway startup: no platform adapters registered; "
+            "inbound messages will not be received",
+        )
 
 
 async def _start_adapters(
@@ -108,6 +132,7 @@ async def gateway_runtime(
     await store.initialize()
 
     platform_adapters = list(adapters or [])
+    _validate_platform_adapters(loaded_gateway_config, platform_adapters, active_logger)
     build_pool = pool_factory or _default_pool_factory
     shutdown_timeout = (
         shutdown_timeout_seconds

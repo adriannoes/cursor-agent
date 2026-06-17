@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -22,6 +23,8 @@ MESSAGING_TOOL_PROFILE: ToolProfile = "messaging"
 _DEFAULT_SETTING_SOURCES: list[str] = ["project", "user"]
 _DEFAULT_MODEL = "composer-2.5"
 _DEFAULT_RUNTIME_MODE: RuntimeMode = "local"
+_REDACTED_SECRET = "[REDACTED]"
+_SENSITIVE_PLATFORM_FIELDS = frozenset({"bot_token"})
 
 
 class TelegramPlatformConfig(BaseModel):
@@ -52,6 +55,29 @@ class GatewayConfig(BaseModel):
     platforms: PlatformsConfig = Field(default_factory=PlatformsConfig)
 
 
+def _redact_gateway_config_data(data: object) -> object:
+    """Return a copy of raw gateway YAML data with secret fields redacted."""
+    if isinstance(data, Mapping):
+        redacted: dict[str, object] = {}
+        for key, value in data.items():
+            if key in _SENSITIVE_PLATFORM_FIELDS and value:
+                redacted[key] = _REDACTED_SECRET
+            else:
+                redacted[key] = _redact_gateway_config_data(value)
+        return redacted
+    if isinstance(data, list):
+        return [_redact_gateway_config_data(item) for item in data]
+    return data
+
+
+def enabled_platform_names(gateway_config: GatewayConfig) -> list[str]:
+    """Return platform names marked ``enabled: true`` in gateway config."""
+    names: list[str] = []
+    if gateway_config.platforms.telegram.enabled:
+        names.append("telegram")
+    return names
+
+
 def load_gateway_config(config_path: Path | None = None) -> GatewayConfig:
     """Load and validate gateway configuration from YAML."""
     path = config_path if config_path is not None else DEFAULT_GATEWAY_CONFIG_PATH
@@ -59,9 +85,10 @@ def load_gateway_config(config_path: Path | None = None) -> GatewayConfig:
     try:
         return GatewayConfig.model_validate(data)
     except ValidationError as exc:
+        safe_data = _redact_gateway_config_data(data)
         raise ConfigError(
             f"invalid gateway configuration: {exc.errors(include_url=False)!r}, "
-            f"received data {data!r}",
+            f"received data {safe_data!r}",
         ) from exc
 
 

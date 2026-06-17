@@ -155,7 +155,7 @@ class OutboundSink:
 
 
 class FakePlatformAdapter:
-    def __init__(self, *, platform: str = "fake") -> None:
+    def __init__(self, *, platform: str = "telegram") -> None:
         self._platform = platform
         self.lifecycle: list[str] = []
         self.outbound_messages: list[OutboundMessage] = []
