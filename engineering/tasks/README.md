@@ -58,7 +58,7 @@ tasks-PRD-{NNN}-{slug}.md
 |------------------|-----|------|--------|
 | [tasks-PRD-000-sdk-spike.md](tasks-PRD-000-sdk-spike.md) | [PRD-000](../../docs/prd/PRD-000-sdk-spike.md) | 0 | implementado — review aprovado com ressalvas |
 | [tasks-PRD-001-facade.md](tasks-PRD-001-facade.md) | [PRD-001](../../docs/prd/PRD-001-facade.md) | 1 | Fase 2 completa — sub-tasks prontas para implementação |
-| `tasks-PRD-002-session-store.md` | [PRD-002](../../docs/prd/PRD-002-session-store.md) | 1 | pendente |
+| [tasks-PRD-002-session-store.md](tasks-PRD-002-session-store.md) | [PRD-002](../../docs/prd/PRD-002-session-store.md) | 1 | implementado — review aprovado |
 | `tasks-PRD-003-cli-repl.md` | [PRD-003](../../docs/prd/PRD-003-cli-repl.md) | 1 | pendente |
 | `tasks-PRD-004-slash-commands.md` | [PRD-004](../../docs/prd/PRD-004-slash-commands.md) | 2 | pendente |
 | `tasks-PRD-005-messaging-profile.md` | [PRD-005](../../docs/prd/PRD-005-messaging-profile.md) | 2b | pendente |
