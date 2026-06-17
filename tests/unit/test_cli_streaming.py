@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
+import pytest
+
+from cursor_agent.cli.repl_session import run_repl
+from cursor_agent.cli.rich_display import RichDisplay
 from cursor_agent.cli.startup import session_key_for
+from cursor_agent.cli.stream_renderer import build_display_stream_callbacks
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.pool import SessionAgentPool
 from cursor_agent.sdk_facade import FakeSdkFacade
 from cursor_agent.sessions.store import SessionStore
 
-from tests.unit.cli_repl_helpers import drive_repl, seed_session
+from tests.unit.cli_repl_helpers import drive_repl, line_reader, seed_session
 
 
 async def test_run_repl_free_text_streams_assistant_deltas_in_order(
@@ -70,3 +76,52 @@ async def test_run_repl_streams_deltas_to_separate_sink_from_line_writer(
     assert delta_sink == ["a", "b", "c", "\n"]
     assert not any(delta in line_sink for delta in ("a", "b", "c"))
     assert any("Resumed session" in line for line in line_sink)
+
+
+_SENSITIVE_TOOL_ARGS: dict[str, Any] = {
+    "pattern": "SECRET_TOKEN_xyz",
+    "path": "/home/user/.ssh/id_rsa",
+}
+
+
+@pytest.mark.asyncio
+async def test_run_repl_uses_injected_stream_callbacks_for_tool_badges(
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """Injected Rich stream callbacks route tool badges to the line writer only."""
+    facade = FakeSdkFacade(
+        scripted_replies={"default": "ok"},
+        scripted_tool_events=[("grep", _SENSITIVE_TOOL_ARGS)],
+    )
+    store = SessionStore(tmp_path / "sessions.db")
+    await store.initialize()
+    session_key = session_key_for(config)
+    await seed_session(store, facade, session_key)
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    line_sink: list[str] = []
+    delta_sink: list[str] = []
+    display = RichDisplay(
+        stream_writer=delta_sink.append,
+        status_writer=line_sink.append,
+    )
+    stream_callbacks = build_display_stream_callbacks(display)
+
+    await run_repl(
+        pool,
+        session_key,
+        store,
+        config=config,
+        facade=facade,
+        reader=line_reader("ping", "/quit"),
+        writer=line_sink.append,
+        stream_writer=delta_sink.append,
+        stream_callbacks=stream_callbacks,
+        auto_resume=True,
+    )
+
+    assert delta_sink == ["o", "k", "\n"]
+    badge_lines = [line for line in line_sink if line.startswith("[tool]")]
+    assert len(badge_lines) == 2
+    assert all("grep" in line for line in badge_lines)
+    assert "SECRET_TOKEN_xyz" not in " ".join(badge_lines)

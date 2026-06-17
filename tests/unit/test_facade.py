@@ -37,6 +37,13 @@ from cursor_agent.sdk_facade import (
 )
 
 
+def _local_option(local_opts: object, key: str) -> object | None:
+    """Read a LocalAgentOptions field from object or mapping test doubles."""
+    if isinstance(local_opts, dict):
+        return local_opts.get(key)
+    return getattr(local_opts, key, None)
+
+
 # --- Task 2.1: public types ---
 
 
@@ -183,6 +190,132 @@ async def test_async_context_manager_launches_and_closes_bridge() -> None:
 
 
 # --- Task 5.3: create_agent ---
+
+
+@pytest.mark.asyncio
+async def test_create_agent_local_options_include_setting_sources_from_config() -> None:
+    """create_agent passes explicit project/user setting_sources for local runtime."""
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-settings"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.create = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(
+        api_key="test-key",
+        local_setting_sources=["project", "user"],
+    )
+    facade._client = mock_client
+
+    await facade.create_agent(workspace="/repo/path", runtime_mode="local")
+
+    create_kwargs = mock_client.agents.create.await_args.kwargs
+    local_opts = create_kwargs["local"]
+    setting_sources = _local_option(local_opts, "setting_sources")
+    assert setting_sources == ["project", "user"]
+    assert setting_sources != "all"
+
+
+@pytest.mark.asyncio
+async def test_create_agent_honors_custom_setting_sources_from_config() -> None:
+    """create_agent uses config-provided setting_sources instead of SDK defaults."""
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-custom-sources"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.create = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(
+        api_key="test-key",
+        local_setting_sources=["project"],
+    )
+    facade._client = mock_client
+
+    await facade.create_agent(workspace="/repo/path", runtime_mode="local")
+
+    local_opts = mock_client.agents.create.await_args.kwargs["local"]
+    assert _local_option(local_opts, "setting_sources") == ["project"]
+
+
+@pytest.mark.asyncio
+async def test_resume_agent_local_options_include_setting_sources_from_config() -> None:
+    """resume_agent passes explicit project/user setting_sources for local runtime."""
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-resume-sources"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(
+        api_key="test-key",
+        local_setting_sources=["project", "user"],
+    )
+    facade._client = mock_client
+
+    await facade.resume_agent(
+        "agent-resume-sources",
+        workspace="/repo",
+        tool_profile="coding",
+    )
+
+    resume_args = mock_client.agents.resume.await_args
+    options = (
+        resume_args.args[1]
+        if len(resume_args.args) > 1
+        else resume_args.kwargs.get("options")
+    )
+    local_opts = (
+        options.get("local")
+        if isinstance(options, dict)
+        else getattr(options, "local", None)
+    )
+    setting_sources = _local_option(local_opts, "setting_sources")
+    assert setting_sources == ["project", "user"]
+    assert setting_sources != "all"
+
+
+@pytest.mark.asyncio
+async def test_resume_agent_cloud_options_omit_local_setting_sources() -> None:
+    """resume_agent omits local setting_sources for cloud runtime sessions."""
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-cloud-resume"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(
+        api_key="test-key",
+        local_setting_sources=["project", "user"],
+    )
+    facade._client = mock_client
+
+    await facade.resume_agent(
+        "agent-cloud-resume",
+        workspace="/repo",
+        tool_profile="coding",
+        runtime_mode="cloud",
+    )
+
+    resume_args = mock_client.agents.resume.await_args
+    options = (
+        resume_args.args[1]
+        if len(resume_args.args) > 1
+        else resume_args.kwargs.get("options")
+    )
+    local_opts = (
+        options.get("local")
+        if isinstance(options, dict)
+        else getattr(options, "local", None)
+    )
+    assert _local_option(local_opts, "setting_sources") is None
 
 
 @pytest.mark.asyncio
