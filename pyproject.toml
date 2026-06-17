@@ -2,13 +2,20 @@
 name = "cursor-agent"
 version = "0.0.0"
 description = "Clean-room Cursor agent orchestration (Phase 0 SDK spike)"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "cursor-agent authors"}]
 requires-python = ">=3.11"
 dependencies = [
     "aiosqlite>=0.22.1",
     "cursor-sdk==0.1.7",
     "pydantic-settings>=2.14.1",
     "pyyaml>=6.0.3",
+    "typer>=0.12",
 ]
+
+[project.scripts]
+cursor-agent = "cursor_agent.cli.app:main"
 
 [build-system]
 requires = ["hatchling>=1.26,<2"]
