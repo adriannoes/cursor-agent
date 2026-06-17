@@ -229,11 +229,11 @@ async def test_lazy_resume_get_calls_resume_agent(
 
 
 @pytest.mark.asyncio
-async def test_lazy_resume_get_is_idempotent_per_agent(
+async def test_lazy_resume_get_is_idempotent_per_agent_and_model(
     store: SessionStore,
     config: CursorAgentConfig,
 ) -> None:
-    """Repeated get() for the same agent_id resumes only once."""
+    """Repeated get() for the same agent_id and model resumes only once."""
     session_key = "cli:default:abc12345"
     facade = ResumeTrackingFacade()
     await _seed_session(store, facade, session_key)
@@ -243,6 +243,41 @@ async def test_lazy_resume_get_is_idempotent_per_agent(
     await pool.get(session_key)
 
     assert len(facade.resume_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_re_resumes_when_model_override_changes(
+    store: SessionStore,
+    config: CursorAgentConfig,
+) -> None:
+    """get() resumes again when the effective model override changes."""
+    session_key = "cli:default:modelchg1"
+    facade = ResumeTrackingFacade()
+    await _seed_session(store, facade, session_key)
+
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    await pool.get(session_key)
+    await pool.get(session_key, model_override="composer-2.5-fast")
+
+    assert len(facade.resume_calls) == 2
+    assert facade.resume_calls[1]["model"] == "composer-2.5-fast"
+
+
+@pytest.mark.asyncio
+async def test_send_uses_model_override_on_resume(
+    store: SessionStore,
+    config: CursorAgentConfig,
+) -> None:
+    """send() resumes with model_override instead of config.model."""
+    session_key = "cli:default:modelsend1"
+    facade = ResumeTrackingFacade()
+    await _seed_session(store, facade, session_key)
+
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    await pool.send(session_key, "hello", model_override="composer-2.5-fast")
+
+    assert len(facade.resume_calls) == 1
+    assert facade.resume_calls[0]["model"] == "composer-2.5-fast"
 
 
 # --- Task 4.3: runtime guard ---

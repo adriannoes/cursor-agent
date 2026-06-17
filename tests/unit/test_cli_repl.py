@@ -233,8 +233,9 @@ async def test_run_repl_send_config_error_prints_guidance_and_continues(
         session_id: str | None = None,
         callbacks: StreamCallbacks | None = None,
         blocking: bool = True,
+        model_override: str | None = None,
     ) -> RunResult:
-        _ = session_key, message, session_id, callbacks, blocking
+        _ = session_key, message, session_id, callbacks, blocking, model_override
         raise ConfigError(
             "runtime mismatch: received 'cloud', expected 'local'; "
             "start a new session with /new"
@@ -277,8 +278,9 @@ async def test_run_repl_send_run_error_status_notifies_and_continues(
         session_id: str | None = None,
         callbacks: StreamCallbacks | None = None,
         blocking: bool = True,
+        model_override: str | None = None,
     ) -> RunResult:
-        _ = session_key, message, session_id, callbacks, blocking
+        _ = session_key, message, session_id, callbacks, blocking, model_override
         return RunResult(run_id="run-error", status=RunStatus.ERROR, text="boom")
 
     pool.send = error_send  # type: ignore[method-assign]
@@ -319,8 +321,9 @@ async def test_run_repl_send_network_error_prints_and_continues(
         session_id: str | None = None,
         callbacks: StreamCallbacks | None = None,
         blocking: bool = True,
+        model_override: str | None = None,
     ) -> RunResult:
-        _ = session_key, message, session_id, callbacks, blocking
+        _ = session_key, message, session_id, callbacks, blocking, model_override
         raise NetworkError("connection reset by peer")
 
     pool.send = network_failure_send  # type: ignore[method-assign]

@@ -44,6 +44,7 @@ class RichDisplay:
         self._stream_writer = stream_writer
         self._status_writer = status_writer
         self._console = console if console is not None else Console()
+        self._last_tool_badge: tuple[str, str] | None = None
 
     def build_stream_callbacks(self) -> StreamCallbacks:
         """Build SDK stream callbacks wired to this display boundary."""
@@ -66,6 +67,10 @@ class RichDisplay:
 
     def _write_tool_badge(self, tool_name: str, state: str) -> None:
         """Render a Rich badge and forward the captured line to the status sink."""
+        badge_key = (tool_name, state)
+        if self._last_tool_badge == badge_key:
+            return
+        self._last_tool_badge = badge_key
         with self._console.capture() as capture:
             self._console.print(_format_tool_badge(tool_name, state), end="")
         self._status_writer(capture.get())

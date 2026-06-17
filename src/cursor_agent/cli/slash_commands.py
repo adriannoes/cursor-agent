@@ -7,6 +7,7 @@ from pathlib import Path
 
 from cursor_agent.cli.command_router import (
     CommandContext,
+    CommandFailed,
     CommandHandled,
     CommandResult,
     CommandRouter,
@@ -58,12 +59,14 @@ async def handle_new(
     config: CursorAgentConfig,
     session_key: str,
     writer: Callable[[str], None],
+    model: str | None = None,
 ) -> str:
     """Create a new SDK agent and session row; return the new session id."""
     workspace = str(Path(config.runtime.local.cwd).resolve())
+    effective_model = model if model is not None and model.strip() else config.model
     agent_id = await facade.create_agent(
         workspace=workspace,
-        model=config.model,
+        model=effective_model,
         tool_profile=config.tool_profile,
         runtime_mode=config.runtime.mode,
     )
@@ -87,10 +90,15 @@ async def handle_resume(
     session_key: str,
     arg: str | None,
     writer: Callable[[str], None],
+    model_override: str | None = None,
 ) -> str | None:
     """Resume a session via ``pool.get``; return session id or ``None`` on failure."""
     try:
-        row = await pool.get(session_key, session_id=arg or None)
+        row = await pool.get(
+            session_key,
+            session_id=arg or None,
+            model_override=model_override,
+        )
     except CursorAgentError as exc:
         writer(format_error(exc))
         return None
@@ -117,10 +125,11 @@ async def _route_new(
             config=ctx.config,
             session_key=ctx.session_key,
             writer=writer,
+            model=ctx.state.model_override,
         )
     except CursorAgentError as exc:
         writer(format_error(exc))
-        return CommandHandled()
+        return CommandFailed()
     return SessionActivated(session_id=session_id)
 
 
@@ -135,10 +144,11 @@ async def _route_resume(
         session_key=ctx.session_key,
         arg=arg,
         writer=writer,
+        model_override=ctx.state.model_override,
     )
     if new_id is not None:
         return SessionActivated(session_id=new_id)
-    return CommandHandled()
+    return CommandFailed()
 
 
 async def _route_quit(
@@ -213,9 +223,10 @@ async def _route_model(
                     tool_profile=row.tool_profile,
                     runtime_mode=row.runtime,
                 )
+                ctx.pool.forget_resumed_agent(row.agent_id)
             except CursorAgentError as exc:
                 writer(format_error(exc))
-                return CommandHandled()
+                return CommandFailed()
     writer(f"Model override set to {model_id}")
     return CommandHandled()
 
@@ -240,10 +251,11 @@ async def _route_retry(
             session_id=ctx.state.active_session_id,
             callbacks=ctx.stream_callbacks,
             blocking=True,
+            model_override=ctx.state.model_override,
         )
     except CursorAgentError as exc:
         writer(format_error(exc))
-        return CommandHandled()
+        return CommandFailed()
     ctx.state.last_status = send_result.status
     ctx.state.last_usage = send_result.usage
     if ctx.stream_writer is not None:
@@ -286,7 +298,7 @@ async def _route_compress(
     session_id = ctx.state.active_session_id
     writer(_COMPRESSING_MESSAGE)
     try:
-        await run_compress_session(
+        result = await run_compress_session(
             store=ctx.store,
             facade=ctx.facade,
             config=ctx.config,
@@ -295,7 +307,9 @@ async def _route_compress(
         )
     except CursorAgentError as exc:
         writer(format_error(exc))
-        return CommandHandled()
+        return CommandFailed()
+    ctx.pool.forget_resumed_agent(result.previous_agent_id)
+    ctx.pool.forget_resumed_agent(result.new_agent_id)
     ctx.state.last_status = RunStatus.FINISHED
     ctx.state.last_usage = None
     writer(_COMPRESS_SUCCESS)

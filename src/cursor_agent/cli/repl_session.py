@@ -130,6 +130,7 @@ async def run_repl(
                 session_id=state.active_session_id,
                 callbacks=send_callbacks,
                 blocking=True,
+                model_override=state.model_override,
             )
         except CursorAgentError as exc:
             writer(format_error(exc))

@@ -74,6 +74,27 @@ async def test_rich_display_tool_badges_go_to_status_writer_only(
 
 
 @pytest.mark.asyncio
+async def test_rich_display_skips_duplicate_tool_badges(
+    display: RichDisplay,
+    sinks: tuple[list[str], list[str]],
+) -> None:
+    """Repeated identical tool badges are suppressed to reduce status-line noise."""
+    _stream_sink, status_sink = sinks
+    callbacks = display.build_stream_callbacks()
+
+    assert callbacks.on_tool_start is not None
+    assert callbacks.on_tool_end is not None
+    await callbacks.on_tool_start("grep", {})
+    await callbacks.on_tool_start("grep", {})
+    await callbacks.on_tool_end("grep", {})
+    await callbacks.on_tool_end("grep", {})
+
+    assert len(status_sink) == 2
+    assert "running" in status_sink[0].lower()
+    assert "done" in status_sink[1].lower()
+
+
+@pytest.mark.asyncio
 async def test_rich_display_separates_text_and_badges_in_mixed_stream(
     display: RichDisplay,
     sinks: tuple[list[str], list[str]],
