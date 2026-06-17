@@ -589,6 +589,9 @@ async def test_run_gateway_returns_zero_after_shutdown(tmp_path: Path) -> None:
 
     @asynccontextmanager
     async def tracing_runtime(*args: object, **kwargs: object):
+        kwargs.setdefault("adapters", [FakePlatformAdapter(platform="telegram")])
+        kwargs.setdefault("facade", FakeSdkFacade())
+        kwargs.setdefault("store_path", tmp_path / "run-gateway-sessions.db")
         async with original_runtime(*args, **kwargs) as ctx:
             contexts.append(ctx)
             entered.set()
