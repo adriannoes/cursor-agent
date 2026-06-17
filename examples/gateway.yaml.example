@@ -1,0 +1,15 @@
+# Gateway configuration example (PRD-006).
+# Copy to ~/.cursor-agent/gateway.yaml and set TELEGRAM_BOT_TOKEN in the environment.
+#
+# CLI override (Wave 4): cursor-agent gateway --config /path/to/gateway.yaml
+
+workspace: /path/to/your/project
+tool_profile: messaging
+
+platforms:
+  telegram:
+    enabled: true
+    bot_token: ${TELEGRAM_BOT_TOKEN}
+    allowed_users:
+      - 123456789
+      - 987654321
