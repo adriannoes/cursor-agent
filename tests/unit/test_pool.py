@@ -67,6 +67,7 @@ class ResumeTrackingFacade(FakeSdkFacade):
         workspace: str,
         model: str | None = None,
         tool_profile: str | None = None,
+        runtime_mode: str = "local",
     ) -> str:
         """Record resume parameters and delegate to the parent fake."""
         self.resume_calls.append(
@@ -75,6 +76,7 @@ class ResumeTrackingFacade(FakeSdkFacade):
                 "workspace": workspace,
                 "model": model,
                 "tool_profile": tool_profile,
+                "runtime_mode": runtime_mode,
             }
         )
         return await super().resume_agent(
@@ -82,6 +84,7 @@ class ResumeTrackingFacade(FakeSdkFacade):
             workspace=workspace,
             model=model,
             tool_profile=tool_profile,
+            runtime_mode=runtime_mode,
         )
 
 
@@ -190,11 +193,13 @@ class ForbiddenResumeFacade(FakeSdkFacade):
         workspace: str,
         model: str | None = None,
         tool_profile: str | None = None,
+        runtime_mode: str = "local",
     ) -> str:
         """Raise to prove resume was attempted."""
         msg = (
             f"resume should not run: agent_id={agent_id!r}, workspace={workspace!r}, "
-            f"model={model!r}, tool_profile={tool_profile!r}"
+            f"model={model!r}, tool_profile={tool_profile!r}, "
+            f"runtime_mode={runtime_mode!r}"
         )
         raise AssertionError(msg)
 

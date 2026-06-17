@@ -162,7 +162,7 @@ async def test_run_repl_unknown_slash_command_placeholder(
         store,
         config,
         facade,
-        lines=("/help", "/quit"),
+        lines=("/definitely-unknown", "/quit"),
         writer=output.append,
         auto_resume=False,
     )
