@@ -7,7 +7,12 @@ import asyncio
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.errors import AgentBusyError, ConfigError
 from cursor_agent.facade_logging import LogContext
+from cursor_agent.messaging_hooks import ensure_messaging_hooks
 from cursor_agent.sdk_facade import RunResult, SdkFacade, StreamCallbacks
+from cursor_agent.tool_profile_policy import (
+    effective_tool_profile,
+    requires_messaging_hooks,
+)
 from cursor_agent.sessions.models import SessionRecord, title_from_first_user_message
 from cursor_agent.sessions.store import SessionStore
 
@@ -101,24 +106,38 @@ class SessionAgentPool:
             raise ConfigError(_session_not_found_message(session_key, session_id))
         return row
 
+    def _ensure_messaging_hooks_for_row(self, row: SessionRecord) -> None:
+        """Deploy messaging hooks when the effective profile requires them."""
+        if not requires_messaging_hooks(
+            self._config.tool_profile,
+            row.tool_profile,
+        ):
+            return
+        ensure_messaging_hooks(row.workspace)
+
     async def _ensure_resumed(
         self,
         row: SessionRecord,
         *,
         model_override: str | None = None,
     ) -> None:
-        """Resume the SDK agent when missing or when the effective model changed."""
+        """Resume the SDK agent when missing or when the effective resume key changed."""
+        self._ensure_messaging_hooks_for_row(row)
         model = self._resolve_model(model_override)
-        if self._resumed_models.get(row.agent_id) == model:
+        tool_profile = effective_tool_profile(
+            self._config.tool_profile, row.tool_profile
+        )
+        resume_key = f"{model}:{tool_profile}"
+        if self._resumed_models.get(row.agent_id) == resume_key:
             return
         await self._facade.resume_agent(
             row.agent_id,
             workspace=row.workspace,
             model=model,
-            tool_profile=row.tool_profile,
+            tool_profile=tool_profile,
             runtime_mode=row.runtime,
         )
-        self._resumed_models[row.agent_id] = model
+        self._resumed_models[row.agent_id] = resume_key
 
     def forget_resumed_agent(self, agent_id: str) -> None:
         """Drop resume cache for ``agent_id`` after agent swaps (e.g. /compress)."""

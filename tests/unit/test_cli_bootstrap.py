@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
+
+import pytest
 
 from cursor_agent.cli.startup import (
     create_store,
     repl_runtime,
     session_key_for,
 )
-from cursor_agent.config.loader import CursorAgentConfig
+from cursor_agent.config.loader import CursorAgentConfig, load_config
 from cursor_agent.pool import SessionAgentPool
 from cursor_agent.sdk_facade import FakeSdkFacade
 from cursor_agent.sessions.store import SessionStore
@@ -195,3 +198,56 @@ async def test_run_repl_free_text_without_session_guidance(
 
     assert any("/new" in line and "/resume" in line for line in output)
     assert pool.send_calls == []
+
+
+@pytest.fixture
+def messaging_config(tmp_path: Path) -> CursorAgentConfig:
+    """Config with messaging tool profile for hook deploy bootstrap tests."""
+    return load_config(
+        config_path=tmp_path / "missing.yaml",
+        cli_overrides={"tool_profile": "messaging"},
+    )
+
+
+async def test_repl_runtime_messaging_deploys_hooks_before_pool(
+    messaging_config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """Messaging startup installs and deploys hooks before pool/facade use."""
+    facade = FakeSdkFacade()
+    db_path = tmp_path / "sessions.db"
+
+    with (
+        patch(
+            "cursor_agent.cli.startup.ensure_messaging_hooks",
+        ) as mock_ensure,
+    ):
+        async with repl_runtime(
+            messaging_config,
+            store_path=db_path,
+            facade=facade,
+        ):
+            mock_ensure.assert_called_once()
+
+    assert facade._closed is True
+
+
+async def test_repl_runtime_coding_skips_messaging_hook_deploy(
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """Coding startup must not install or deploy messaging deny hooks."""
+    facade = FakeSdkFacade()
+    db_path = tmp_path / "sessions.db"
+
+    with (
+        patch(
+            "cursor_agent.cli.startup.ensure_messaging_hooks",
+        ) as mock_ensure,
+    ):
+        async with repl_runtime(
+            config,
+            store_path=db_path,
+            facade=facade,
+        ):
+            mock_ensure.assert_not_called()

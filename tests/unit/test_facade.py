@@ -33,8 +33,8 @@ from cursor_agent.sdk_facade import (
     RunStatus,
     StreamCallbacks,
     _map_sdk_exception,
-    _resolve_mcp_servers,
 )
+from cursor_agent.tool_profile_policy import resolve_mcp_servers
 
 
 def _local_option(local_opts: object, key: str) -> object | None:
@@ -347,6 +347,75 @@ async def test_create_agent_uses_composer_and_local_cwd() -> None:
 # --- Task 5.5: resume_agent MCP re-inject ---
 
 
+def _sandbox_enabled(local_opts: object) -> bool | None:
+    """Return sandbox_options.enabled from LocalAgentOptions or a mapping."""
+    sandbox = _local_option(local_opts, "sandbox_options")
+    if sandbox is None:
+        return None
+    if isinstance(sandbox, dict):
+        enabled = sandbox.get("enabled")
+        return enabled if isinstance(enabled, bool) else None
+    return getattr(sandbox, "enabled", None)
+
+
+@pytest.mark.asyncio
+async def test_coding_create_agent_omits_mcp_servers_and_sandbox() -> None:
+    """Coding create keeps legacy behavior without MCP or sandbox options."""
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-coding-create"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.create = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(api_key="test-key")
+    facade._client = mock_client
+
+    await facade.create_agent(workspace="/repo/path", tool_profile="coding")
+
+    create_call = mock_client.agents.create.await_args
+    create_options = create_call.args[0] if create_call.args else None
+    if isinstance(create_options, dict):
+        assert "mcp_servers" not in create_options
+    assert "mcp_servers" not in create_call.kwargs
+    local_opts = create_call.kwargs["local"]
+    assert _sandbox_enabled(local_opts) is None
+
+
+@pytest.mark.asyncio
+async def test_coding_resume_agent_passes_empty_mcp_without_sandbox() -> None:
+    """Coding resume keeps empty MCP reinject without enabling sandbox."""
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-coding-resume"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(api_key="test-key")
+    facade._client = mock_client
+
+    await facade.resume_agent(
+        "agent-coding-resume",
+        workspace="/repo",
+        tool_profile="coding",
+    )
+
+    resume_args = mock_client.agents.resume.await_args
+    options = (
+        resume_args.args[1]
+        if len(resume_args.args) > 1
+        else resume_args.kwargs.get("options")
+    )
+    assert isinstance(options, dict)
+    assert options.get("mcp_servers") == {}
+    local_opts = options.get("local")
+    assert local_opts is not None
+    assert _sandbox_enabled(local_opts) is None
+
+
 @pytest.mark.asyncio
 async def test_resume_agent_reinjects_mcp_servers_from_profile() -> None:
     """resume_agent passes stub mcp_servers for the tool profile."""
@@ -625,9 +694,9 @@ async def test_log_emit_send_start_and_end_ndjson() -> None:
 
 def test_resolve_mcp_servers_stub_profiles() -> None:
     """MCP stub returns empty dict for coding and messaging profiles."""
-    assert _resolve_mcp_servers("coding") == {}
-    assert _resolve_mcp_servers("messaging") == {}
-    assert _resolve_mcp_servers("unknown") == {}
+    assert resolve_mcp_servers("coding") == {}
+    assert resolve_mcp_servers("messaging") == {}
+    assert resolve_mcp_servers("unknown") == {}
 
 
 def test_facade_logging_redacts_api_key_patterns() -> None:
