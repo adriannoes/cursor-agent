@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
 
+from cursor_agent.cli.error_display import format_error
 from cursor_agent.cli.slash_commands import handle_new, handle_resume
 from cursor_agent.cli.stream_renderer import build_stream_callbacks
 from cursor_agent.config.loader import CursorAgentConfig
@@ -25,11 +26,6 @@ def _parse_resume_arg(line: str) -> str | None:
         return None
     arg = parts[1].strip()
     return arg or None
-
-
-def _format_error(exc: CursorAgentError) -> str:
-    """Render a domain error as a single-line, user-facing REPL message."""
-    return f"Error: {exc}"
 
 
 async def run_repl(
@@ -63,16 +59,18 @@ async def run_repl(
     last_status: RunStatus | None = None
 
     if auto_resume:
-        resolved = await store.resolve(session_key)
-        if resolved is not None:
-            try:
-                row = await pool.get(session_key)
-                active_session_id = row.id
-                writer(f"Resumed session {active_session_id}")
-            except CursorAgentError as exc:
-                writer(_format_error(exc))
-        else:
-            writer(_NO_SESSION_GUIDANCE)
+        # Resume goes through pool.get so the lazy resume + runtime guard
+        # (ADR-003) always run (PRD-003 §7). On failure, fall back to a cheap
+        # existence probe only to choose between the "/new" hint and the error.
+        try:
+            row = await pool.get(session_key)
+            active_session_id = row.id
+            writer(f"Resumed session {active_session_id}")
+        except CursorAgentError as exc:
+            if await store.resolve(session_key) is None:
+                writer(_NO_SESSION_GUIDANCE)
+            else:
+                writer(format_error(exc))
 
     async for line in reader:
         stripped = line.strip()
@@ -91,7 +89,7 @@ async def run_repl(
                         writer=writer,
                     )
                 except CursorAgentError as exc:
-                    writer(_format_error(exc))
+                    writer(format_error(exc))
                 continue
             if stripped == "/resume" or stripped.startswith("/resume "):
                 resume_arg = (
@@ -120,7 +118,7 @@ async def run_repl(
                 blocking=True,
             )
         except CursorAgentError as exc:
-            writer(_format_error(exc))
+            writer(format_error(exc))
             continue
         last_status = result.status
         stream_sink("\n")

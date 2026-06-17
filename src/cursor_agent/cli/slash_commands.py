@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+from cursor_agent.cli.error_display import format_error
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.errors import CursorAgentError
 from cursor_agent.pool import SessionAgentPool
@@ -54,7 +55,7 @@ async def handle_resume(
     try:
         row = await pool.get(session_key, session_id=arg or None)
     except CursorAgentError as exc:
-        writer(str(exc))
+        writer(format_error(exc))
         return None
     writer(f"Resumed session {row.id}")
     return row.id
