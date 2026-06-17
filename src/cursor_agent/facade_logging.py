@@ -230,6 +230,26 @@ def emit_hook_deploy(
     logger.info(json.dumps(payload, separators=(",", ":")))
 
 
+def emit_gateway_auth_blocked(
+    logger: logging.Logger,
+    *,
+    platform: str,
+    sender_id: str,
+    session_key: str | None = None,
+) -> None:
+    """Emit NDJSON ``gateway_auth_blocked`` for unauthorized inbound attempts."""
+    payload: dict[str, Any] = {
+        "v": _LOG_SCHEMA_VERSION,
+        "ts": _utc_timestamp(),
+        "level": "info",
+        "event": "gateway_auth_blocked",
+        "platform": platform,
+        "sender_id": _redact(sender_id),
+        "session_key": session_key,
+    }
+    logger.info(json.dumps(payload, separators=(",", ":")))
+
+
 def emit_hook_deny(
     logger: logging.Logger,
     *,

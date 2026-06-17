@@ -1,0 +1,540 @@
+"""Unit tests for gateway runner startup and inbound dispatch."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from collections.abc import Callable
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+from typer.testing import CliRunner
+
+from cursor_agent.cli.app import app
+from cursor_agent.errors import ConfigError
+from cursor_agent.gateway.config import (
+    load_gateway_config,
+    resolve_gateway_startup_config,
+)
+from cursor_agent.gateway.runner import gateway_runtime, run_gateway
+from cursor_agent.pool import SessionAgentPool
+from cursor_agent.sdk_facade import FakeSdkFacade
+from cursor_agent.sessions.store import SessionStore
+from cursor_agent.platforms.base import InboundMessage, OutboundMessage
+
+from tests.unit.gateway_fakes import (
+    FakePlatformAdapter,
+    OrderTrackingAdapter,
+    SendSpyPool,
+    gateway_config,
+    seed_session,
+    write_gateway_yaml,
+)
+
+
+async def _wait_for_condition(
+    condition: Callable[[], bool],
+    *,
+    description: str,
+) -> None:
+    """Wait for a background dispatch assertion to become true."""
+    for _attempt in range(20):
+        if condition():
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"condition did not become true: {description}")
+
+
+def test_resolve_gateway_startup_config_rejects_coding_profile() -> None:
+    """Coding tool_profile raises ConfigError with the received profile."""
+    config = gateway_config(tool_profile="coding")
+    with pytest.raises(ConfigError, match="coding"):
+        resolve_gateway_startup_config(config)
+
+
+def test_resolve_gateway_startup_config_accepts_messaging_profile() -> None:
+    """Messaging tool_profile converts to CursorAgentConfig."""
+    config = gateway_config(tool_profile="messaging")
+    cursor_config = resolve_gateway_startup_config(config)
+    assert cursor_config.tool_profile == "messaging"
+    assert cursor_config.runtime.local.cwd == config.workspace
+
+
+async def test_gateway_profile_coding_fails_before_hooks_store_and_adapters(
+    tmp_path: Path,
+) -> None:
+    """Coding profile aborts before hooks, store, or adapters start."""
+    config_file = tmp_path / "gateway.yaml"
+    write_gateway_yaml(config_file, tool_profile="coding")
+    adapter = FakePlatformAdapter()
+    facade = FakeSdkFacade()
+
+    with (
+        patch(
+            "cursor_agent.gateway.runner.bootstrap_messaging_hooks",
+        ) as mock_hooks,
+        patch.object(SessionStore, "initialize", autospec=True) as mock_init,
+    ):
+        with pytest.raises(ConfigError, match="coding"):
+            async with gateway_runtime(
+                config_path=config_file,
+                adapters=[adapter],
+                facade=facade,
+                store_path=tmp_path / "sessions.db",
+            ):
+                pytest.fail("gateway_runtime must not start with coding profile")
+
+        mock_hooks.assert_not_called()
+        mock_init.assert_not_called()
+        assert adapter.lifecycle == []
+
+
+async def test_gateway_profile_messaging_proceeds_past_profile_gate(
+    tmp_path: Path,
+) -> None:
+    """Messaging profile passes validation and reaches hook bootstrap."""
+    config_file = tmp_path / "gateway.yaml"
+    write_gateway_yaml(config_file, tool_profile="messaging")
+    adapter = FakePlatformAdapter()
+    facade = FakeSdkFacade()
+
+    with patch(
+        "cursor_agent.gateway.runner.bootstrap_messaging_hooks",
+    ) as mock_hooks:
+        async with gateway_runtime(
+            config_path=config_file,
+            adapters=[adapter],
+            facade=facade,
+            store_path=tmp_path / "sessions.db",
+        ) as _ctx:
+            mock_hooks.assert_called_once()
+            assert adapter.started is True
+
+
+async def test_gateway_hooks_bootstrap_called_once_before_adapters(
+    tmp_path: Path,
+) -> None:
+    """Messaging startup calls bootstrap_messaging_hooks once before adapters."""
+    config = gateway_config()
+    order: list[str] = []
+    adapter = OrderTrackingAdapter(order)
+    facade = FakeSdkFacade()
+
+    def _record_hooks(*_args: object, **_kwargs: object) -> None:
+        order.append("hooks")
+
+    with patch(
+        "cursor_agent.gateway.runner.bootstrap_messaging_hooks",
+        side_effect=_record_hooks,
+    ) as mock_hooks:
+        async with gateway_runtime(
+            gateway_config=config,
+            adapters=[adapter],
+            facade=facade,
+            store_path=tmp_path / "sessions.db",
+        ):
+            mock_hooks.assert_called_once()
+
+    assert order == ["hooks", "adapter_start"]
+
+
+async def test_gateway_hooks_config_error_aborts_startup(tmp_path: Path) -> None:
+    """Hook-source ConfigError aborts startup before adapters start."""
+    config = gateway_config()
+    adapter = FakePlatformAdapter()
+    facade = FakeSdkFacade()
+
+    with patch(
+        "cursor_agent.gateway.runner.bootstrap_messaging_hooks",
+        side_effect=ConfigError("missing messaging hook sources"),
+    ):
+        with pytest.raises(ConfigError, match="missing messaging hook sources"):
+            async with gateway_runtime(
+                gateway_config=config,
+                adapters=[adapter],
+                facade=facade,
+                store_path=tmp_path / "sessions.db",
+            ):
+                pytest.fail("gateway_runtime must abort on hook bootstrap failure")
+
+    assert adapter.lifecycle == []
+
+
+async def test_gateway_runtime_yields_pool_store_and_closes_facade(
+    tmp_path: Path,
+) -> None:
+    """gateway_runtime initializes store, starts adapters, and closes facade."""
+    config = gateway_config()
+    adapter = FakePlatformAdapter()
+    facade = FakeSdkFacade()
+    db_path = tmp_path / "sessions.db"
+
+    async with gateway_runtime(
+        gateway_config=config,
+        adapters=[adapter],
+        facade=facade,
+        store_path=db_path,
+    ) as ctx:
+        assert isinstance(ctx.pool, SessionAgentPool)
+        assert isinstance(ctx.store, SessionStore)
+        assert ctx.facade is facade
+        assert ctx.gateway_config == config
+        assert db_path.exists()
+        assert adapter.started is True
+        assert facade._closed is False
+
+    assert facade._closed is True
+    assert adapter.stopped is True
+
+
+async def test_dispatch_allowed_inbound_sends_assistant_reply(
+    tmp_path: Path,
+) -> None:
+    """Allowed inbound dispatches through the pool and returns assistant text."""
+    config = gateway_config()
+    adapter = FakePlatformAdapter(platform="telegram")
+    facade = FakeSdkFacade(default_reply="hello from agent")
+    session_key = "telegram:123456789:deadbeef"
+    db_path = tmp_path / "sessions.db"
+
+    async with gateway_runtime(
+        gateway_config=config,
+        adapters=[adapter],
+        facade=facade,
+        store_path=db_path,
+    ) as ctx:
+        await seed_session(
+            ctx.store,
+            facade,
+            session_key,
+            workspace=config.workspace,
+            tool_profile="messaging",
+        )
+        await adapter.simulate_inbound(
+            InboundMessage(
+                platform="telegram",
+                sender_id="123456789",
+                session_key=session_key,
+                text="ping",
+            )
+        )
+        await _wait_for_condition(
+            lambda: len(adapter.outbound_messages) == 1,
+            description="assistant reply outbound",
+        )
+
+    assert len(adapter.outbound_messages) == 1
+    outbound = adapter.outbound_messages[0]
+    assert outbound == OutboundMessage(
+        platform="telegram",
+        sender_id="123456789",
+        session_key=session_key,
+        text="hello from agent",
+    )
+
+
+async def test_dispatch_blocked_inbound_skips_pool_and_emits_auth_log(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Blocked inbound does not call the pool and emits gateway_auth_blocked."""
+    config = gateway_config()
+    adapter = FakePlatformAdapter(platform="telegram")
+    facade = FakeSdkFacade()
+    session_key = "telegram:999888777:deadbeef"
+    db_path = tmp_path / "sessions.db"
+
+    async with gateway_runtime(
+        gateway_config=config,
+        adapters=[adapter],
+        facade=facade,
+        store_path=db_path,
+        pool_factory=SendSpyPool,
+    ) as ctx:
+        await seed_session(
+            ctx.store,
+            facade,
+            session_key,
+            workspace=config.workspace,
+            tool_profile="messaging",
+        )
+        with caplog.at_level(logging.INFO, logger="cursor_agent.gateway.runner"):
+            await adapter.simulate_inbound(
+                InboundMessage(
+                    platform="telegram",
+                    sender_id="999888777",
+                    session_key=session_key,
+                    text="unauthorized",
+                )
+            )
+            await _wait_for_condition(
+                lambda: any(
+                    record.message.startswith("{")
+                    and "gateway_auth_blocked" in record.message
+                    for record in caplog.records
+                ),
+                description="blocked auth log",
+            )
+
+        assert ctx.pool.send_calls == []
+        assert adapter.outbound_messages == []
+
+    payloads = [
+        json.loads(record.message)
+        for record in caplog.records
+        if record.message.startswith("{")
+    ]
+    blocked = [p for p in payloads if p.get("event") == "gateway_auth_blocked"]
+    assert len(blocked) == 1
+    assert blocked[0]["platform"] == "telegram"
+    assert blocked[0]["sender_id"] == "999888777"
+    assert blocked[0]["session_key"] == session_key
+
+
+async def test_dispatch_missing_session_does_not_auto_create_or_call_pool(
+    tmp_path: Path,
+) -> None:
+    """Missing session rows do not auto-create sessions or invoke the pool."""
+    config = gateway_config()
+    adapter = FakePlatformAdapter(platform="telegram")
+    facade = FakeSdkFacade()
+    session_key = "telegram:123456789:missing"
+    db_path = tmp_path / "sessions.db"
+
+    async with gateway_runtime(
+        gateway_config=config,
+        adapters=[adapter],
+        facade=facade,
+        store_path=db_path,
+        pool_factory=SendSpyPool,
+    ) as ctx:
+        with patch.object(ctx.store, "create", autospec=True) as mock_create:
+            await adapter.simulate_inbound(
+                InboundMessage(
+                    platform="telegram",
+                    sender_id="123456789",
+                    session_key=session_key,
+                    text="hello",
+                )
+            )
+            mock_create.assert_not_called()
+
+        assert ctx.pool.send_calls == []
+        assert adapter.outbound_messages == []
+
+
+async def test_dispatch_uses_blocking_false_pool_send(tmp_path: Path) -> None:
+    """Inbound dispatch calls pool.send with blocking=False."""
+    config = gateway_config()
+    adapter = FakePlatformAdapter(platform="telegram")
+    facade = FakeSdkFacade(default_reply="ok")
+    session_key = "telegram:123456789:abc12345"
+    db_path = tmp_path / "sessions.db"
+
+    async with gateway_runtime(
+        gateway_config=config,
+        adapters=[adapter],
+        facade=facade,
+        store_path=db_path,
+        pool_factory=SendSpyPool,
+    ) as ctx:
+        await seed_session(
+            ctx.store,
+            facade,
+            session_key,
+            workspace=config.workspace,
+            tool_profile="messaging",
+        )
+        await adapter.simulate_inbound(
+            InboundMessage(
+                platform="telegram",
+                sender_id="123456789",
+                session_key=session_key,
+                text="status",
+            )
+        )
+        await _wait_for_condition(
+            lambda: len(ctx.pool.send_calls) == 1,
+            description="pool send call",
+        )
+
+        assert len(ctx.pool.send_calls) == 1
+        assert ctx.pool.send_calls[0]["blocking"] is False
+        assert ctx.pool.send_calls[0]["session_key"] == session_key
+        assert ctx.pool.send_calls[0]["message"] == "status"
+
+
+async def test_dispatch_rejects_inbound_when_shutting_down(tmp_path: Path) -> None:
+    """Inbound messages are ignored after the shutdown flag is set."""
+    config = gateway_config()
+    adapter = FakePlatformAdapter(platform="telegram")
+    facade = FakeSdkFacade(default_reply="should not send")
+    session_key = "telegram:123456789:shutdown"
+    db_path = tmp_path / "sessions.db"
+
+    async with gateway_runtime(
+        gateway_config=config,
+        adapters=[adapter],
+        facade=facade,
+        store_path=db_path,
+        pool_factory=SendSpyPool,
+    ) as ctx:
+        await seed_session(
+            ctx.store,
+            facade,
+            session_key,
+            workspace=config.workspace,
+            tool_profile="messaging",
+        )
+        ctx.shutting_down = True
+        await adapter.simulate_inbound(
+            InboundMessage(
+                platform="telegram",
+                sender_id="123456789",
+                session_key=session_key,
+                text="late message",
+            )
+        )
+
+        assert ctx.pool.send_calls == []
+        assert adapter.outbound_messages == []
+
+
+def test_load_gateway_config_round_trip_for_runner_fixtures(tmp_path: Path) -> None:
+    """Runner fixtures use the same loader as production gateway startup."""
+    config_file = tmp_path / "gateway.yaml"
+    write_gateway_yaml(config_file)
+    loaded = load_gateway_config(config_file)
+    assert loaded.tool_profile == "messaging"
+
+
+def test_help_shows_gateway_command() -> None:
+    """Root --help lists the gateway subcommand."""
+    result = CliRunner().invoke(app, ["--help"])
+    assert result.exit_code == 0
+    assert "gateway" in result.stdout
+
+
+def test_gateway_command_invokes_run_gateway(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """cursor-agent gateway runs the gateway runner without blocking."""
+    captured: dict[str, object] = {"invoked": False, "config_path": "unset"}
+
+    async def stub_run_gateway(config_path: Path | None = None) -> int:
+        captured["invoked"] = True
+        captured["config_path"] = config_path
+        return 0
+
+    monkeypatch.setattr("cursor_agent.cli.app.run_gateway", stub_run_gateway)
+
+    result = CliRunner().invoke(app, ["gateway"])
+    assert result.exit_code == 0
+    assert captured["invoked"] is True
+    assert captured["config_path"] is None
+
+
+def test_gateway_command_passes_config_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """cursor-agent gateway --config PATH forwards the config path to the runner."""
+    config_file = tmp_path / "gateway.yaml"
+    write_gateway_yaml(config_file)
+    captured: dict[str, object] = {"config_path": "unset"}
+
+    async def stub_run_gateway(config_path: Path | None = None) -> int:
+        captured["config_path"] = config_path
+        return 0
+
+    monkeypatch.setattr("cursor_agent.cli.app.run_gateway", stub_run_gateway)
+
+    result = CliRunner().invoke(app, ["gateway", "--config", str(config_file)])
+    assert result.exit_code == 0
+    assert captured["config_path"] == config_file
+
+
+def test_gateway_command_config_error_exits_nonzero(tmp_path: Path) -> None:
+    """Gateway config validation failures map to exit code 1."""
+    config_file = tmp_path / "gateway.yaml"
+    write_gateway_yaml(config_file, tool_profile="coding")
+
+    with patch("cursor_agent.gateway.runner.bootstrap_messaging_hooks"):
+        result = CliRunner().invoke(app, ["gateway", "--config", str(config_file)])
+
+    assert result.exit_code == 1
+
+
+def test_gateway_command_maps_cursor_agent_error_to_exit_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CursorAgentError from the runner maps to exit code 1."""
+
+    async def stub_run_gateway(config_path: Path | None = None) -> int:
+        _ = config_path
+        raise ConfigError("gateway startup failed")
+
+    monkeypatch.setattr("cursor_agent.cli.app.run_gateway", stub_run_gateway)
+
+    result = CliRunner().invoke(app, ["gateway"])
+    assert result.exit_code == 1
+
+
+def test_default_cli_invocation_does_not_run_gateway_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Invoking without a subcommand does not start the gateway runner."""
+    called = {"gateway": False, "repl": False}
+
+    async def stub_run_gateway(config_path: Path | None = None) -> int:
+        called["gateway"] = True
+        _ = config_path
+        return 0
+
+    async def stub_run_default(_config: object) -> None:
+        called["repl"] = True
+        return None
+
+    monkeypatch.setattr("cursor_agent.cli.app.run_gateway", stub_run_gateway)
+    monkeypatch.setattr("cursor_agent.cli.app.run_default", stub_run_default)
+
+    result = CliRunner().invoke(app, [])
+    assert result.exit_code == 0
+    assert called["gateway"] is False
+    assert called["repl"] is True
+
+
+async def test_run_gateway_returns_zero_after_shutdown(tmp_path: Path) -> None:
+    """run_gateway blocks until shutdown_complete and returns exit code 0."""
+    from contextlib import asynccontextmanager
+
+    import cursor_agent.gateway.runner as runner_module
+    from cursor_agent.gateway.context import GatewayContext
+
+    config_file = tmp_path / "gateway.yaml"
+    write_gateway_yaml(config_file)
+    entered = asyncio.Event()
+    contexts: list[GatewayContext] = []
+    original_runtime = runner_module.gateway_runtime
+
+    @asynccontextmanager
+    async def tracing_runtime(*args: object, **kwargs: object):
+        async with original_runtime(*args, **kwargs) as ctx:
+            contexts.append(ctx)
+            entered.set()
+            yield ctx
+
+    with (
+        patch.object(runner_module, "gateway_runtime", tracing_runtime),
+        patch("cursor_agent.gateway.runner.bootstrap_messaging_hooks"),
+    ):
+        task = asyncio.create_task(run_gateway(config_path=config_file))
+        await entered.wait()
+        ctx = contexts[0]
+        await ctx.shutdown_coordinator.shutdown(ctx)
+        exit_code = await task
+
+    assert exit_code == 0
+    assert ctx.shutting_down is True
