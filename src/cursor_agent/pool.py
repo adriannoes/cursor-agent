@@ -104,6 +104,7 @@ class SessionAgentPool:
             workspace=row.workspace,
             model=self._config.model,
             tool_profile=row.tool_profile,
+            runtime_mode=row.runtime,
         )
         self._resumed_agent_ids.add(row.agent_id)
 

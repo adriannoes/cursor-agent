@@ -2,30 +2,42 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator, Callable
 
+from cursor_agent.cli.command_router import (
+    CommandContext,
+    CommandResult,
+    QuitRequested,
+    ReplState,
+    SessionActivated,
+    UnknownSlashCommand,
+    execute_builtin_command,
+)
 from cursor_agent.cli.error_display import format_error
-from cursor_agent.cli.slash_commands import handle_new, handle_resume
+from cursor_agent.cli.slash_commands import build_repl_command_router
 from cursor_agent.cli.stream_renderer import build_stream_callbacks
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.errors import CursorAgentError
 from cursor_agent.pool import SessionAgentPool
-from cursor_agent.sdk_facade import RunStatus, SdkFacade
+from cursor_agent.sdk_facade import RunStatus, SdkFacade, StreamCallbacks
 from cursor_agent.sessions.store import SessionStore
 
 _NO_SESSION_GUIDANCE = "No active session. Use /new to start one."
 _NO_ACTIVE_SESSION_GUIDANCE = "No active session. Use /new or /resume to continue."
-_SLASH_PLACEHOLDER = "Command not available yet"
 _RUN_FAILED_NOTICE = "Run failed (status=error). You can retry or continue."
 
 
-def _parse_resume_arg(line: str) -> str | None:
-    """Return the optional UUID argument from a ``/resume`` line."""
-    parts = line.split(maxsplit=1)
-    if len(parts) < 2:
-        return None
-    arg = parts[1].strip()
-    return arg or None
+def _apply_command_result(
+    result: CommandResult | None,
+    state: ReplState,
+) -> bool:
+    """Update ``ReplState`` from handler output; return True when loop should exit."""
+    if isinstance(result, QuitRequested):
+        return True
+    if isinstance(result, SessionActivated) and result.session_id is not None:
+        state.active_session_id = result.session_id
+    return False
 
 
 async def run_repl(
@@ -38,7 +50,9 @@ async def run_repl(
     reader: AsyncIterator[str],
     writer: Callable[[str], None],
     stream_writer: Callable[[str], None] | None = None,
+    stream_callbacks: StreamCallbacks | None = None,
     auto_resume: bool = True,
+    logger: logging.Logger | None = None,
 ) -> RunStatus | None:
     """Run the interactive REPL loop until ``/quit`` or reader exhaustion.
 
@@ -55,8 +69,24 @@ async def run_repl(
         )
     """
     stream_sink = stream_writer if stream_writer is not None else writer
-    active_session_id: str | None = None
-    last_status: RunStatus | None = None
+    send_callbacks = (
+        stream_callbacks
+        if stream_callbacks is not None
+        else build_stream_callbacks(stream_sink)
+    )
+    state = ReplState()
+    router = build_repl_command_router()
+    ctx = CommandContext(
+        pool=pool,
+        store=store,
+        config=config,
+        facade=facade,
+        session_key=session_key,
+        state=state,
+        stream_callbacks=send_callbacks,
+        stream_writer=stream_sink,
+        logger=logger,
+    )
 
     if auto_resume:
         # Resume goes through pool.get so the lazy resume + runtime guard
@@ -64,8 +94,8 @@ async def run_repl(
         # existence probe only to choose between the "/new" hint and the error.
         try:
             row = await pool.get(session_key)
-            active_session_id = row.id
-            writer(f"Resumed session {active_session_id}")
+            state.active_session_id = row.id
+            writer(f"Resumed session {state.active_session_id}")
         except CursorAgentError as exc:
             if await store.resolve(session_key) is None:
                 writer(_NO_SESSION_GUIDANCE)
@@ -76,53 +106,39 @@ async def run_repl(
         stripped = line.strip()
         if not stripped:
             continue
-        if stripped == "/quit":
-            break
-        if stripped.startswith("/"):
-            if stripped == "/new":
-                try:
-                    active_session_id = await handle_new(
-                        facade=facade,
-                        store=store,
-                        config=config,
-                        session_key=session_key,
-                        writer=writer,
-                    )
-                except CursorAgentError as exc:
-                    writer(format_error(exc))
+        resolved = router.resolve(stripped)
+        if resolved is not None:
+            if isinstance(resolved, UnknownSlashCommand):
+                writer(resolved.message)
                 continue
-            if stripped == "/resume" or stripped.startswith("/resume "):
-                resume_arg = (
-                    None if stripped == "/resume" else _parse_resume_arg(stripped)
-                )
-                new_id = await handle_resume(
-                    pool=pool,
-                    session_key=session_key,
-                    arg=resume_arg,
-                    writer=writer,
-                )
-                if new_id is not None:
-                    active_session_id = new_id
-                continue
-            writer(_SLASH_PLACEHOLDER)
+            command_result = await execute_builtin_command(
+                resolved,
+                ctx,
+                writer,
+                on_error=format_error,
+            )
+            if _apply_command_result(command_result, state):
+                break
             continue
-        if active_session_id is None:
+        if state.active_session_id is None:
             writer(_NO_ACTIVE_SESSION_GUIDANCE)
             continue
         try:
-            result = await pool.send(
+            send_result = await pool.send(
                 session_key,
                 stripped,
-                session_id=active_session_id,
-                callbacks=build_stream_callbacks(stream_sink),
+                session_id=state.active_session_id,
+                callbacks=send_callbacks,
                 blocking=True,
             )
         except CursorAgentError as exc:
             writer(format_error(exc))
             continue
-        last_status = result.status
+        state.last_user_message = stripped
+        state.last_status = send_result.status
+        state.last_usage = send_result.usage
         stream_sink("\n")
-        if result.status == RunStatus.ERROR:
+        if send_result.status == RunStatus.ERROR:
             writer(_RUN_FAILED_NOTICE)
 
-    return last_status
+    return state.last_status
