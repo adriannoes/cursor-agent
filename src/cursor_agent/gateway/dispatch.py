@@ -44,6 +44,12 @@ async def dispatch_inbound(ctx: GatewayContext, message: InboundMessage) -> None
 
     row = await ctx.store.resolve(message.session_key, session_id=None)
     if row is None:
+        ctx._logger.warning(
+            "gateway dispatch: no session row for session_key=%s platform=%s sender_id=%s",
+            message.session_key,
+            message.platform,
+            message.sender_id,
+        )
         return
 
     ctx._track_active_agent(row.agent_id)

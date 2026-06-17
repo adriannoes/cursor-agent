@@ -260,6 +260,31 @@ async def test_shutdown_is_idempotent(tmp_path: Path) -> None:
     assert facade.close_calls == 1
 
 
+async def test_shutdown_concurrent_calls_close_facade_once(tmp_path: Path) -> None:
+    """Concurrent shutdown callers serialize on the lock and close once."""
+    config = gateway_config()
+    adapter = FakePlatformAdapter()
+    facade = CancelTrackingFacade()
+    db_path = tmp_path / "sessions.db"
+
+    with patch("cursor_agent.gateway.runner.bootstrap_messaging_hooks"):
+        async with gateway_runtime(
+            gateway_config=config,
+            adapters=[adapter],
+            facade=facade,
+            store_path=db_path,
+            shutdown_timeout_seconds=0.05,
+            register_signals=False,
+        ) as ctx:
+            results = await asyncio.gather(
+                ctx.shutdown_coordinator.shutdown(ctx),
+                ctx.shutdown_coordinator.shutdown(ctx),
+            )
+
+    assert results == [0, 0]
+    assert facade.close_calls == 1
+
+
 def test_flush_logging_handlers_flushes_root_handlers() -> None:
     """Log flush walks installed root handlers."""
     handler = FlushRecordingHandler()
