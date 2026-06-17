@@ -10,6 +10,7 @@ import pytest
 from cursor_agent.config import CursorAgentConfig, load_config
 from cursor_agent.errors import AgentBusyError, AuthError, ConfigError, CursorAgentError
 from cursor_agent.facade_logging import LogContext
+from cursor_agent.messaging_hooks import ensure_messaging_hooks
 from cursor_agent.pool import SessionAgentPool
 from cursor_agent.sdk_facade import FakeSdkFacade, RunResult, RunStatus, StreamCallbacks
 from cursor_agent.sessions.models import SessionCreateParams
@@ -38,6 +39,7 @@ async def _seed_session(
     runtime: str = "local",
     title: str | None = None,
     workspace: str = "/tmp/workspace",
+    tool_profile: str = "coding",
 ) -> str:
     """Create a facade agent and persist a matching session row."""
     agent_id = await facade.create_agent(workspace=workspace)
@@ -48,9 +50,16 @@ async def _seed_session(
             workspace=workspace,
             runtime=runtime,
             title=title,
+            tool_profile=tool_profile,
         )
     )
     return record.id
+
+
+def _config_with_tool_profile(tool_profile: str) -> CursorAgentConfig:
+    """Return default config with an explicit tool_profile override."""
+    config = load_config(config_path=Path("/nonexistent/config.yaml"))
+    return config.model_copy(update={"tool_profile": tool_profile})
 
 
 class ResumeTrackingFacade(FakeSdkFacade):
@@ -532,3 +541,214 @@ async def test_send_raises_config_error_when_session_missing(
 
     with pytest.raises(ConfigError, match="session_key"):
         await pool.send("cli:default:missing", "hello")
+
+
+@pytest.mark.asyncio
+async def test_messaging_hook_deploy_does_not_corrupt_resume_cache_or_metadata(
+    store: SessionStore,
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """Workspace hook deploy must not change pool resume caching or session metadata."""
+    from cursor_agent import messaging_hooks
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    session_key = "cli:default:hookdep1"
+    facade = ResumeTrackingFacade()
+    session_id = await _seed_session(
+        store,
+        facade,
+        session_key,
+        workspace=str(workspace),
+    )
+
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    await pool.get(session_key)
+    assert len(facade.resume_calls) == 1
+
+    user_hooks = tmp_path / "user-hooks" / "messaging"
+    messaging_hooks.install_messaging_hooks(target_dir=user_hooks)
+    messaging_hooks.deploy_messaging_hooks_to_workspace(
+        workspace,
+        user_hooks_dir=user_hooks,
+    )
+
+    await pool.get(session_key)
+    assert len(facade.resume_calls) == 1
+
+    row = await store.resolve(session_key, session_id=session_id)
+    assert row is not None
+    assert row.metadata.get("status") != "compressing"
+
+
+# --- PRD-005 security: effective resume tool_profile ---
+
+
+@pytest.mark.asyncio
+async def test_resume_uses_messaging_when_config_messaging_stored_coding(
+    store: SessionStore,
+) -> None:
+    """Config messaging must win over a stored coding session profile on resume."""
+    session_key = "cli:default:profmsg1"
+    facade = ResumeTrackingFacade()
+    await _seed_session(store, facade, session_key, tool_profile="coding")
+
+    config = _config_with_tool_profile("messaging")
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    await pool.get(session_key)
+
+    assert len(facade.resume_calls) == 1
+    assert facade.resume_calls[0]["tool_profile"] == "messaging"
+
+
+@pytest.mark.asyncio
+async def test_resume_stays_messaging_when_config_coding_stored_messaging(
+    store: SessionStore,
+    tmp_path: Path,
+) -> None:
+    """Stored messaging profile must remain messaging even if config is coding."""
+    session_key = "cli:default:profmsg2"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    facade = ResumeTrackingFacade()
+    await _seed_session(
+        store,
+        facade,
+        session_key,
+        workspace=str(workspace),
+        tool_profile="messaging",
+    )
+
+    config = _config_with_tool_profile("coding")
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    await pool.get(session_key)
+
+    assert len(facade.resume_calls) == 1
+    assert facade.resume_calls[0]["tool_profile"] == "messaging"
+    assert (workspace / ".cursor" / "hooks.json").is_file()
+    assert (workspace / ".cursor" / "hooks" / "messaging" / "shell-gate.sh").is_file()
+
+
+@pytest.mark.asyncio
+async def test_resume_skips_hook_deploy_for_coding_session(
+    store: SessionStore,
+    tmp_path: Path,
+) -> None:
+    """Coding sessions must not deploy messaging hooks on resume."""
+    session_key = "cli:default:profcod2"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    facade = ResumeTrackingFacade()
+    await _seed_session(
+        store,
+        facade,
+        session_key,
+        workspace=str(workspace),
+        tool_profile="coding",
+    )
+
+    config = _config_with_tool_profile("coding")
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    await pool.get(session_key)
+
+    assert not (workspace / ".cursor" / "hooks.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_resume_stays_coding_when_config_and_stored_are_coding(
+    store: SessionStore,
+) -> None:
+    """Coding config and stored profile must resume with coding tool_profile."""
+    session_key = "cli:default:profcod1"
+    facade = ResumeTrackingFacade()
+    await _seed_session(store, facade, session_key, tool_profile="coding")
+
+    config = _config_with_tool_profile("coding")
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    await pool.get(session_key)
+
+    assert len(facade.resume_calls) == 1
+    assert facade.resume_calls[0]["tool_profile"] == "coding"
+
+
+@pytest.mark.asyncio
+async def test_messaging_hook_deploy_cached_per_workspace(
+    store: SessionStore,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repeated pool get/send must not redeploy messaging hooks for one workspace."""
+    session_key = "cli:default:hookcache1"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    facade = ResumeTrackingFacade()
+    await _seed_session(
+        store,
+        facade,
+        session_key,
+        workspace=str(workspace),
+        tool_profile="messaging",
+    )
+
+    ensure_calls = 0
+    original_ensure = ensure_messaging_hooks
+
+    def counting_ensure(*args: object, **kwargs: object) -> Path:
+        nonlocal ensure_calls
+        ensure_calls += 1
+        return original_ensure(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "cursor_agent.pool.ensure_messaging_hooks",
+        counting_ensure,
+    )
+
+    config = _config_with_tool_profile("messaging")
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    await pool.get(session_key)
+    await pool.get(session_key)
+    await pool.send(session_key, "hello again")
+
+    assert ensure_calls == 1
+    assert (workspace / ".cursor" / "hooks.json").is_file()
+
+
+@pytest.mark.asyncio
+async def test_messaging_hook_deploy_uses_to_thread(
+    store: SessionStore,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Messaging hook deploy must run off the event loop via asyncio.to_thread."""
+    session_key = "cli:default:hookthread1"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    facade = ResumeTrackingFacade()
+    await _seed_session(
+        store,
+        facade,
+        session_key,
+        workspace=str(workspace),
+        tool_profile="messaging",
+    )
+
+    to_thread_calls: list[object] = []
+    original_to_thread = asyncio.to_thread
+
+    async def recording_to_thread(
+        func: object,
+        /,
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        to_thread_calls.append(func)
+        return await original_to_thread(func, *args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", recording_to_thread)
+
+    config = _config_with_tool_profile("messaging")
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    await pool.get(session_key)
+
+    assert ensure_messaging_hooks in to_thread_calls

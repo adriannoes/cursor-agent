@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""SDK tools inventory spike (PRD-000 T3) — historical SDK investigation.
-
-**Not a product example.** This script imports ``cursor_sdk`` directly to record
-observed native tool names from ``run.messages()``. For orchestration-layer usage,
-use ``cursor-agent`` and ``cursor_agent.sdk_facade``. See ``examples/README.md``.
+"""SDK tools inventory spike (PRD-000 T3).
 
 Introspection API (cursor-sdk 0.1.7)
 ------------------------------------
@@ -17,7 +13,7 @@ Regenerate snapshot
 -------------------
 ::
 
-    CURSOR_API_KEY=... uv run python docs/archive/sdk-spikes/tools_list.py > sdk-tools-snapshot.txt
+    CURSOR_API_KEY=... uv run python examples/tools_list.py > sdk-tools-snapshot.txt
 
 Requires ``CURSOR_API_KEY`` in the environment (see ``.env.example``). Do not commit secrets.
 """
@@ -42,7 +38,7 @@ TOOL_PROBE_PROMPT = (
     "Reply with DONE after using the tools."
 )
 CURSOR_DASHBOARD_URL = "https://cursor.com/dashboard/integrations"
-SNAPSHOT_SOURCE = "docs/archive/sdk-spikes/tools_list.py"
+SNAPSHOT_SOURCE = "examples/tools_list.py"
 
 
 @dataclass(frozen=True)
