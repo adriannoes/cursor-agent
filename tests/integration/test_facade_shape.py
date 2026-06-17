@@ -1,4 +1,4 @@
-"""Facade integration shape tests (PRD-001 task 3.4).
+"""Facade integration shape tests (PRD-001).
 
 Documents real SDK 0.1.7 attributes observed through ``AsyncSdkFacade``.
 Reuses the smoke pattern from ``test_sdk_smoke.py``; skip without API key.

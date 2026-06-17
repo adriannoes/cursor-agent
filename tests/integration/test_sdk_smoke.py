@@ -51,7 +51,7 @@ async def collect_tool_call_events(run: AsyncRun) -> list[SDKToolUseMessage]:
 
 
 async def test_sdk_bridge_basic_turn() -> None:
-    """Bridge launches and agent returns a non-empty response (PRD-000 task 4.4)."""
+    """Bridge launches and agent returns a non-empty response (PRD-000)."""
     workspace = str(repo_root())
     async with await AsyncClient.launch_bridge(workspace=workspace) as client:
         async with await client.agents.create(
@@ -69,7 +69,7 @@ async def test_sdk_bridge_basic_turn() -> None:
 
 
 async def test_sdk_native_tool_turn() -> None:
-    """Agent uses a native file tool and cites README content (PRD-000 task 4.5)."""
+    """Agent uses a native file tool and cites README content (PRD-000)."""
     workspace = str(repo_root())
     async with await AsyncClient.launch_bridge(workspace=workspace) as client:
         async with await client.agents.create(
