@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from collections.abc import AsyncIterator, Mapping
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -16,6 +17,7 @@ from cursor_agent.cli.startup import create_store, repl_runtime, session_key_for
 from cursor_agent.cli.stream_renderer import build_display_stream_callbacks
 from cursor_agent.config.loader import CursorAgentConfig, ToolProfile, load_config
 from cursor_agent.errors import CursorAgentError
+from cursor_agent.gateway.runner import run_gateway
 from cursor_agent.sdk_facade import RunStatus
 from cursor_agent.sessions.models import SessionRecord
 
@@ -94,6 +96,27 @@ def sessions_list() -> None:
 
     for row in rows:
         _print_session_row(row)
+
+
+@app.command("gateway")
+def gateway_command(
+    config: Annotated[
+        Path | None,
+        typer.Option(
+            "--config",
+            help="Path to gateway YAML configuration.",
+            dir_okay=False,
+            file_okay=True,
+            resolve_path=True,
+        ),
+    ] = None,
+) -> None:
+    """Run the long-running messaging gateway."""
+    try:
+        exit_code = asyncio.run(run_gateway(config_path=config))
+    except CursorAgentError as exc:
+        raise typer.Exit(exit_code_for_error(exc)) from exc
+    raise typer.Exit(exit_code)
 
 
 def _cli_overrides_for_profile(
