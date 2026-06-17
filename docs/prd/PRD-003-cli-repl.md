@@ -100,6 +100,15 @@ Depende de [PRD-002](PRD-002-session-store.md) (store + pool). Empacotamento: [A
 
 **session_key:** derivado do config (`cli:{profile}:{workspace_hash}`) — usuário não digita manualmente.
 
+**Retro PRD-002 (store/pool/config entregues):**
+
+- `build_cli_session_key(cwd, profile="default")` gera `cli:{profile}:{sha256(abs(cwd))[:8]}`; o CLI deve usar `config.runtime.local.cwd` como base do workspace atual.
+- `SessionStore` expõe `create`, `resolve`, `list`, `touch`, `update_title` e `update_metadata`; `sessions list` deve exibir `SessionRecord.id`, `title` e `updated_at` filtrados pelo `session_key` atual.
+- `SessionAgentPool.send(session_key, message, *, session_id=None, callbacks=None, blocking=True)` é a API de envio para texto livre no REPL; CLI deve manter `blocking=True`.
+- `SessionAgentPool.get(session_key, session_id=None)` faz lazy resume via `SdkFacade.resume_agent` e valida `runtime` antes de retomar.
+- `load_config(config_path=None, cli_overrides=None)` usa `pydantic-settings` com precedência CLI > env `CURSOR_AGENT__*` > YAML > defaults; falhas públicas chegam como `ConfigError`.
+- Após cada `send`, metadata inclui `last_run_id` e `last_status`; o CLI pode usar esses campos em mensagens de status/debug, sem substituir histórico do SDK.
+
 ## 8. Métricas de sucesso
 
 | Métrica | Critério de aceite |
@@ -113,7 +122,14 @@ Depende de [PRD-002](PRD-002-session-store.md) (store + pool). Empacotamento: [A
 
 ## 9. Perguntas em aberto
 
-Nenhuma — packaging e escopo de API estão em [ADR-019](../decisions/ADR-019-packaging-license.md).
+**Decisões fechadas recebidas do PRD-002:**
+
+- Runtime mismatch já é `ConfigError` no pool e a mensagem sugere `/new`; o CLI deve apenas renderizar a falha e sair com code 1 quando ocorrer fora do REPL.
+- `RunResult.status == RunStatus.ERROR` retorna normalmente do pool; o CLI deve mapear esse caso para exit code 2 sem transformar em exceção.
+- `AgentBusyError` continua responsabilidade do pool/gateway; o REPL usa envio bloqueante e não deve exibir busy para mensagens digitadas em série.
+- Títulos são derivados da primeira mensagem no pool/store; `/new` pode criar a sessão sem título e deixar o primeiro `send` preencher.
+
+Nenhuma pergunta bloqueante restante para gerar tasks do CLI; packaging e escopo de API continuam em [ADR-019](../decisions/ADR-019-packaging-license.md).
 
 ## 10. Tarefas de implementação
 
@@ -157,6 +173,14 @@ Ordem sugerida: entry point → wire fake pool → comandos → exit codes → r
 ### Retroalimentação
 
 **Após concluir PRD-003:** revisar e atualizar [PRD-004](PRD-004-slash-commands.md) (§7, §9, §11) antes de slash commands.
+
+**Aprendizados recebidos do PRD-002:**
+
+- [x] Shape real de `SessionRecord` para CLI/listagem: `id`, `session_key`, `agent_id`, `title`, `workspace`, `runtime`, `tool_profile`, `created_at`, `updated_at`, `metadata`.
+- [x] Assinatura do pool para REPL: `send(session_key, message, session_id=None, callbacks=None, blocking=True)` e `get(session_key, session_id=None)`.
+- [x] Config mínima validada: `model`, `tool_profile`, `runtime.mode`, `runtime.local.cwd`, `runtime.local.setting_sources`; overrides vêm de CLI/env/YAML/defaults.
+- [x] Exit code mapping preservado: `CursorAgentError`/`ConfigError` → 1; `RunStatus.ERROR` → 2; `FINISHED`/`CANCELLED` → 0.
+- [x] Testes do CLI devem injetar `FakeSdkFacade`, `SessionStore(tmp_path / "sessions.db")` e `load_config(config_path=missing_path)` para rodar sem `CURSOR_API_KEY`.
 
 **Aprendizados a registrar:**
 
