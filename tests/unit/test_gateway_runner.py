@@ -381,8 +381,7 @@ async def test_dispatch_missing_session_does_not_auto_create_or_call_pool(
             )
             await _wait_for_condition(
                 lambda: any(
-                    "no session row" in record.message
-                    and session_key in record.message
+                    "no session row" in record.message and session_key in record.message
                     for record in caplog.records
                 ),
                 description="missing session warning log",

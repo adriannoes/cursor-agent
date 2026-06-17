@@ -62,7 +62,9 @@ class GatewayShutdownCoordinator:
             try:
                 await ctx.facade.close()
             except Exception:
-                self._logger.debug("gateway shutdown: facade close failed", exc_info=True)
+                self._logger.debug(
+                    "gateway shutdown: facade close failed", exc_info=True
+                )
 
             flush_logging_handlers()
             self._shutdown_complete = True
