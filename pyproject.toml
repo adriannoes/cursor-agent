@@ -4,7 +4,10 @@ version = "0.0.0"
 description = "Clean-room Cursor agent orchestration (Phase 0 SDK spike)"
 requires-python = ">=3.11"
 dependencies = [
+    "aiosqlite>=0.22.1",
     "cursor-sdk==0.1.7",
+    "pydantic-settings>=2.14.1",
+    "pyyaml>=6.0.3",
 ]
 
 [build-system]
