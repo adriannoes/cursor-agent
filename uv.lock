@@ -177,6 +177,7 @@ dependencies = [
     { name = "cursor-sdk" },
     { name = "pydantic-settings" },
     { name = "pyyaml" },
+    { name = "rich" },
     { name = "typer" },
 ]
 
@@ -195,6 +196,7 @@ requires-dist = [
     { name = "cursor-sdk", specifier = "==0.1.7" },
     { name = "pydantic-settings", specifier = ">=2.14.1" },
     { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "rich", specifier = ">=15.0.0" },
     { name = "typer", specifier = ">=0.12" },
 ]
 
