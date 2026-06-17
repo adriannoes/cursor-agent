@@ -449,7 +449,7 @@ class FakeSdkFacade:
         self._closed = True
 
 
-# Task 5.2: first cursor_sdk import in this module.
+# SDK import boundary (see AGENTS.md).
 from cursor_sdk import AsyncClient, LocalAgentOptions, SandboxOptions  # noqa: E402
 
 

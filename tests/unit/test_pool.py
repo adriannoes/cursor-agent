@@ -213,9 +213,6 @@ class ForbiddenResumeFacade(FakeSdkFacade):
         raise AssertionError(msg)
 
 
-# --- Task 4.1: lazy resume ---
-
-
 @pytest.mark.asyncio
 async def test_lazy_resume_get_calls_resume_agent(
     store: SessionStore,
@@ -289,9 +286,6 @@ async def test_send_uses_model_override_on_resume(
     assert facade.resume_calls[0]["model"] == "composer-2.5-fast"
 
 
-# --- Task 4.3: runtime guard ---
-
-
 @pytest.mark.asyncio
 async def test_runtime_guard_get_raises_config_error_before_resume(
     store: SessionStore,
@@ -331,9 +325,6 @@ async def test_runtime_guard_send_raises_config_error_before_lock(
         await pool.send(session_key, "hello")
 
     assert facade.send_calls == []
-
-
-# --- Task 4.5: locks CLI and gateway ---
 
 
 @pytest.mark.asyncio
@@ -400,9 +391,6 @@ async def test_send_rejects_whitespace_only_message_before_facade(
         await pool.send(session_key, "   \t\n  ")
 
     assert facade.send_calls == []
-
-
-# --- Task 4.7: send wrapper and LogContext ---
 
 
 @pytest.mark.asyncio
@@ -483,9 +471,6 @@ async def test_send_wrapper_touches_updated_at(
     after = await store.resolve(session_key, session_id=session_id)
     assert after is not None
     assert after.updated_at >= before.updated_at
-
-
-# --- Task 4.9: error propagation and lock release ---
 
 
 @pytest.mark.asyncio
@@ -580,9 +565,6 @@ async def test_messaging_hook_deploy_does_not_corrupt_resume_cache_or_metadata(
     row = await store.resolve(session_key, session_id=session_id)
     assert row is not None
     assert row.metadata.get("status") != "compressing"
-
-
-# --- PRD-005 security: effective resume tool_profile ---
 
 
 @pytest.mark.asyncio

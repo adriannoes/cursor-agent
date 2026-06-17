@@ -43,12 +43,7 @@ def _packaged_compress_prompt_path() -> Path:
 
 
 def load_compress_prompt() -> str:
-    """Load the versioned /compress summary prompt from the packaged wheel path.
-
-    Example:
-        >>> "## Goal" in load_compress_prompt()
-        True
-    """
+    """Load the versioned /compress summary prompt from the packaged wheel path."""
     path = _packaged_compress_prompt_path()
     if path.is_file():
         return _read_prompt_text(path)

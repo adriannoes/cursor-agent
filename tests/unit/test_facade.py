@@ -44,9 +44,6 @@ def _local_option(local_opts: object, key: str) -> object | None:
     return getattr(local_opts, key, None)
 
 
-# --- Task 2.1: public types ---
-
-
 def test_types_run_status_finished_value() -> None:
     """RunStatus.FINISHED must match SDK spike terminal status."""
     assert RunStatus.FINISHED.value == "finished"
@@ -93,9 +90,6 @@ def test_types_log_context_optional_fields() -> None:
     assert ctx.agent_id is None
 
 
-# --- Task 4.1: FakeSdkFacade happy path ---
-
-
 @pytest.mark.asyncio
 async def test_fake_create_agent_returns_agent_id() -> None:
     """FakeSdkFacade.create_agent returns a non-empty agent_id."""
@@ -116,9 +110,6 @@ async def test_fake_send_returns_scripted_finished_result() -> None:
     assert result.run_id
 
 
-# --- Task 4.3: busy hook ---
-
-
 @pytest.mark.asyncio
 async def test_fake_busy_hook_send_in_progress_event() -> None:
     """send_in_progress is set during send and cleared after."""
@@ -134,9 +125,6 @@ async def test_fake_busy_hook_send_in_progress_event() -> None:
     result = await send_task
     assert facade.send_in_progress.is_set() is False
     assert result.status is RunStatus.FINISHED
-
-
-# --- Task 4.5: StreamCallbacks on fake ---
 
 
 @pytest.mark.asyncio
@@ -169,9 +157,6 @@ async def test_fake_callbacks_invoke_in_order() -> None:
     assert events == ["start:grep", "end:grep", "text:a", "text:b"]
 
 
-# --- Task 5.1: AsyncSdkFacade context manager ---
-
-
 @pytest.mark.asyncio
 async def test_async_context_manager_launches_and_closes_bridge() -> None:
     """__aenter__ launches bridge; __aexit__ closes it."""
@@ -187,9 +172,6 @@ async def test_async_context_manager_launches_and_closes_bridge() -> None:
             assert facade._client is mock_bridge
         launch_mock.assert_awaited_once()
         mock_bridge.aclose.assert_awaited_once()
-
-
-# --- Task 5.3: create_agent ---
 
 
 @pytest.mark.asyncio
@@ -344,9 +326,6 @@ async def test_create_agent_uses_composer_and_local_cwd() -> None:
     )
 
 
-# --- Task 5.5: resume_agent MCP re-inject ---
-
-
 def _sandbox_enabled(local_opts: object) -> bool | None:
     """Return sandbox_options.enabled from LocalAgentOptions or a mapping."""
     sandbox = _local_option(local_opts, "sandbox_options")
@@ -450,9 +429,6 @@ async def test_resume_agent_reinjects_mcp_servers_from_profile() -> None:
     assert mcp_servers == {}
 
 
-# --- Task 5.7: async send with stream mock ---
-
-
 @pytest.mark.asyncio
 async def test_async_send_drains_messages_and_wait() -> None:
     """send drains messages(), calls wait(), and never uses run.text()."""
@@ -524,11 +500,8 @@ async def test_async_send_drains_messages_and_wait() -> None:
     assert tool_events == ["start:read", "end:read"]
 
 
-# --- Task 5.9: retry is_retryable pre-run ---
-
-
 class _RetryableFacadeError(Exception):
-    """Stand-in for CursorAgentError until errors.py lands (task 2.4)."""
+    """Stand-in for CursorAgentError in retry tests."""
 
     is_retryable = True
 
@@ -595,9 +568,6 @@ async def test_retry_does_not_retry_non_retryable_errors() -> None:
     sleep_mock.assert_not_awaited()
 
 
-# --- Task 5.11: cancel and close ---
-
-
 @pytest.mark.asyncio
 async def test_cancel_during_send_returns_cancelled() -> None:
     """cancel during active send yields CANCELLED RunResult."""
@@ -642,9 +612,6 @@ async def test_close_is_idempotent() -> None:
     await facade.close()
 
     mock_bridge.aclose.assert_awaited_once()
-
-
-# --- Task 6.1: NDJSON logging ---
 
 
 @pytest.mark.asyncio
