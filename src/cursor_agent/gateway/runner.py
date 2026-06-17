@@ -57,7 +57,9 @@ def _validate_platform_adapters(
     """Fail fast when YAML enables platforms without a registered adapter."""
     registered = {adapter.platform for adapter in adapters}
     missing = [
-        name for name in enabled_platform_names(gateway_config) if name not in registered
+        name
+        for name in enabled_platform_names(gateway_config)
+        if name not in registered
     ]
     if missing:
         raise ConfigError(
