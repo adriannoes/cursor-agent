@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.errors import AgentBusyError, ConfigError
 from cursor_agent.facade_logging import LogContext
+from cursor_agent.messaging_hooks import (
+    ensure_messaging_hooks,
+    messaging_hook_source_fingerprint,
+)
 from cursor_agent.sdk_facade import RunResult, SdkFacade, StreamCallbacks
+from cursor_agent.tool_profile_policy import (
+    effective_tool_profile,
+    requires_messaging_hooks,
+)
 from cursor_agent.sessions.models import SessionRecord, title_from_first_user_message
 from cursor_agent.sessions.store import SessionStore
 
@@ -71,6 +80,7 @@ class SessionAgentPool:
         self._config = config
         self._locks: dict[str, asyncio.Lock] = {}
         self._resumed_models: dict[str, str] = {}
+        self._messaging_hooks_deployed: dict[str, str] = {}
 
     def _resolve_model(self, model_override: str | None) -> str:
         """Return the effective model for resume/send (override wins over config)."""
@@ -101,24 +111,46 @@ class SessionAgentPool:
             raise ConfigError(_session_not_found_message(session_key, session_id))
         return row
 
+    async def _ensure_messaging_hooks_for_row(self, row: SessionRecord) -> None:
+        """Deploy messaging hooks once per workspace and hook-source fingerprint."""
+        if not requires_messaging_hooks(
+            self._config.tool_profile,
+            row.tool_profile,
+        ):
+            return
+        workspace_key = str(Path(row.workspace).resolve())
+        fingerprint = messaging_hook_source_fingerprint()
+        if self._messaging_hooks_deployed.get(workspace_key) == fingerprint:
+            return
+        try:
+            await asyncio.to_thread(ensure_messaging_hooks, row.workspace)
+        except (ConfigError, FileNotFoundError) as exc:
+            raise ConfigError(str(exc)) from exc
+        self._messaging_hooks_deployed[workspace_key] = fingerprint
+
     async def _ensure_resumed(
         self,
         row: SessionRecord,
         *,
         model_override: str | None = None,
     ) -> None:
-        """Resume the SDK agent when missing or when the effective model changed."""
+        """Resume the SDK agent when missing or when the effective resume key changed."""
         model = self._resolve_model(model_override)
-        if self._resumed_models.get(row.agent_id) == model:
+        tool_profile = effective_tool_profile(
+            self._config.tool_profile, row.tool_profile
+        )
+        resume_key = f"{model}:{tool_profile}"
+        if self._resumed_models.get(row.agent_id) == resume_key:
             return
+        await self._ensure_messaging_hooks_for_row(row)
         await self._facade.resume_agent(
             row.agent_id,
             workspace=row.workspace,
             model=model,
-            tool_profile=row.tool_profile,
+            tool_profile=tool_profile,
             runtime_mode=row.runtime,
         )
-        self._resumed_models[row.agent_id] = model
+        self._resumed_models[row.agent_id] = resume_key
 
     def forget_resumed_agent(self, agent_id: str) -> None:
         """Drop resume cache for ``agent_id`` after agent swaps (e.g. /compress)."""

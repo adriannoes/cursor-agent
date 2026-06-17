@@ -21,14 +21,11 @@ from enum import Enum
 from typing import Any, Protocol, TypeVar
 
 from cursor_agent.facade_logging import LogContext, emit_send_end, emit_send_start
+from cursor_agent.tool_profile_policy import resolve_mcp_servers, sandbox_enabled
 
 _T = TypeVar("_T")
 _RETRY_MAX_ATTEMPTS = 3
 _RETRY_BACKOFF_CAP_SECONDS = 30.0
-_MCP_PROFILE_STUBS: dict[str, dict[str, Any]] = {
-    "coding": {},
-    "messaging": {},
-}
 _MODULE_LOGGER = logging.getLogger(__name__)
 
 
@@ -214,11 +211,11 @@ async def _dispatch_stream_message(
     return delta
 
 
-def _resolve_mcp_servers(tool_profile: str) -> dict[str, Any]:
-    """Resolve MCP servers for a tool profile (stub until PRD-005)."""
-    if tool_profile in _MCP_PROFILE_STUBS:
-        return _MCP_PROFILE_STUBS[tool_profile]
-    return {}
+def _resolve_sandbox_options(tool_profile: str) -> Any | None:
+    """Return SDK sandbox options for a tool profile; messaging enables sandbox."""
+    if sandbox_enabled(tool_profile):
+        return SandboxOptions(enabled=True)
+    return None
 
 
 def _is_retryable_error(exc: BaseException) -> bool:
@@ -453,18 +450,28 @@ class FakeSdkFacade:
 
 
 # Task 5.2: first cursor_sdk import in this module.
-from cursor_sdk import AsyncClient, LocalAgentOptions  # noqa: E402
+from cursor_sdk import AsyncClient, LocalAgentOptions, SandboxOptions  # noqa: E402
 
 
 def _build_local_agent_options(
     *,
     workspace: str,
     setting_sources: list[str] | None,
+    tool_profile: str = "coding",
 ) -> LocalAgentOptions:
-    """Build SDK local options with explicit cwd and optional setting_sources."""
-    if setting_sources is None:
+    """Build SDK local options with cwd, optional setting_sources, and sandbox."""
+    sandbox_options = _resolve_sandbox_options(tool_profile)
+    if setting_sources is None and sandbox_options is None:
         return LocalAgentOptions(cwd=workspace)
-    return LocalAgentOptions(cwd=workspace, setting_sources=setting_sources)
+    if setting_sources is None:
+        return LocalAgentOptions(cwd=workspace, sandbox_options=sandbox_options)
+    if sandbox_options is None:
+        return LocalAgentOptions(cwd=workspace, setting_sources=setting_sources)
+    return LocalAgentOptions(
+        cwd=workspace,
+        setting_sources=setting_sources,
+        sandbox_options=sandbox_options,
+    )
 
 
 class AsyncSdkFacade:
@@ -528,15 +535,29 @@ class AsyncSdkFacade:
             self._local_setting_sources if runtime_mode == "local" else None
         )
 
+        create_options: dict[str, Any] | None = None
+        if tool_profile == "messaging":
+            create_options = {"mcp_servers": resolve_mcp_servers(tool_profile)}
+
         async def _create() -> str:
-            agent = await client.agents.create(
-                model=model,
-                local=_build_local_agent_options(
-                    workspace=workspace,
-                    setting_sources=local_setting_sources,
-                ),
-                api_key=self._api_key,
+            local_options = _build_local_agent_options(
+                workspace=workspace,
+                setting_sources=local_setting_sources,
+                tool_profile=tool_profile,
             )
+            if create_options is None:
+                agent = await client.agents.create(
+                    model=model,
+                    local=local_options,
+                    api_key=self._api_key,
+                )
+            else:
+                agent = await client.agents.create(
+                    create_options,
+                    model=model,
+                    local=local_options,
+                    api_key=self._api_key,
+                )
             await agent.__aenter__()
             self._agents[agent.agent_id] = agent
             self._agent_tool_profiles[agent.agent_id] = tool_profile
@@ -566,8 +587,9 @@ class AsyncSdkFacade:
             "local": _build_local_agent_options(
                 workspace=workspace,
                 setting_sources=local_setting_sources,
+                tool_profile=profile,
             ),
-            "mcp_servers": _resolve_mcp_servers(profile),
+            "mcp_servers": resolve_mcp_servers(profile),
         }
         if model is not None:
             options["model"] = model

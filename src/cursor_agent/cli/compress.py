@@ -42,28 +42,20 @@ def _packaged_compress_prompt_path() -> Path:
     return Path(str(packaged))
 
 
-def _compress_prompt_paths() -> tuple[Path, ...]:
-    """Return deterministic prompt locations (packaged first, then repo checkout)."""
-    module_dir = Path(__file__).resolve().parent
-    checkout = module_dir.parents[2] / "docs" / "prompts" / "compress.txt"
-    return (_packaged_compress_prompt_path(), checkout)
-
-
 def load_compress_prompt() -> str:
-    """Load the versioned /compress summary prompt from packaged or checkout paths.
+    """Load the versioned /compress summary prompt from the packaged wheel path.
 
     Example:
         >>> "## Goal" in load_compress_prompt()
         True
     """
-    for path in _compress_prompt_paths():
-        if path.is_file():
-            return _read_prompt_text(path)
+    path = _packaged_compress_prompt_path()
+    if path.is_file():
+        return _read_prompt_text(path)
 
-    searched = ", ".join(str(path) for path in _compress_prompt_paths())
     msg = (
-        f"compress prompt not found: searched [{searched}], "
-        "expected cursor_agent/prompts/compress.txt or docs/prompts/compress.txt"
+        f"compress prompt not found: searched [{path}], "
+        "expected cursor_agent/prompts/compress.txt in the installed package"
     )
     raise ConfigError(msg)
 

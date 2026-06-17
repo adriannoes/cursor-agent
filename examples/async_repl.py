@@ -70,7 +70,7 @@ async def run_two_turn_demo(workspace: str) -> float:
         SystemExit: When the second turn does not reference the first-turn token.
     """
     # Local-first for CLI/gateway (launch_bridge + local cwd); cloud reserved for
-    # batch jobs — aligned with FR-7 and STRATEGY.md section 7.
+    # batch jobs.
     async with await AsyncClient.launch_bridge(workspace=workspace) as client:
         async with await client.agents.create(
             model=COMPOSER_MODEL,

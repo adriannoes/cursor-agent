@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "command": "./pre-tool-deny-write.sh",
+        "matcher": "Write|StrReplace|Delete|Task|write|edit|strreplace|delete|task",
+        "failClosed": true
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "./shell-gate.sh",
+        "failClosed": true
+      }
+    ],
+    "beforeMCPExecution": [
+      {
+        "command": "./mcp-deny.sh",
+        "failClosed": true
+      }
+    ],
+    "beforeReadFile": [
+      {
+        "command": "./read-sensitive-deny.sh",
+        "failClosed": true
+      }
+    ]
+  }
+}
