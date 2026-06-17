@@ -80,6 +80,18 @@ A Fase 2 evolui o CLI básico (PRD-003) para uma experiência **Hermes-like**: s
 - **Testes:** `FakeSdkFacade` + pytest; saga `/compress` testável sem API key.
 - **Logs:** reutilizar schema JSON v1 ([ADR-018](../decisions/ADR-018-observability-logs.md)) em eventos de comando.
 
+### Retro from PRD-003 (CLI REPL) — real contracts to build on
+
+> Recorded per [ADR-022](../decisions/ADR-022-tdd-prd-feedback-loop.md) after delivering PRD-003. English per repo docs convention.
+
+- **REPL loop signature (where the `CommandRouter` plugs in — T1.4):**
+  `run_repl(pool, session_key, store, *, config, facade, reader, writer, auto_resume=True) -> RunStatus | None` in `src/cursor_agent/cli/repl_session.py`. The loop already splits `/`-prefixed input from free text; the router should replace the inline `if stripped == "/quit" / startswith("/")` branch.
+- **Slash handlers location:** `src/cursor_agent/cli/slash_commands.py` already hosts `handle_new(*, facade, store, config, session_key, writer)` and `handle_resume(*, pool, session_key, arg, writer)`. New P0–P2 handlers should follow the same keyword-only, dependency-injected shape (no hidden globals).
+- **Runtime/bootstrap reuse:** `repl_runtime(config, *, store_path=None, facade=None)` (in `cli/startup.py`) yields `(pool, session_key, store, facade)`. `/stop` (T2.2) calls `facade.cancel(agent_id)`; `/compress` (T4) calls `facade.create_agent(...)` + `store.update_metadata(...)`/`store.create(...)` — all already available without new wiring.
+- **Streaming:** `build_stream_callbacks(writer)` (in `cli/stream_renderer.py`) maps `on_assistant_text` deltas to the injected `writer`. `StreamCallbacks` also exposes `on_tool_start`/`on_tool_end` (unused by the CLI today) — T3.2 badges should wire these. Keep `writer` injectable so Rich stays out of unit tests.
+- **Exit codes:** centralized in `cli/exit_codes.py` (`exit_code_for_status`, `exit_code_for_error`). `/stop` resolves to `RunStatus.CANCELLED` → exit 0; keep this mapping when wiring cancellation.
+- **`rich` dependency:** NOT yet declared (PRD-003 added only `typer>=0.12`). T3 must `uv add rich` before the Rich display work. Typer pulls Rich transitively for `--help`, but the project must depend on it explicitly.
+
 ## 8. Métricas de sucesso
 
 - 8+ comandos implementados e listados em `/help`.
@@ -93,6 +105,12 @@ A Fase 2 evolui o CLI básico (PRD-003) para uma experiência **Hermes-like**: s
 - `/personality` — backlog Fase 5; personalidade via `.cursor/rules` apenas ([STRATEGY §9.2](../STRATEGY.md#92-contexto-e-personalidade)).
 - `/usage` deve exibir custo acumulado da sessão ou só do último turn?
 - Badge de tool: mostrar argumentos resumidos ou só o nome da tool?
+
+**Opened by the PRD-003 retro (resolve before/while implementing):**
+
+- `/retry` needs the "last user message", which `run_repl` does not persist today — PRD-004 must track it in REPL state (consider a small `ReplState` object when introducing the `CommandRouter`, since `active_session_id` is currently a local variable in `run_repl`).
+- `/model [id]` mid-session: confirm whether changing the model requires `facade.resume_agent(..., model=...)` (re-bind) or only affects the next `send`. The facade `resume_agent` already accepts an optional `model`.
+- `/usage`: `RunResult.usage` is `dict | None`; `FakeSdkFacade` returns `None` and the real usage shape is still uncalibrated (carried over from PRD-001). Decide the displayed fields once a real run is observed.
 
 ## 10. Tarefas de implementação
 
@@ -170,6 +188,15 @@ Ordem sugerida: router/registry → handlers P0 → saga compress → Rich displ
 ### Retroalimentação
 
 **Após concluir PRD-004:** revisar e atualizar [PRD-005](PRD-005-messaging-profile.md) (§7, §9, §11) antes do gate messaging.
+
+**Learnings received from PRD-003 (CLI REPL):**
+
+- [x] REPL turn loop, slash dispatch, and `active_session_id` state are implemented in `cli/repl_session.py`; the `CommandRouter` (T1) replaces the inline `/`-branch rather than re-implementing the loop.
+- [x] Resolution order is NOT yet implemented (PRD-003 only handles `/quit`, `/new`, `/resume`, free text). T1.2 (built-in → skills → free message) is greenfield on top of the existing dispatch point.
+- [x] `StreamCallbacks.on_tool_start`/`on_tool_end` exist but the CLI renderer ignores them today — tool badges (T3.2) are net-new wiring, not a refactor.
+- [x] Command-level NDJSON events do not exist yet; only `facade.send` start/end are emitted (ADR-018). T-level work must add command events.
+- [x] Destructive tools remain reachable: `tool_profile` resolves to an empty MCP map (stub), so no allowlist/hooks gate exists yet — reinforces the PRD-005 motivation.
+- [x] Exit-code contract is live in `cli/exit_codes.py`; `/stop` → `CANCELLED` → 0 must reuse it.
 
 **Aprendizados a registrar:**
 
