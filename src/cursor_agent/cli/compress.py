@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib import resources
 from pathlib import Path
 
 from cursor_agent.config.loader import CursorAgentConfig
@@ -23,16 +24,33 @@ class CompressResult:
     new_agent_id: str
 
 
+def _read_prompt_text(path: Path) -> str:
+    """Read and validate a compress prompt file."""
+    text = path.read_text(encoding="utf-8")
+    if not text.strip():
+        msg = (
+            f"compress prompt empty: received path={path!r}, "
+            "expected non-empty UTF-8 text"
+        )
+        raise ConfigError(msg)
+    return text
+
+
+def _packaged_compress_prompt_path() -> Path:
+    """Return the packaged prompt path via importlib.resources."""
+    packaged = resources.files("cursor_agent").joinpath("prompts/compress.txt")
+    return Path(str(packaged))
+
+
 def _compress_prompt_paths() -> tuple[Path, ...]:
     """Return deterministic prompt locations (packaged first, then repo checkout)."""
     module_dir = Path(__file__).resolve().parent
-    packaged = module_dir.parent / "prompts" / "compress.txt"
     checkout = module_dir.parents[2] / "docs" / "prompts" / "compress.txt"
-    return (packaged, checkout)
+    return (_packaged_compress_prompt_path(), checkout)
 
 
 def load_compress_prompt() -> str:
-    """Load the versioned /compress summary prompt from a fixed project path.
+    """Load the versioned /compress summary prompt from packaged or checkout paths.
 
     Example:
         >>> "## Goal" in load_compress_prompt()
@@ -40,19 +58,12 @@ def load_compress_prompt() -> str:
     """
     for path in _compress_prompt_paths():
         if path.is_file():
-            text = path.read_text(encoding="utf-8")
-            if not text.strip():
-                msg = (
-                    f"compress prompt empty: received path={path!r}, "
-                    "expected non-empty UTF-8 text"
-                )
-                raise ConfigError(msg)
-            return text
+            return _read_prompt_text(path)
 
     searched = ", ".join(str(path) for path in _compress_prompt_paths())
     msg = (
         f"compress prompt not found: searched [{searched}], "
-        "expected docs/prompts/compress.txt in checkout or packaged prompts/"
+        "expected cursor_agent/prompts/compress.txt or docs/prompts/compress.txt"
     )
     raise ConfigError(msg)
 

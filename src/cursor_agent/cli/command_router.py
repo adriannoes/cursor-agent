@@ -84,7 +84,12 @@ class CommandHandled:
     """Handler completed without changing the active session id."""
 
 
-CommandResult = QuitRequested | SessionActivated | CommandHandled | None
+@dataclass(frozen=True)
+class CommandFailed:
+    """Handler completed after a user-visible failure (ADR-018 error outcome)."""
+
+
+CommandResult = QuitRequested | SessionActivated | CommandHandled | CommandFailed | None
 
 
 class CommandHandler(Protocol):
@@ -212,6 +217,8 @@ def _command_outcome(result: CommandResult | None) -> str:
     """Map handler results to stable NDJSON outcome values."""
     if isinstance(result, QuitRequested):
         return "quit"
+    if isinstance(result, CommandFailed):
+        return "error"
     return "success"
 
 

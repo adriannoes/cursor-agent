@@ -531,6 +531,105 @@ async def test_model_sets_override_and_resumes_agent(
     assert model_calls[0]["agent_id"] == row.agent_id
 
 
+async def test_model_override_applies_to_new_session(
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """/model then /new creates the agent with the override instead of config.model."""
+    facade = CreateAgentTrackingFacade(scripted_replies={"default": "ok"})
+    store = SessionStore(tmp_path / "sessions.db")
+    await store.initialize()
+    session_key = session_key_for(config)
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    output: list[str] = []
+
+    await drive_repl(
+        pool,
+        session_key,
+        store,
+        config,
+        facade,
+        lines=("/model composer-2.5-fast", "/new", "/quit"),
+        writer=output.append,
+        auto_resume=False,
+    )
+
+    assert len(facade.create_agent_calls) == 1
+    assert facade.create_agent_calls[0]["model"] == "composer-2.5-fast"
+
+
+async def test_repl_free_text_passes_model_override_to_pool(
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """Free-text sends thread ReplState.model_override into pool.send."""
+    facade = FakeSdkFacade(scripted_replies={"default": "ok"})
+    store = SessionStore(tmp_path / "sessions.db")
+    await store.initialize()
+    session_key = session_key_for(config)
+    await seed_session(store, facade, session_key)
+    pool = SendSpyPool(store=store, facade=facade, config=config)
+    output: list[str] = []
+
+    await drive_repl(
+        pool,
+        session_key,
+        store,
+        config,
+        facade,
+        lines=("/model composer-2.5-fast", "hello", "/quit"),
+        writer=output.append,
+        auto_resume=True,
+    )
+
+    assert len(pool.send_calls) == 1
+    assert pool.send_calls[0]["model_override"] == "composer-2.5-fast"
+
+
+async def test_post_compress_free_text_targets_new_agent(
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """A free-text turn after /compress resumes and sends via the swapped agent_id."""
+    store = SessionStore(tmp_path / "sessions.db")
+    await store.initialize()
+    session_key = session_key_for(config)
+    facade = _CompressSendSpyFacade(
+        scripted_replies={"default": _SUMMARY_REPLY},
+        store=store,
+        session_key=session_key,
+        session_id=None,
+    )
+    session_id = await seed_session(
+        store,
+        facade,
+        session_key,
+        workspace=str(tmp_path),
+    )
+    facade._status_session_id = session_id
+    row_before = await store.resolve(session_key, session_id=session_id)
+    assert row_before is not None
+    previous_agent_id = row_before.agent_id
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    output: list[str] = []
+
+    await drive_repl(
+        pool,
+        session_key,
+        store,
+        config,
+        facade,
+        lines=("/compress", "follow-up", "/quit"),
+        writer=output.append,
+        auto_resume=True,
+    )
+
+    row_after = await store.resolve(session_key, session_id=session_id)
+    assert row_after is not None
+    assert row_after.agent_id != previous_agent_id
+    assert facade.send_calls[-1]["agent_id"] == row_after.agent_id
+
+
 async def test_retry_without_previous_message_does_not_send(
     config: CursorAgentConfig,
     tmp_path: Path,
@@ -759,6 +858,43 @@ async def test_compress_failure_keeps_active_session_and_shows_error(
     assert row_after.agent_id == previous_agent_id
     assert any(line.startswith("Error:") for line in output)
     assert _SUMMARY_REPLY not in "\n".join(output)
+
+
+async def test_compress_failure_records_error_command_outcome(
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """Handler-internal /compress failures emit command_end outcome=error (ADR-018)."""
+    logger, records = _capture_command_logs()
+    facade = _CompressSendSpyFacade(
+        scripted_replies={"default": _SUMMARY_REPLY},
+        fail_on_summary_delivery=True,
+    )
+    store = SessionStore(tmp_path / "sessions.db")
+    await store.initialize()
+    session_key = session_key_for(config)
+    await seed_session(store, facade, session_key, workspace=str(tmp_path))
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    output: list[str] = []
+
+    await run_repl(
+        pool,
+        session_key,
+        store,
+        config=config,
+        facade=facade,
+        reader=line_reader("/compress", "/quit"),
+        writer=output.append,
+        auto_resume=True,
+        logger=logger,
+    )
+
+    compress_end = next(
+        p
+        for p in _command_log_payloads(records)
+        if p["event"] == "command_end" and p["command"] == "compress"
+    )
+    assert compress_end["outcome"] == "error"
 
 
 async def test_command_log_emits_start_and_end_ndjson(

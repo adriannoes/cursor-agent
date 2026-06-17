@@ -47,6 +47,15 @@ def test_load_compress_prompt_reads_versioned_file() -> None:
     assert "injected as the first message" in prompt
 
 
+def test_load_compress_prompt_reads_packaged_file() -> None:
+    """load_compress_prompt resolves the wheel-shipped prompt under cursor_agent."""
+    from importlib import resources
+
+    packaged = resources.files("cursor_agent").joinpath("prompts/compress.txt")
+    assert packaged.is_file()
+    assert load_compress_prompt() == packaged.read_text(encoding="utf-8")
+
+
 async def test_compress_session_requires_active_session(
     config: CursorAgentConfig,
     tmp_path: Path,
