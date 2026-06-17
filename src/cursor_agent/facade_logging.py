@@ -1,4 +1,4 @@
-"""NDJSON logging helpers for SdkFacade send lifecycle (ADR-018, ADR-025)."""
+"""NDJSON logging helpers for SdkFacade send and command lifecycle (ADR-018, ADR-025)."""
 
 from __future__ import annotations
 
@@ -107,5 +107,92 @@ def emit_send_end(
         run_id=run_id,
         duration_ms=duration_ms,
         status=status,
+    )
+    logger.info(json.dumps(payload, separators=(",", ":")))
+
+
+def _command_payload(
+    *,
+    event: str,
+    command: str,
+    session_id: str | None,
+    session_key: str | None,
+    agent_id: str | None = None,
+    duration_ms: int | None = None,
+    outcome: str | None = None,
+) -> dict[str, Any]:
+    """Build NDJSON schema v1 fields for command lifecycle events."""
+    payload: dict[str, Any] = {
+        "v": _LOG_SCHEMA_VERSION,
+        "ts": _utc_timestamp(),
+        "level": "info",
+        "event": event,
+        "command": command,
+        "session_id": session_id,
+        "session_key": session_key,
+    }
+    if agent_id is not None:
+        payload["agent_id"] = _redact(agent_id)
+    if duration_ms is not None:
+        payload["duration_ms"] = duration_ms
+    if outcome is not None:
+        payload["outcome"] = outcome
+    return payload
+
+
+def emit_command_start(
+    logger: logging.Logger,
+    *,
+    command: str,
+    session_id: str | None = None,
+    session_key: str | None = None,
+    agent_id: str | None = None,
+) -> None:
+    """Emit NDJSON ``command_start`` before a slash command handler runs.
+
+    Example:
+        emit_command_start(
+            logger, command="help", session_id="sess-1", session_key="cli:default:abc"
+        )
+    """
+    payload = _command_payload(
+        event="command_start",
+        command=command,
+        session_id=session_id,
+        session_key=session_key,
+        agent_id=agent_id,
+    )
+    logger.info(json.dumps(payload, separators=(",", ":")))
+
+
+def emit_command_end(
+    logger: logging.Logger,
+    *,
+    command: str,
+    outcome: str,
+    duration_ms: int,
+    session_id: str | None = None,
+    session_key: str | None = None,
+    agent_id: str | None = None,
+) -> None:
+    """Emit NDJSON ``command_end`` after a slash command handler completes.
+
+    Example:
+        emit_command_end(
+            logger,
+            command="quit",
+            outcome="quit",
+            duration_ms=3,
+            session_key="cli:default:abc",
+        )
+    """
+    payload = _command_payload(
+        event="command_end",
+        command=command,
+        session_id=session_id,
+        session_key=session_key,
+        agent_id=agent_id,
+        duration_ms=duration_ms,
+        outcome=outcome,
     )
     logger.info(json.dumps(payload, separators=(",", ":")))

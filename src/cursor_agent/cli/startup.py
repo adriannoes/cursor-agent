@@ -57,6 +57,7 @@ async def repl_runtime(
     else:
         async with AsyncSdkFacade(  # pragma: no cover
             api_key=os.environ.get("CURSOR_API_KEY"),
+            local_setting_sources=config.runtime.local.setting_sources,
         ) as real:
             pool = SessionAgentPool(store=store, facade=real, config=config)
             yield pool, session_key, store, real
