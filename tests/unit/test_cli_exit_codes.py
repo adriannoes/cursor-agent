@@ -58,3 +58,26 @@ def test_sessions_list_exits_1_on_broken_config(
     monkeypatch.setenv("CURSOR_AGENT__RUNTIME__MODE", "invalid")
     result = CliRunner().invoke(app, ["sessions", "list"])
     assert result.exit_code == 1
+
+
+def test_default_invoke_exits_1_on_broken_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default REPL invoke with invalid config exits 1 (startup failure, FR-10)."""
+    monkeypatch.setenv("CURSOR_AGENT__RUNTIME__MODE", "invalid")
+    result = CliRunner().invoke(app, [])
+    assert result.exit_code == 1
+
+
+def test_default_invoke_exits_2_on_run_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default REPL ending after a RunStatus.ERROR turn exits 2 (FR-10)."""
+
+    async def fake_run_default(config: object) -> RunStatus:
+        _ = config
+        return RunStatus.ERROR
+
+    monkeypatch.setattr("cursor_agent.cli.app.run_default", fake_run_default)
+    result = CliRunner().invoke(app, [])
+    assert result.exit_code == 2
