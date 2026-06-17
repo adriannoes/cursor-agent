@@ -5,8 +5,10 @@ from __future__ import annotations
 import stat
 from pathlib import Path
 
+import pytest
 from pytest import MonkeyPatch
 
+from cursor_agent.errors import ConfigError
 from tests.unit.messaging_hook_test_helpers import REQUIRED_HOOK_FILES
 
 
@@ -85,3 +87,20 @@ def test_ensure_messaging_hooks_installs_once(
         user_hooks_dir=user_hooks,
     )
     assert install_calls == 1
+
+
+def test_resolve_missing_hook_sources_raises_config_error(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Missing hook sources must raise ConfigError with an actionable message."""
+    from cursor_agent import messaging_hooks
+
+    messaging_hooks.messaging_hook_source_fingerprint.cache_clear()
+    monkeypatch.setattr(
+        messaging_hooks,
+        "_is_complete_hook_source_dir",
+        lambda _directory: False,
+    )
+
+    with pytest.raises(ConfigError, match="messaging hook sources not found"):
+        messaging_hooks.resolve_messaging_hook_source_dir()

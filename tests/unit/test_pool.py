@@ -10,6 +10,7 @@ import pytest
 from cursor_agent.config import CursorAgentConfig, load_config
 from cursor_agent.errors import AgentBusyError, AuthError, ConfigError, CursorAgentError
 from cursor_agent.facade_logging import LogContext
+from cursor_agent.messaging_hooks import ensure_messaging_hooks
 from cursor_agent.pool import SessionAgentPool
 from cursor_agent.sdk_facade import FakeSdkFacade, RunResult, RunStatus, StreamCallbacks
 from cursor_agent.sessions.models import SessionCreateParams
@@ -669,3 +670,85 @@ async def test_resume_stays_coding_when_config_and_stored_are_coding(
 
     assert len(facade.resume_calls) == 1
     assert facade.resume_calls[0]["tool_profile"] == "coding"
+
+
+@pytest.mark.asyncio
+async def test_messaging_hook_deploy_cached_per_workspace(
+    store: SessionStore,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repeated pool get/send must not redeploy messaging hooks for one workspace."""
+    session_key = "cli:default:hookcache1"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    facade = ResumeTrackingFacade()
+    await _seed_session(
+        store,
+        facade,
+        session_key,
+        workspace=str(workspace),
+        tool_profile="messaging",
+    )
+
+    ensure_calls = 0
+    original_ensure = ensure_messaging_hooks
+
+    def counting_ensure(*args: object, **kwargs: object) -> Path:
+        nonlocal ensure_calls
+        ensure_calls += 1
+        return original_ensure(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "cursor_agent.pool.ensure_messaging_hooks",
+        counting_ensure,
+    )
+
+    config = _config_with_tool_profile("messaging")
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    await pool.get(session_key)
+    await pool.get(session_key)
+    await pool.send(session_key, "hello again")
+
+    assert ensure_calls == 1
+    assert (workspace / ".cursor" / "hooks.json").is_file()
+
+
+@pytest.mark.asyncio
+async def test_messaging_hook_deploy_uses_to_thread(
+    store: SessionStore,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Messaging hook deploy must run off the event loop via asyncio.to_thread."""
+    session_key = "cli:default:hookthread1"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    facade = ResumeTrackingFacade()
+    await _seed_session(
+        store,
+        facade,
+        session_key,
+        workspace=str(workspace),
+        tool_profile="messaging",
+    )
+
+    to_thread_calls: list[object] = []
+    original_to_thread = asyncio.to_thread
+
+    async def recording_to_thread(
+        func: object,
+        /,
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        to_thread_calls.append(func)
+        return await original_to_thread(func, *args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", recording_to_thread)
+
+    config = _config_with_tool_profile("messaging")
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    await pool.get(session_key)
+
+    assert ensure_messaging_hooks in to_thread_calls
