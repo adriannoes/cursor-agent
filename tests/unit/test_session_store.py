@@ -25,9 +25,6 @@ def _expected_workspace_hash(cwd: Path | str) -> str:
     return hashlib.sha256(absolute.encode()).hexdigest()[:8]
 
 
-# --- Task 2.1: session_key and title helpers ---
-
-
 def test_build_cli_session_key_default_profile(tmp_path: Path) -> None:
     """session_key uses cli:{profile}:{sha256(abs(cwd))[:8]} with default profile."""
     workspace_hash = _expected_workspace_hash(tmp_path)
@@ -89,8 +86,6 @@ def test_title_from_first_user_message_rejects_empty() -> None:
     with pytest.raises(ValueError, match="message"):
         title_from_first_user_message("   ")
 
-
-# --- Task 2.3: SQLite schema and index ---
 
 _SESSIONS_COLUMNS = frozenset(
     {
@@ -170,9 +165,6 @@ async def test_session_store_schema_initialize_is_idempotent(tmp_path: Path) -> 
 
     columns = await _fetch_table_info(db_path, "sessions")
     assert len(columns) == len(_SESSIONS_COLUMNS)
-
-
-# --- Task 2.5: create, resolve, list, touch ---
 
 
 class _SteppingClock:
@@ -363,9 +355,6 @@ async def test_session_store_touch_updates_updated_at(tmp_path: Path) -> None:
     assert reloaded.updated_at == _iso(t_touch)
 
 
-# --- Task 2.7: metadata JSON merge/replace ---
-
-
 @pytest.mark.asyncio
 async def test_session_store_metadata_merge_preserves_existing_keys(
     tmp_path: Path,
@@ -552,9 +541,6 @@ async def test_session_store_touch_raises_for_missing_session(tmp_path: Path) ->
 
     with pytest.raises(ValueError, match="session not found"):
         await store.touch(missing_id)
-
-
-# --- Task 5.1: agent_id replacement for /compress (ADR-011) ---
 
 
 @pytest.mark.asyncio

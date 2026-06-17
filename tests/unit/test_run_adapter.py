@@ -1,4 +1,4 @@
-"""Unit tests for SDK wait-result → RunResult adapter (PRD-001 task 3.1)."""
+"""Unit tests for SDK wait-result → RunResult adapter (PRD-001)."""
 
 from __future__ import annotations
 
