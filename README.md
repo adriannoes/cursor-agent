@@ -4,26 +4,15 @@
 
 Clean-room agent inspired by [Hermes Agent](https://github.com/NousResearch/hermes-agent) behavior and [OpenClaw](https://github.com/openclaw/openclaw) gateway patterns — reference docs and codebases may be studied for patterns, with **zero copied code** (not a fork). Powered by the [Cursor Python SDK](https://cursor.com/docs/sdk/python) and **Composer 2.5**.
 
-Orchestration layer only — the SDK owns the agent loop, tools, and inference. Related projects by the same author (e.g. shellclaw) are **separate** — see [STRATEGY.md §1.4](docs/STRATEGY.md#14-relação-com-outros-projetos).
-
-## Status
-
-**Planning** — see [docs/STRATEGY.md](docs/STRATEGY.md) v1.2.
+Orchestration layer only — the SDK owns the agent loop, tools, and inference.
 
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
-| [AGENTS.md](AGENTS.md) | **Agent entry point** — read order, map, conventions |
-| [docs/README.md](docs/README.md) | Documentation hub |
-| [docs/STRATEGY.md](docs/STRATEGY.md) | Strategy, architecture, Phases 0–4 |
-| [docs/DECISIONS.md](docs/DECISIONS.md) | Architecture Decision Records (26 ADRs) |
-| [docs/prd/README.md](docs/prd/README.md) | PRDs with tasks and subtasks |
-| [docs/gateway-security.md](docs/gateway-security.md) | Messaging threat model |
-| [docs/contracts/async-sdk-facade.md](docs/contracts/async-sdk-facade.md) | Facade technical contract |
-| [docs/BACKLOG-PHASE5.md](docs/BACKLOG-PHASE5.md) | Post-MVP Hermes parity backlog |
-
-Decisions in STRATEGY §2 are expanded in ADRs (including rejected options with pros/cons).
+| [AGENTS.md](AGENTS.md) | **Agent entry point** — repo map, conventions, verification |
+| [SECURITY.md](SECURITY.md) | Messaging threat model, hooks, and acceptance probes |
+| [.env.example](.env.example) | Environment variable reference |
 
 ## Prerequisites
 
@@ -33,16 +22,18 @@ Decisions in STRATEGY §2 are expanded in ADRs (including rejected options with 
 
 ## Development hooks (optional)
 
-For local work with `tool_profile: coding`, you may add an optional `.cursor/hooks.json` in your workspace to moderate tool behavior (for example, shell gates). **cursor-agent does not install this file** — it is a documented developer convenience only. See the [Cursor Hooks](https://cursor.com/docs/hooks) schema and wire hook scripts under `.cursor/hooks/` as needed.
+For local work with `tool_profile: coding`, you may add an optional `.cursor/hooks.json` in your workspace to moderate tool behavior (for example, shell gates). **cursor-agent does not install messaging deny hooks for `coding`** — any dev hooks are a documented developer convenience only. See the [Cursor Hooks](https://cursor.com/docs/hooks) schema and wire hook scripts under `.cursor/hooks/` as needed.
 
-Messaging deny hooks, sandbox, and MCP policy are **not** covered here. Those are defined in [gateway-security.md](docs/gateway-security.md) and implemented in [PRD-005](docs/prd/PRD-005-messaging-profile.md).
+For `tool_profile: messaging`, deny hooks are **auto-deployed** on CLI startup to `.cursor/hooks.json` and `.cursor/hooks/messaging/*.sh` in the active workspace (source versioned under `hooks/messaging/` in the repo). Sandbox and MCP policy are defined in [SECURITY.md](SECURITY.md).
 
 ## Auto-approve risk (`coding` vs `messaging`)
 
-The default **`coding`** profile runs the local SDK with **auto-approve** — tools execute without interactive prompts. That posture is a **developer convenience**, not a security boundary for public gateways or untrusted input.
+The default **`coding`** profile runs the local SDK with **auto-approve** — tools execute without interactive prompts. That posture is a **developer convenience**, not a security boundary for public gateways or untrusted input. Optional dev hooks do not make `coding` gateway-safe.
 
-For bots and gateways, use `tool_profile: messaging` with deny hooks, sandbox (network off), and empty MCP as specified in [gateway-security.md](docs/gateway-security.md). Do not rely on `coding` + auto-approve outside a trusted local dev session.
+The **`messaging`** profile is read-only over the workspace: it auto-deploys deny hooks to `.cursor/hooks/messaging/`, passes `mcp_servers: {}`, and enables `sandbox_options.enabled: true` (network off). Use `cursor-agent --profile messaging` to validate hooks locally before gateway work.
+
+For bots and gateways, use `tool_profile: messaging` as specified in [SECURITY.md](SECURITY.md). Do not rely on `coding` + auto-approve outside a trusted local dev session.
 
 ## License
 
-MIT — see [ADR-019](docs/decisions/ADR-019-packaging-license.md).
+MIT — see [LICENSE](LICENSE).

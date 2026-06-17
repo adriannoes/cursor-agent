@@ -32,6 +32,11 @@ htmlcov/
 # Cursor local agent state (if created in-repo during dev)
 .cursor-agent-state/
 
-# Git worktrees (see .cursor/skills/using-git-worktrees/SKILL.md)
+# Internal planning artifacts and local agent workflows (not part of the public repo)
+docs/
+engineering/
+.cursor/
+
+# Git worktrees
 .worktrees/
 worktrees/

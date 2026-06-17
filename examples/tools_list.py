@@ -13,7 +13,7 @@ Regenerate snapshot
 -------------------
 ::
 
-    CURSOR_API_KEY=... uv run python examples/tools_list.py > docs/sdk-tools-snapshot.txt
+    CURSOR_API_KEY=... uv run python examples/tools_list.py > sdk-tools-snapshot.txt
 
 Requires ``CURSOR_API_KEY`` in the environment (see ``.env.example``). Do not commit secrets.
 """
@@ -34,7 +34,7 @@ COMPOSER_MODEL = "composer-2.5"
 CURSOR_SDK_PIN = "0.1.7"
 TOOL_PROBE_PROMPT = (
     "Use your repository tools, not memory, to do both tasks: read README.md and "
-    "search for the string PRD-000 in engineering/tasks/tasks-PRD-000-sdk-spike.md. "
+    "search for the string cursor-agent in pyproject.toml. "
     "Reply with DONE after using the tools."
 )
 CURSOR_DASHBOARD_URL = "https://cursor.com/dashboard/integrations"
