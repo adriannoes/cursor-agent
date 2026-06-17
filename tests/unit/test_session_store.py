@@ -474,3 +474,81 @@ async def test_session_store_metadata_rejects_non_serializable_payload(
     bad_payload: dict[str, object] = {"handler": object()}
     with pytest.raises(ValueError, match="metadata"):
         await store.update_metadata(created.id, bad_payload, merge=True)
+
+
+@pytest.mark.asyncio
+async def test_session_store_update_title_sets_title(tmp_path: Path) -> None:
+    """update_title(session_id, title) persists a non-empty title."""
+    t0 = datetime(2026, 6, 16, 12, 0, 0, tzinfo=UTC)
+    store = await _initialized_store(tmp_path, _SteppingClock([t0]))
+    session_key = build_cli_session_key(tmp_path)
+
+    created = await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id="agent-title",
+            workspace=str(tmp_path.resolve()),
+            runtime="local",
+        )
+    )
+
+    updated = await store.update_title(created.id, "Renamed session")
+    assert updated.title == "Renamed session"
+
+    reloaded = await store.resolve(session_key, created.id)
+    assert reloaded is not None
+    assert reloaded.title == "Renamed session"
+
+
+@pytest.mark.asyncio
+async def test_session_store_update_title_rejects_empty_title(tmp_path: Path) -> None:
+    """update_title rejects empty titles before touching the database."""
+    t0 = datetime(2026, 6, 16, 12, 0, 0, tzinfo=UTC)
+    store = await _initialized_store(tmp_path, _SteppingClock([t0]))
+    session_key = build_cli_session_key(tmp_path)
+
+    created = await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id="agent-title",
+            workspace=str(tmp_path.resolve()),
+            runtime="local",
+        )
+    )
+
+    with pytest.raises(ValueError, match="title"):
+        await store.update_title(created.id, "")
+
+
+@pytest.mark.asyncio
+async def test_session_store_update_title_raises_for_missing_session(
+    tmp_path: Path,
+) -> None:
+    """update_title raises when session_id does not exist."""
+    store = await _initialized_store(tmp_path, _SteppingClock([datetime.now(tz=UTC)]))
+    missing_id = str(uuid.uuid4())
+
+    with pytest.raises(ValueError, match="session not found"):
+        await store.update_title(missing_id, "orphan")
+
+
+@pytest.mark.asyncio
+async def test_session_store_update_metadata_raises_for_missing_session(
+    tmp_path: Path,
+) -> None:
+    """update_metadata raises when session_id does not exist."""
+    store = await _initialized_store(tmp_path, _SteppingClock([datetime.now(tz=UTC)]))
+    missing_id = str(uuid.uuid4())
+
+    with pytest.raises(ValueError, match="session not found"):
+        await store.update_metadata(missing_id, {"status": "idle"}, merge=True)
+
+
+@pytest.mark.asyncio
+async def test_session_store_touch_raises_for_missing_session(tmp_path: Path) -> None:
+    """touch raises when session_id does not exist."""
+    store = await _initialized_store(tmp_path, _SteppingClock([datetime.now(tz=UTC)]))
+    missing_id = str(uuid.uuid4())
+
+    with pytest.raises(ValueError, match="session not found"):
+        await store.touch(missing_id)

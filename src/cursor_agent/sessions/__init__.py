@@ -1,7 +1,17 @@
-"""Session persistence and metadata for cursor-agent (PRD-002).
+"""Session persistence and metadata for cursor-agent (PRD-002)."""
 
-Public store APIs and models are added incrementally via TDD; this package
-starts as an import scaffold only.
-"""
+from cursor_agent.sessions.models import (
+    SessionCreateParams,
+    SessionRecord,
+    build_cli_session_key,
+    title_from_first_user_message,
+)
+from cursor_agent.sessions.store import SessionStore
 
-__all__: list[str] = []
+__all__ = [
+    "SessionCreateParams",
+    "SessionRecord",
+    "SessionStore",
+    "build_cli_session_key",
+    "title_from_first_user_message",
+]

@@ -34,11 +34,20 @@ def _session_not_found_message(session_key: str, session_id: str | None) -> str:
 
 
 async def _try_acquire_lock(lock: asyncio.Lock) -> bool:
-    """Attempt non-blocking lock acquisition without ``blocking=False``."""
-    if lock.locked():
+    """Attempt non-blocking lock acquisition (ADR-008; no TOCTOU via ``locked()``)."""
+    try:
+        await asyncio.wait_for(lock.acquire(), timeout=0)
+    except TimeoutError:
         return False
-    await lock.acquire()
     return True
+
+
+def _validate_send_message(message: str) -> None:
+    """Reject empty user messages before SDK send or store side effects."""
+    if not message.strip():
+        raise ConfigError(
+            f"invalid message: received {message!r}, expected non-empty string after strip"
+        )
 
 
 class SessionAgentPool:
@@ -119,6 +128,7 @@ class SessionAgentPool:
         blocking: bool = True,
     ) -> RunResult:
         """Send a message with per-key locking, logging context, and store updates."""
+        _validate_send_message(message)
         row = await self._resolve_or_raise(session_key, session_id)
         self._assert_runtime_match(row)
 
