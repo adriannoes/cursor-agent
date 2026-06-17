@@ -552,3 +552,67 @@ async def test_session_store_touch_raises_for_missing_session(tmp_path: Path) ->
 
     with pytest.raises(ValueError, match="session not found"):
         await store.touch(missing_id)
+
+
+# --- Task 5.1: agent_id replacement for /compress (ADR-011) ---
+
+
+@pytest.mark.asyncio
+async def test_session_store_update_agent_id_replaces_agent_id(tmp_path: Path) -> None:
+    """update_agent_id(session_id, agent_id) swaps SDK agent id on the same row."""
+    t0 = datetime(2026, 6, 16, 12, 0, 0, tzinfo=UTC)
+    store = await _initialized_store(tmp_path, _SteppingClock([t0]))
+    session_key = build_cli_session_key(tmp_path)
+
+    created = await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id="agent-before-compress",
+            workspace=str(tmp_path.resolve()),
+            runtime="local",
+        )
+    )
+
+    updated = await store.update_agent_id(created.id, "agent-after-compress")
+    assert updated.id == created.id
+    assert updated.agent_id == "agent-after-compress"
+    assert updated.session_key == created.session_key
+
+    reloaded = await store.resolve(session_key, created.id)
+    assert reloaded is not None
+    assert reloaded.id == created.id
+    assert reloaded.agent_id == "agent-after-compress"
+
+
+@pytest.mark.asyncio
+async def test_session_store_update_agent_id_rejects_empty_agent_id(
+    tmp_path: Path,
+) -> None:
+    """update_agent_id rejects empty agent_id before touching the database."""
+    t0 = datetime(2026, 6, 16, 12, 0, 0, tzinfo=UTC)
+    store = await _initialized_store(tmp_path, _SteppingClock([t0]))
+    session_key = build_cli_session_key(tmp_path)
+
+    created = await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id="agent-valid",
+            workspace=str(tmp_path.resolve()),
+            runtime="local",
+        )
+    )
+
+    with pytest.raises(ValueError, match="agent_id"):
+        await store.update_agent_id(created.id, "")
+
+
+@pytest.mark.asyncio
+async def test_session_store_update_agent_id_raises_for_missing_session(
+    tmp_path: Path,
+) -> None:
+    """update_agent_id raises when session_id does not exist."""
+    store = await _initialized_store(tmp_path, _SteppingClock([datetime.now(tz=UTC)]))
+    missing_id = str(uuid.uuid4())
+
+    with pytest.raises(ValueError, match="session not found"):
+        await store.update_agent_id(missing_id, "agent-orphan")

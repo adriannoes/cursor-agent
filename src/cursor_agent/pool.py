@@ -70,7 +70,13 @@ class SessionAgentPool:
         self._facade = facade
         self._config = config
         self._locks: dict[str, asyncio.Lock] = {}
-        self._resumed_agent_ids: set[str] = set()
+        self._resumed_models: dict[str, str] = {}
+
+    def _resolve_model(self, model_override: str | None) -> str:
+        """Return the effective model for resume/send (override wins over config)."""
+        if model_override is not None and model_override.strip():
+            return model_override.strip()
+        return self._config.model
 
     def _lock_for(self, session_key: str) -> asyncio.Lock:
         """Return the asyncio lock for ``session_key``, creating it lazily."""
@@ -95,27 +101,40 @@ class SessionAgentPool:
             raise ConfigError(_session_not_found_message(session_key, session_id))
         return row
 
-    async def _ensure_resumed(self, row: SessionRecord) -> None:
-        """Resume the SDK agent once per pool lifetime for ``row.agent_id``."""
-        if row.agent_id in self._resumed_agent_ids:
+    async def _ensure_resumed(
+        self,
+        row: SessionRecord,
+        *,
+        model_override: str | None = None,
+    ) -> None:
+        """Resume the SDK agent when missing or when the effective model changed."""
+        model = self._resolve_model(model_override)
+        if self._resumed_models.get(row.agent_id) == model:
             return
         await self._facade.resume_agent(
             row.agent_id,
             workspace=row.workspace,
-            model=self._config.model,
+            model=model,
             tool_profile=row.tool_profile,
+            runtime_mode=row.runtime,
         )
-        self._resumed_agent_ids.add(row.agent_id)
+        self._resumed_models[row.agent_id] = model
+
+    def forget_resumed_agent(self, agent_id: str) -> None:
+        """Drop resume cache for ``agent_id`` after agent swaps (e.g. /compress)."""
+        self._resumed_models.pop(agent_id, None)
 
     async def get(
         self,
         session_key: str,
         session_id: str | None = None,
+        *,
+        model_override: str | None = None,
     ) -> SessionRecord:
         """Resolve and lazily resume the session for ``session_key``."""
         row = await self._resolve_or_raise(session_key, session_id)
         self._assert_runtime_match(row)
-        await self._ensure_resumed(row)
+        await self._ensure_resumed(row, model_override=model_override)
         return row
 
     async def send(
@@ -126,6 +145,7 @@ class SessionAgentPool:
         session_id: str | None = None,
         callbacks: StreamCallbacks | None = None,
         blocking: bool = True,
+        model_override: str | None = None,
     ) -> RunResult:
         """Send a message with per-key locking, logging context, and store updates."""
         _validate_send_message(message)
@@ -145,7 +165,7 @@ class SessionAgentPool:
                 )
 
         try:
-            await self._ensure_resumed(row)
+            await self._ensure_resumed(row, model_override=model_override)
             log_context = LogContext(
                 session_id=row.id,
                 session_key=row.session_key,

@@ -65,6 +65,7 @@ async def test_resume_after_restart_reuses_persisted_agent_id(
         workspace: str,
         model: str | None = None,
         tool_profile: str | None = None,
+        runtime_mode: str = "local",
     ) -> str:
         resume_calls.append(agent_id_arg)
         return await original_resume(
@@ -72,6 +73,7 @@ async def test_resume_after_restart_reuses_persisted_agent_id(
             workspace=workspace,
             model=model,
             tool_profile=tool_profile,
+            runtime_mode=runtime_mode,
         )
 
     monkeypatch.setattr(facade, "resume_agent", spy_resume_agent)
