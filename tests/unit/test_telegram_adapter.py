@@ -184,7 +184,6 @@ def _runtime_handles(
     )
     facade = FakeSdkFacade()
     store = SessionStore(tmp_path / "sessions.db")  # type: ignore[operator]
-    pool = SessionAgentPool(store=store, facade=facade, config=cursor_cfg)
     logger = logging.getLogger("test.telegram.adapter")
     return {
         "platform_config": gateway_cfg.platforms.telegram.model_copy(
@@ -194,7 +193,6 @@ def _runtime_handles(
         "config": cursor_cfg,
         "store": store,
         "facade": facade,
-        "pool": pool,
         "logger": logger,
     }
 
@@ -950,7 +948,6 @@ def _telegram_adapter_factory(
                 config=cursor_cfg,
                 store=store,
                 facade=facade,
-                pool=pool,
                 logger=logger,
                 bot_factory=bot_factory,
                 dispatcher_factory=dispatcher_factory,
@@ -1341,3 +1338,132 @@ def test_parse_telegram_command_classification(
 ) -> None:
     """_parse_telegram_command maps supported commands and rejects the rest."""
     assert _parse_telegram_command(text) == expected
+
+
+@pytest.mark.asyncio
+async def test_telegram_polling_termination_logs_critical(
+    tmp_path: object,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Unexpected polling termination surfaces a CRITICAL operator signal."""
+    secret_token = "bot111000:supervision-secret-token"
+
+    class RaisingDispatcher(FakeDispatcher):
+        async def start_polling(self, bot: FakeBot, **kwargs: object) -> None:
+            raise RuntimeError("telegram outage")
+
+    adapter, _fake_bot, _ = _make_adapter(
+        tmp_path,
+        dispatcher=RaisingDispatcher(),
+        bot_token=secret_token,
+    )
+    caplog.set_level(logging.CRITICAL, logger="test.telegram.adapter")
+
+    await adapter.start(track_inbound([]))
+    assert adapter._polling_task is not None
+    with contextlib.suppress(RuntimeError):
+        await adapter._polling_task
+    await asyncio.sleep(0)
+
+    combined = "\n".join(record.message for record in caplog.records)
+    assert "telegram_polling_terminated" in combined
+    assert secret_token not in combined
+
+
+@pytest.mark.asyncio
+async def test_telegram_polling_termination_silent_on_normal_stop(
+    tmp_path: object,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A clean stop() must not emit the CRITICAL termination signal."""
+    adapter, _fake_bot, _ = _make_adapter(tmp_path)
+    caplog.set_level(logging.CRITICAL, logger="test.telegram.adapter")
+
+    await adapter.start(track_inbound([]))
+    await adapter.stop()
+    await asyncio.sleep(0)
+
+    combined = "\n".join(record.message for record in caplog.records)
+    assert "telegram_polling_terminated" not in combined
+
+
+@pytest.mark.asyncio
+async def test_telegram_send_message_falls_back_to_plain_text_on_html_rejection(
+    tmp_path: object,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """When Telegram rejects parse_mode=HTML, the reply is retried as plain text."""
+    workspace = "/tmp/gateway-workspace"
+    adapter, fake_bot, _ = _make_adapter(tmp_path, workspace=workspace)
+    session_key = telegram_session_key(1, workspace)
+    caplog.set_level(logging.WARNING, logger="test.telegram.adapter")
+    raw_text = "**bold** and <x>"
+    attempts: list[dict[str, object]] = []
+
+    async def html_rejecting_send(
+        chat_id: int,
+        text: str,
+        *,
+        parse_mode: str | None = None,
+        **kwargs: object,
+    ) -> object:
+        attempts.append({"text": text, "parse_mode": parse_mode})
+        if parse_mode == "HTML":
+            raise RuntimeError("Bad Request: can't parse entities")
+        return {"ok": True}
+
+    fake_bot.send_message = html_rejecting_send  # type: ignore[method-assign]
+
+    await adapter.send_message(
+        OutboundMessage(
+            platform="telegram",
+            sender_id="1",
+            session_key=session_key,
+            text=raw_text,
+        ),
+    )
+
+    html_attempts = [a for a in attempts if a["parse_mode"] == "HTML"]
+    plain_attempts = [a for a in attempts if a["parse_mode"] is None]
+    assert len(html_attempts) == 1
+    assert plain_attempts
+    assert plain_attempts[0]["text"] == raw_text
+    assert "telegram_outbound_html_fallback" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_telegram_send_message_reraises_when_failure_after_first_chunk(
+    tmp_path: object,
+) -> None:
+    """A failure after the first chunk re-raises instead of duplicating delivery."""
+    workspace = "/tmp/gateway-workspace"
+    adapter, fake_bot, _ = _make_adapter(tmp_path, workspace=workspace)
+    session_key = telegram_session_key(1, workspace)
+    long_text = "line\n\n" + ("x" * 3900)
+    attempts: list[str | None] = []
+
+    async def fail_after_first(
+        chat_id: int,
+        text: str,
+        *,
+        parse_mode: str | None = None,
+        **kwargs: object,
+    ) -> object:
+        attempts.append(parse_mode)
+        if len(attempts) >= 2:
+            raise RuntimeError("api down mid-stream")
+        return {"ok": True}
+
+    fake_bot.send_message = fail_after_first  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="api down mid-stream"):
+        await adapter.send_message(
+            OutboundMessage(
+                platform="telegram",
+                sender_id="1",
+                session_key=session_key,
+                text=long_text,
+            ),
+        )
+
+    assert attempts.count(None) == 0

@@ -13,7 +13,6 @@ from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.platforms.base import InboundMessage
 from cursor_agent.platforms.telegram import TelegramAdapter
 from cursor_agent.platforms.telegram_chunking import telegram_session_key
-from cursor_agent.pool import SessionAgentPool
 from cursor_agent.product_copy import TELEGRAM_NO_SESSION_HINT
 from cursor_agent.sdk_facade import FakeSdkFacade
 from cursor_agent.sessions.store import SessionStore
@@ -119,7 +118,6 @@ def _runtime_handles(
     )
     sdk_facade = facade or FakeSdkFacade()
     store = SessionStore(tmp_path / "sessions.db")  # type: ignore[operator]
-    pool = SessionAgentPool(store=store, facade=sdk_facade, config=cursor_cfg)
 
     return {
         "platform_config": gateway_cfg.platforms.telegram.model_copy(
@@ -129,7 +127,6 @@ def _runtime_handles(
         "config": cursor_cfg,
         "store": store,
         "facade": sdk_facade,
-        "pool": pool,
         "logger": logging.getLogger("test.telegram.commands"),
     }
 

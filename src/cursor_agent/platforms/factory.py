@@ -26,6 +26,24 @@ def _validate_telegram_bot_token(gateway_config: GatewayConfig) -> None:
     )
 
 
+def _warn_if_telegram_allowlist_empty(
+    gateway_config: GatewayConfig,
+    logger: logging.Logger,
+) -> None:
+    """Warn when Telegram is enabled but no sender is allowlisted.
+
+    An empty ``allowed_users`` blocks everyone by design, so the bot looks
+    online yet ignores every message; a startup warning saves debugging time.
+    """
+    if gateway_config.platforms.telegram.allowed_users:
+        return
+    logger.warning(
+        "gateway startup: platforms.telegram.enabled is true but allowed_users is "
+        "empty; all senders will be blocked and the bot will appear online while "
+        "ignoring every message",
+    )
+
+
 def build_platform_adapters(
     *,
     gateway_config: GatewayConfig,
@@ -54,6 +72,7 @@ def build_platform_adapters(
     for platform_name in enabled_platform_names(gateway_config):
         if platform_name == "telegram":
             _validate_telegram_bot_token(gateway_config)
+            _warn_if_telegram_allowlist_empty(gateway_config, logger)
             adapters.append(
                 TelegramAdapter(
                     platform_config=gateway_config.platforms.telegram,
@@ -61,7 +80,6 @@ def build_platform_adapters(
                     config=config,
                     store=store,
                     facade=facade,
-                    pool=pool,
                     logger=logger,
                 ),
             )
