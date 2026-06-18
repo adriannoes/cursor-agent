@@ -19,6 +19,7 @@ from cursor_agent.gateway.config import (
     resolve_gateway_startup_config,
 )
 from cursor_agent.gateway.runner import gateway_runtime, run_gateway
+from cursor_agent.platforms.telegram import TelegramAdapter
 from cursor_agent.pool import SessionAgentPool
 from cursor_agent.sdk_facade import FakeSdkFacade
 from cursor_agent.sessions.store import SessionStore
@@ -32,6 +33,7 @@ from tests.unit.gateway_fakes import (
     seed_session,
     write_gateway_yaml,
 )
+from tests.unit.test_telegram_adapter import FakeBot, FakeDispatcher
 
 
 async def _wait_for_condition(
@@ -360,12 +362,26 @@ async def test_gateway_runtime_injected_adapters_bypass_factory(
 async def test_gateway_runtime_enabled_telegram_with_factory_passes_validation(
     tmp_path: Path,
 ) -> None:
-    """Enabled Telegram with factory-built adapter passes startup validation."""
+    """Enabled Telegram with factory-built adapter passes startup validation.
+
+    Exercises the real factory + TelegramAdapter but injects offline aiogram
+    bot/dispatcher doubles so the runner suite never touches the network.
+    """
     config = gateway_config()
     facade = FakeSdkFacade()
     db_path = tmp_path / "sessions.db"
 
-    with patch("cursor_agent.gateway.runner.bootstrap_messaging_hooks"):
+    with (
+        patch("cursor_agent.gateway.runner.bootstrap_messaging_hooks"),
+        patch(
+            "cursor_agent.platforms.telegram._default_bot_factory",
+            lambda token: FakeBot(token=token),
+        ),
+        patch(
+            "cursor_agent.platforms.telegram._default_dispatcher_factory",
+            FakeDispatcher,
+        ),
+    ):
         async with gateway_runtime(
             gateway_config=config,
             facade=facade,
@@ -373,6 +389,7 @@ async def test_gateway_runtime_enabled_telegram_with_factory_passes_validation(
             register_signals=False,
         ) as ctx:
             assert len(ctx.adapters) == 1
+            assert isinstance(ctx.adapters[0], TelegramAdapter)
             assert ctx.adapters[0].platform == "telegram"
 
 
