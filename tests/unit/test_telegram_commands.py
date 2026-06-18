@@ -232,6 +232,48 @@ async def test_telegram_new_creates_session_row_and_agent(tmp_path: object) -> N
 
 
 @pytest.mark.asyncio
+async def test_telegram_new_cancels_superseded_agent(tmp_path: object) -> None:
+    """A second /new cancels the prior agent to avoid leaking SDK agents."""
+    facade = CancelTrackingFacade()
+    adapter, _fake_bot, fake_dispatcher, handles = _make_command_adapter(
+        tmp_path,
+        facade=facade,
+    )
+    _record_id, old_agent_id = await _seed_chat_session(handles)
+    await adapter.start(track_inbound([]))
+
+    handler = await _registered_handler(fake_dispatcher)
+    await handler(_command_message("/new"))
+
+    assert facade.cancel_calls == [old_agent_id]
+    store = handles["store"]
+    assert isinstance(store, SessionStore)
+    row = await store.resolve(telegram_session_key(DEFAULT_CHAT_ID, DEFAULT_WORKSPACE))
+    assert row is not None
+    assert row.agent_id != old_agent_id
+    await adapter.stop()
+
+
+@pytest.mark.asyncio
+async def test_telegram_new_without_previous_session_does_not_cancel(
+    tmp_path: object,
+) -> None:
+    """First /new for a chat has no prior agent to cancel."""
+    facade = CancelTrackingFacade()
+    adapter, _fake_bot, fake_dispatcher, handles = _make_command_adapter(
+        tmp_path,
+        facade=facade,
+    )
+    await _start_adapter(adapter, handles, track_inbound([]))
+
+    handler = await _registered_handler(fake_dispatcher)
+    await handler(_command_message("/new"))
+
+    assert facade.cancel_calls == []
+    await adapter.stop()
+
+
+@pytest.mark.asyncio
 async def test_telegram_new_sends_confirmation_copy(tmp_path: object) -> None:
     """Allowlisted /new sends concise confirmation copy to the chat."""
     adapter, fake_bot, fake_dispatcher, handles = _make_command_adapter(tmp_path)
