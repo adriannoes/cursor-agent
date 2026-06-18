@@ -82,6 +82,7 @@ def _is_reattachable_send_error(exc: CursorAgentError) -> bool:
     """Return True for SDK internal failures observed after cold resume."""
     return isinstance(exc, SdkInternalError)
 
+
 class SessionAgentPool:
     """Serialize SDK access per session_key with lazy resume from SessionStore.
 
