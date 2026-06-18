@@ -6,6 +6,9 @@
 workspace: /path/to/your/project
 tool_profile: messaging
 
+# Optional — directory containing USER.md and MEMORY.md (default: ~/.cursor-agent)
+# memory_root: /path/to/memory
+
 platforms:
   telegram:
     enabled: true

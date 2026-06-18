@@ -61,7 +61,7 @@ Runtime config and session data live under `~/.cursor-agent/` (see [.env.example
 
 ## Memory
 
-Memory v1 reads `~/.cursor-agent/USER.md` and `~/.cursor-agent/MEMORY.md`. On the first user turn for a session, `cursor-agent` injects up to 8 KB before the message: up to 4 KB from `USER.md`, then the remaining budget from `MEMORY.md`. Oversized sections keep the end of the file.
+Memory v1 reads `~/.cursor-agent/USER.md` and `~/.cursor-agent/MEMORY.md` by default. Override the directory with `memory_root` in `~/.cursor-agent/config.yaml` or `CURSOR_AGENT__MEMORY_ROOT` (see [.env.example](.env.example)). On the first user turn for a session, `cursor-agent` injects up to 8 KB before the message: up to 4 KB from `USER.md`, then the remaining budget from `MEMORY.md`. Oversized sections keep the end of the file.
 
 After that first turn, memory is frozen for the session: edits or new files on disk are not picked up until `/new` starts a fresh session row (or `/resume` on a row that has not yet injected memory). `/memory show` always reads from disk at command time.
 

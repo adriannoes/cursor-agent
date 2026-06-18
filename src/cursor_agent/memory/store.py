@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from cursor_agent.config.loader import CursorAgentConfig
+
 USER_FILENAME: Final[str] = "USER.md"
 MEMORY_FILENAME: Final[str] = "MEMORY.md"
 TOTAL_MEMORY_BUDGET_BYTES: Final[int] = 8192
@@ -137,6 +139,29 @@ class LocalMemoryStore:
             byte_length=file_byte_length,
             missing=False,
         )
+
+
+def memory_store_from_config(
+    config: CursorAgentConfig,
+    *,
+    override_root: Path | None = None,
+) -> LocalMemoryStore:
+    """Build a ``LocalMemoryStore`` from config with an optional runtime override.
+
+    ``override_root`` wins for tests and REPL injection; otherwise
+    ``config.memory_root`` (``CURSOR_AGENT__MEMORY_ROOT`` / YAML) is used;
+    when unset, the default ``~/.cursor-agent`` directory applies.
+
+    Example:
+        >>> from cursor_agent.config.loader import load_config
+        >>> store = memory_store_from_config(load_config())
+    """
+    if override_root is not None:
+        return LocalMemoryStore(root=override_root)
+    configured_root = config.memory_root
+    if configured_root is not None and configured_root.strip():
+        return LocalMemoryStore(root=Path(configured_root.strip()))
+    return LocalMemoryStore()
 
 
 def format_memory_injection_message(

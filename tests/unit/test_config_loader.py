@@ -197,3 +197,21 @@ def test_omitted_cli_tool_profile_preserves_yaml_over_default(
     config_file.write_text("tool_profile: messaging\n", encoding="utf-8")
     config = load_config(config_path=config_file)
     assert config.tool_profile == "messaging"
+
+
+def test_memory_root_defaults_to_none(tmp_path: Path) -> None:
+    """Memory root is optional and defaults to unset (home directory at runtime)."""
+    config = load_config(config_path=tmp_path / "missing.yaml")
+    assert config.memory_root is None
+
+
+def test_precedence_env_memory_root_over_yaml(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Env CURSOR_AGENT__MEMORY_ROOT overrides YAML memory_root."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("memory_root: /from/yaml\n", encoding="utf-8")
+    monkeypatch.setenv("CURSOR_AGENT__MEMORY_ROOT", "/from/env")
+    config = load_config(config_path=config_file)
+    assert config.memory_root == "/from/env"
