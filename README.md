@@ -1,10 +1,17 @@
 # cursor-agent
 
-> **Agents:** start at **[AGENTS.md](AGENTS.md)**
+> **Humans:** quick start below. **Agents:** start at **[AGENTS.md](AGENTS.md)**.
 
 Clean-room agent inspired by [Hermes Agent](https://github.com/NousResearch/hermes-agent) behavior and [OpenClaw](https://github.com/openclaw/openclaw) gateway patterns — reference docs and codebases may be studied for patterns, with **zero copied code** (not a fork). Powered by the [Cursor Python SDK](https://cursor.com/docs/sdk/python) and **Composer 2.5**.
 
-Orchestration layer only — the SDK owns the agent loop, tools, and inference.
+Orchestration layer only — the SDK owns the agent loop, tools, and inference. **cursor-agent** adds sessions, configuration, CLI UX, concurrency, and security policy (tool profiles, hooks, allowlists).
+
+## What it provides
+
+- Interactive local REPL (`cursor-agent`)
+- Persistent sessions (`cursor-agent sessions list`)
+- Long-running messaging gateway, including Telegram (`cursor-agent gateway`)
+- `coding` and `messaging` tool profiles for trusted dev vs untrusted input
 
 ## Documentation
 
@@ -12,13 +19,50 @@ Orchestration layer only — the SDK owns the agent loop, tools, and inference.
 |----------|-------------|
 | [AGENTS.md](AGENTS.md) | **Agent entry point** — repo map, conventions, verification |
 | [SECURITY.md](SECURITY.md) | Messaging threat model, hooks, and acceptance probes |
+| [Cursor API Key Onboarding](docs/cursor-api-key-onboarding.md) | Local setup guide for creating and exporting `CURSOR_API_KEY` |
+| [Telegram Gateway Onboarding](docs/telegram-gateway-onboarding.md) | Local setup guide for BotFather, `TELEGRAM_BOT_TOKEN`, allowlist, and gateway testing |
 | [.env.example](.env.example) | Environment variable reference |
 
 ## Prerequisites
 
 - Python 3.11+
+- [uv](https://docs.astral.sh/uv/) (dependency manager used by this repo)
 - [Cursor API key](https://cursor.com/dashboard/api) → `CURSOR_API_KEY`
 - `cursor-sdk-bridge` on PATH (installed with `cursor-sdk`)
+
+## Quick start
+
+```bash
+uv sync
+export CURSOR_API_KEY="your-cursor-api-key"
+uv run cursor-agent
+```
+
+For a local `.env` file, copy [.env.example](.env.example) to `.env`, set `CURSOR_API_KEY`, and keep `.env` out of git. Full key setup: [Cursor API Key Onboarding](docs/cursor-api-key-onboarding.md).
+
+Run the unit test gate without an API key:
+
+```bash
+uv run pytest -m "not integration" -v
+```
+
+## Usage
+
+```bash
+uv run cursor-agent                         # interactive REPL (default: coding profile)
+uv run cursor-agent --profile messaging     # validate messaging hooks locally
+uv run cursor-agent sessions list             # list sessions for the workspace key
+uv run cursor-agent gateway                   # gateway using ~/.cursor-agent/gateway.yaml
+uv run cursor-agent gateway --config /path/to/gateway.yaml
+```
+
+Runtime config and session data live under `~/.cursor-agent/` (see [.env.example](.env.example) for overrides).
+
+## Gateway (Telegram)
+
+The gateway runs **cursor-agent** as a long-running bot process with `tool_profile: messaging` — read-only workspace, deny hooks, empty MCP, sandbox network off. See [SECURITY.md](SECURITY.md) and the step-by-step [Telegram Gateway Onboarding](docs/telegram-gateway-onboarding.md).
+
+Example config: [examples/gateway.yaml.example](examples/gateway.yaml.example). Set `TELEGRAM_BOT_TOKEN` in the environment; do not commit real tokens.
 
 ## Development hooks (optional)
 

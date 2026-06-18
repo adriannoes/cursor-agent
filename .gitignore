@@ -33,8 +33,7 @@ htmlcov/
 .cursor-agent-state/
 
 # Internal planning artifacts and local agent workflows (not part of the public repo)
-docs/
-engineering/
+internal-docs/
 .cursor/
 
 # Git worktrees
