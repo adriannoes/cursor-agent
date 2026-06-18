@@ -13,7 +13,8 @@ from cursor_agent.errors import (
     AuthError,
     ConfigError,
     CursorAgentError,
-    NetworkError,
+    InvalidAgentError,
+    SdkInternalError,
 )
 from cursor_agent.facade_logging import LogContext
 from cursor_agent.messaging_hooks import ensure_messaging_hooks
@@ -773,10 +774,27 @@ class ColdStartSendFailFacade(FakeSdkFacade):
         """Fail the first send with an internal SDK-style error."""
         self._send_attempts += 1
         if self._send_attempts == 1:
-            raise NetworkError("internal: internal error")
+            raise SdkInternalError("internal: internal error")
         return await super().send(
             agent_id, message, callbacks=callbacks, log_context=log_context
         )
+
+
+class InvalidColdResumeFacade(FakeSdkFacade):
+    """Simulates stale agent_id that cannot be resumed after process restart."""
+
+    async def resume_agent(
+        self,
+        agent_id: str,
+        *,
+        workspace: str,
+        model: str | None = None,
+        tool_profile: str | None = None,
+        runtime_mode: str = "local",
+    ) -> str:
+        """Raise InvalidAgentError as the live SDK does for unknown agents."""
+        _ = agent_id, workspace, model, tool_profile, runtime_mode
+        raise InvalidAgentError(f"invalid agent_id: received {agent_id!r}")
 
 
 @pytest.mark.asyncio
@@ -804,6 +822,37 @@ async def test_send_reattaches_agent_after_cold_resume_internal_error(
     assert result.status is RunStatus.FINISHED
     assert result.text == "ok-after-reattach"
     assert facade._send_attempts == 2
+
+    row = await store.resolve(session_key)
+    assert row is not None
+    assert row.agent_id != stale_agent_id
+    assert row.agent_id.startswith("fake-")
+
+
+@pytest.mark.asyncio
+async def test_send_reattaches_agent_after_invalid_agent_cold_resume(
+    store: SessionStore,
+    config: CursorAgentConfig,
+) -> None:
+    """InvalidAgentError on cold resume creates a fresh agent before send."""
+    session_key = "cli:default:reattach2"
+    stale_agent_id = "stale-agent-invalid"
+    await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id=stale_agent_id,
+            workspace="/tmp/workspace",
+            runtime="local",
+            tool_profile="coding",
+        )
+    )
+
+    facade = InvalidColdResumeFacade(default_reply="ok-after-invalid-resume")
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    result = await pool.send(session_key, "hello after invalid resume")
+
+    assert result.status is RunStatus.FINISHED
+    assert result.text == "ok-after-invalid-resume"
 
     row = await store.resolve(session_key)
     assert row is not None
