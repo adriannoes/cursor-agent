@@ -187,6 +187,41 @@ def test_missing_frontmatter_description_defaults_to_empty(tmp_path: Path) -> No
     assert "Body without a description field." in entry.content
 
 
+def test_frontmatter_uses_yaml_parser_for_quotes_colons_and_multiline(
+    tmp_path: Path,
+) -> None:
+    """Real YAML frontmatter supports quotes, colons, and folded descriptions."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    project_root = _project_skills_root(workspace)
+    skill_dir = project_root / "yaml-rich"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "\n".join(
+            [
+                "---",
+                'name: "canonical:skill"',
+                "description: >",
+                "  Use when output needs: quoted YAML.",
+                "---",
+                "",
+                "Rich YAML body.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    discovery = _discovery_from_fixtures(
+        tmp_path,
+        workspace=workspace,
+        user_skills_root=tmp_path / "user-skills",
+    )
+    entry = _entry_by_name(discovery.list_skills(), "canonical:skill")
+
+    assert entry.description == "Use when output needs: quoted YAML."
+    assert "Rich YAML body." in entry.content
+
+
 def test_project_wins_over_user_on_name_collision(tmp_path: Path) -> None:
     """Precedence: ``project`` source wins when the same skill ``name`` exists in both roots."""
     workspace = tmp_path / "workspace"
@@ -225,6 +260,41 @@ def test_project_wins_over_user_on_name_collision(tmp_path: Path) -> None:
     assert entry.path == "shared-name/SKILL.md"
     assert "Project skill body." in entry.content
     assert "User skill body." not in entry.content
+
+
+def test_duplicate_names_within_same_source_emit_warning(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Duplicate skill names in one source are surfaced instead of silently hidden."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    project_root = _project_skills_root(workspace)
+    _write_skill_md(
+        project_root,
+        "first",
+        name="duplicate-skill",
+        description="First copy.",
+        body="First body.",
+    )
+    _write_skill_md(
+        project_root,
+        "second",
+        name="duplicate-skill",
+        description="Second copy.",
+        body="Second body.",
+    )
+
+    caplog.set_level("WARNING", logger="cursor_agent.skills.discovery")
+    discovery = _discovery_from_fixtures(
+        tmp_path,
+        workspace=workspace,
+        user_skills_root=tmp_path / "user-skills",
+    )
+
+    assert [skill.name for skill in discovery.list_skills()] == ["duplicate-skill"]
+    assert "duplicate skill name" in caplog.text
+    assert "duplicate-skill" in caplog.text
 
 
 def test_empty_directories_are_ignored(tmp_path: Path) -> None:
@@ -363,6 +433,29 @@ def test_missing_frontmatter_name_falls_back_to_directory(tmp_path: Path) -> Non
     assert discovery.get_skill("fallback-name") == entry
 
 
+def test_skill_lookup_is_case_sensitive_by_design(tmp_path: Path) -> None:
+    """Skill names follow exact frontmatter spelling; slash lookup is case-sensitive."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    project_root = _project_skills_root(workspace)
+    _write_skill_md(
+        project_root,
+        "canvas",
+        name="canvas",
+        description="Lowercase only.",
+        body="Canvas body.",
+    )
+
+    discovery = _discovery_from_fixtures(
+        tmp_path,
+        workspace=workspace,
+        user_skills_root=tmp_path / "user-skills",
+    )
+
+    assert discovery.get_skill("canvas") is not None
+    assert discovery.get_skill("Canvas") is None
+
+
 def test_user_skill_discovered_when_setting_sources_include_user(
     tmp_path: Path,
 ) -> None:
@@ -478,3 +571,50 @@ def test_skill_symlink_outside_root_is_ignored(tmp_path: Path) -> None:
     )
 
     assert discovery.list_skills() == []
+
+
+def test_invalid_utf8_skill_file_is_skipped(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Invalid UTF-8 SKILL.md files are skipped instead of crashing discovery."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    project_root = _project_skills_root(workspace)
+    invalid_dir = project_root / "invalid"
+    invalid_dir.mkdir(parents=True)
+    (invalid_dir / "SKILL.md").write_bytes(b"\xff\xfe\xfa")
+
+    caplog.set_level("WARNING", logger="cursor_agent.skills.discovery")
+    discovery = _discovery_from_fixtures(
+        tmp_path,
+        workspace=workspace,
+        user_skills_root=tmp_path / "user-skills",
+    )
+
+    assert discovery.list_skills() == []
+    assert "invalid UTF-8" in caplog.text
+
+
+def test_metadata_only_discovery_does_not_load_skill_body(tmp_path: Path) -> None:
+    """/skills listing can index metadata while leaving an invalid body unread."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    project_root = _project_skills_root(workspace)
+    skill_dir = project_root / "metadata-only"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_bytes(
+        b"---\nname: metadata-only\ndescription: Metadata only.\n---\n\n\xff\xfe"
+    )
+    config = _load_discovery_config(tmp_path, workspace=workspace)
+
+    metadata_discovery = skill_discovery_from_config(
+        config,
+        override_workspace=workspace,
+        override_user_skills=tmp_path / "user-skills",
+        include_content=False,
+    )
+
+    entry = _entry_by_name(metadata_discovery.list_skills(), "metadata-only")
+    assert entry.description == "Metadata only."
+    assert entry.content == ""
