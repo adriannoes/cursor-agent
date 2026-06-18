@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -13,6 +14,12 @@ from cursor_agent.sdk_facade import AsyncSdkFacade
 def _local_option(local_opts: object, key: str) -> object | None:
     """Read a LocalAgentOptions field from object or mapping test doubles."""
     if isinstance(local_opts, dict):
+        wire_key = {
+            "setting_sources": "settingSources",
+            "sandbox_options": "sandboxOptions",
+        }.get(key, key)
+        if wire_key in local_opts:
+            return local_opts.get(wire_key)
         return local_opts.get(key)
     return getattr(local_opts, key, None)
 
@@ -53,6 +60,7 @@ def _resume_options(mock_client: MagicMock) -> dict[str, Any]:
         else resume_args.kwargs.get("options")
     )
     assert isinstance(options, dict)
+    json.dumps(options)
     return options
 
 
@@ -123,7 +131,7 @@ async def test_messaging_resume_agent_passes_empty_mcp_servers(
     )
 
     options = _resume_options(mock_client)
-    assert options.get("mcp_servers") == {}
+    assert options.get("mcpServers") == {}
 
 
 @pytest.mark.asyncio
@@ -141,5 +149,5 @@ async def test_messaging_resume_agent_passes_sandbox_enabled(
 
     options = _resume_options(mock_client)
     local_opts = options.get("local")
-    assert local_opts is not None
+    assert isinstance(local_opts, dict)
     assert _sandbox_enabled(local_opts) is True
