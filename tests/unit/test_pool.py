@@ -8,7 +8,14 @@ from pathlib import Path
 import pytest
 
 from cursor_agent.config import CursorAgentConfig, load_config
-from cursor_agent.errors import AgentBusyError, AuthError, ConfigError, CursorAgentError
+from cursor_agent.errors import (
+    AgentBusyError,
+    AuthError,
+    ConfigError,
+    CursorAgentError,
+    InvalidAgentError,
+    SdkInternalError,
+)
 from cursor_agent.facade_logging import LogContext
 from cursor_agent.messaging_hooks import ensure_messaging_hooks
 from cursor_agent.pool import SessionAgentPool
@@ -734,3 +741,120 @@ async def test_messaging_hook_deploy_uses_to_thread(
     await pool.get(session_key)
 
     assert ensure_messaging_hooks in to_thread_calls
+
+
+class ColdStartSendFailFacade(FakeSdkFacade):
+    """Simulates SDK internal failure on first send after cold resume."""
+
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(**kwargs)  # type: ignore[arg-type]
+        self._send_attempts = 0
+
+    async def resume_agent(
+        self,
+        agent_id: str,
+        *,
+        workspace: str,
+        model: str | None = None,
+        tool_profile: str | None = None,
+        runtime_mode: str = "local",
+    ) -> str:
+        """Register a cold-resumed agent without requiring prior create."""
+        self._messages_by_agent.setdefault(agent_id, [])
+        return agent_id
+
+    async def send(
+        self,
+        agent_id: str,
+        message: str,
+        *,
+        callbacks: StreamCallbacks | None = None,
+        log_context: LogContext | None = None,
+    ) -> RunResult:
+        """Fail the first send with an internal SDK-style error."""
+        self._send_attempts += 1
+        if self._send_attempts == 1:
+            raise SdkInternalError("internal: internal error")
+        return await super().send(
+            agent_id, message, callbacks=callbacks, log_context=log_context
+        )
+
+
+class InvalidColdResumeFacade(FakeSdkFacade):
+    """Simulates stale agent_id that cannot be resumed after process restart."""
+
+    async def resume_agent(
+        self,
+        agent_id: str,
+        *,
+        workspace: str,
+        model: str | None = None,
+        tool_profile: str | None = None,
+        runtime_mode: str = "local",
+    ) -> str:
+        """Raise InvalidAgentError as the live SDK does for unknown agents."""
+        _ = agent_id, workspace, model, tool_profile, runtime_mode
+        raise InvalidAgentError(f"invalid agent_id: received {agent_id!r}")
+
+
+@pytest.mark.asyncio
+async def test_send_reattaches_agent_after_cold_resume_internal_error(
+    store: SessionStore,
+    config: CursorAgentConfig,
+) -> None:
+    """Cold-start send internal failure swaps agent_id and retries successfully."""
+    session_key = "cli:default:reattach1"
+    stale_agent_id = "stale-agent-reattach"
+    await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id=stale_agent_id,
+            workspace="/tmp/workspace",
+            runtime="local",
+            tool_profile="coding",
+        )
+    )
+
+    facade = ColdStartSendFailFacade(default_reply="ok-after-reattach")
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    result = await pool.send(session_key, "hello after reattach")
+
+    assert result.status is RunStatus.FINISHED
+    assert result.text == "ok-after-reattach"
+    assert facade._send_attempts == 2
+
+    row = await store.resolve(session_key)
+    assert row is not None
+    assert row.agent_id != stale_agent_id
+    assert row.agent_id.startswith("fake-")
+
+
+@pytest.mark.asyncio
+async def test_send_reattaches_agent_after_invalid_agent_cold_resume(
+    store: SessionStore,
+    config: CursorAgentConfig,
+) -> None:
+    """InvalidAgentError on cold resume creates a fresh agent before send."""
+    session_key = "cli:default:reattach2"
+    stale_agent_id = "stale-agent-invalid"
+    await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id=stale_agent_id,
+            workspace="/tmp/workspace",
+            runtime="local",
+            tool_profile="coding",
+        )
+    )
+
+    facade = InvalidColdResumeFacade(default_reply="ok-after-invalid-resume")
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    result = await pool.send(session_key, "hello after invalid resume")
+
+    assert result.status is RunStatus.FINISHED
+    assert result.text == "ok-after-invalid-resume"
+
+    row = await store.resolve(session_key)
+    assert row is not None
+    assert row.agent_id != stale_agent_id
+    assert row.agent_id.startswith("fake-")
