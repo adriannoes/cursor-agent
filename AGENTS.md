@@ -23,6 +23,12 @@ cursor-agent/
 ├── .env.example           ← documented environment variables
 ├── pyproject.toml         ← package, tooling, and wheel includes
 │
+├── docs/                  ← official user guides (onboarding, gateway setup)
+├── internal-docs/         ← internal planning (PRDs, ADRs, tasks; gitignored)
+│   ├── prd/               ← product requirements (PRD-000 …)
+│   ├── decisions/         ← architecture decision records
+│   └── engineering/tasks/ ← implementation task plans
+│
 ├── src/cursor_agent/      ← production Python package
 │   ├── sdk_facade.py      ← only module that imports cursor_sdk
 │   ├── messaging_hooks.py ← hook install/deploy for messaging profile
@@ -35,6 +41,8 @@ cursor-agent/
 ```
 
 **Note:** Runtime hook deployment writes to `{workspace}/.cursor/hooks.json` and `{workspace}/.cursor/hooks/messaging/` when `tool_profile` is `messaging`. That workspace `.cursor/` tree is generated at runtime — it is not the same as any local-only planning directories you may have on disk.
+
+**Docs split:** `docs/` is the public, user-facing documentation. PRDs, ADRs, strategy, and task plans live in `internal-docs/` (and `.cursor/` workflows); do not put internal planning artifacts under `docs/`.
 
 ---
 
@@ -112,8 +120,13 @@ uv run pytest tests/unit/test_cli_profile.py tests/unit/test_messaging_profile.p
 |----------|-------------|
 | [README.md](README.md) | Project overview and prerequisites |
 | [SECURITY.md](SECURITY.md) | Messaging threat model and hook acceptance |
+| [docs/cursor-api-key-onboarding.md](docs/cursor-api-key-onboarding.md) | Local `CURSOR_API_KEY` setup |
+| [docs/telegram-gateway-onboarding.md](docs/telegram-gateway-onboarding.md) | Telegram bot and gateway setup |
 | [.env.example](.env.example) | Environment variable reference |
 | [pyproject.toml](pyproject.toml) | Package metadata and quality gates |
 | [hooks/messaging/](hooks/messaging/) | Versioned deny-hook scripts |
+| [internal-docs/README.md](internal-docs/README.md) | Internal hub — PRDs, ADRs, strategy (local/gitignored) |
+| [internal-docs/prd/README.md](internal-docs/prd/README.md) | PRD chain and TDD retro rules |
+| [internal-docs/engineering/tasks/README.md](internal-docs/engineering/tasks/README.md) | Task plan index |
 | [Cursor Python SDK](https://cursor.com/docs/sdk/python) | Upstream SDK documentation |
 | [Cursor Hooks](https://cursor.com/docs/hooks) | Hook schema reference |

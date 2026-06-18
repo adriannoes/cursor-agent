@@ -213,11 +213,22 @@ async def test_gateway_inbound_callback_is_async_callable() -> None:
     )
 
 
+def _platforms_telegram_chunking_path() -> Path:
+    """Return the path to ``platforms/telegram_chunking.py``."""
+    return _package_source_dir() / "platforms" / "telegram_chunking.py"
+
+
+def _platforms_telegram_formatting_path() -> Path:
+    """Return the path to ``platforms/telegram_formatting.py``."""
+    return _package_source_dir() / "platforms" / "telegram_formatting.py"
+
+
 def _file_imports_forbidden_platform_deps(py_file: Path) -> list[str]:
     """Return forbidden import module names found in ``py_file``."""
     forbidden_prefixes = (
         "aiogram",
         "telegram",
+        "cursor_sdk",
     )
     forbidden_exact = {
         "cursor_agent.sessions.models.build_cli_session_key",
@@ -256,3 +267,21 @@ def test_no_telegram_dependency_in_platforms_base() -> None:
     assert base_path.is_file(), f"expected {base_path} to exist"
     offenders = _file_imports_forbidden_platform_deps(base_path)
     assert offenders == [], f"forbidden platform imports in base.py: {offenders!r}"
+
+
+def test_no_forbidden_deps_in_telegram_chunking() -> None:
+    """telegram_chunking.py stays free of aiogram and cursor_sdk imports."""
+    chunking_path = _platforms_telegram_chunking_path()
+    assert chunking_path.is_file(), f"expected {chunking_path} to exist"
+    offenders = _file_imports_forbidden_platform_deps(chunking_path)
+    assert offenders == [], f"forbidden imports in telegram_chunking.py: {offenders!r}"
+
+
+def test_no_forbidden_deps_in_telegram_formatting() -> None:
+    """telegram_formatting.py stays free of aiogram and cursor_sdk imports."""
+    formatting_path = _platforms_telegram_formatting_path()
+    assert formatting_path.is_file(), f"expected {formatting_path} to exist"
+    offenders = _file_imports_forbidden_platform_deps(formatting_path)
+    assert offenders == [], (
+        f"forbidden imports in telegram_formatting.py: {offenders!r}"
+    )

@@ -29,6 +29,7 @@ from cursor_agent.gateway.shutdown import (
     register_shutdown_signals,
 )
 from cursor_agent.platforms.base import InboundMessage, PlatformAdapter
+from cursor_agent.platforms.factory import build_platform_adapters
 from cursor_agent.pool import SessionAgentPool
 from cursor_agent.sdk_facade import AsyncSdkFacade, SdkFacade
 from cursor_agent.sessions.store import SessionStore
@@ -133,8 +134,6 @@ async def gateway_runtime(
     store = create_store(cursor_config, store_path=store_path)
     await store.initialize()
 
-    platform_adapters = list(adapters or [])
-    _validate_platform_adapters(loaded_gateway_config, platform_adapters, active_logger)
     build_pool = pool_factory or _default_pool_factory
     shutdown_timeout = (
         shutdown_timeout_seconds
@@ -148,6 +147,22 @@ async def gateway_runtime(
 
     async with _managed_facade(cursor_config, facade) as active_facade:
         pool = build_pool(store, active_facade, cursor_config)
+        if adapters is None:
+            platform_adapters = build_platform_adapters(
+                gateway_config=loaded_gateway_config,
+                config=cursor_config,
+                store=store,
+                facade=active_facade,
+                pool=pool,
+                logger=active_logger,
+            )
+        else:
+            platform_adapters = list(adapters)
+        _validate_platform_adapters(
+            loaded_gateway_config,
+            platform_adapters,
+            active_logger,
+        )
         ctx = GatewayContext(
             gateway_config=loaded_gateway_config,
             config=cursor_config,
