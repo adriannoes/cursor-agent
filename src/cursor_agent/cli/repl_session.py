@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator, Callable
+from pathlib import Path
 
 from cursor_agent.cli.command_router import (
     CommandContext,
@@ -53,6 +54,7 @@ async def run_repl(
     stream_callbacks: StreamCallbacks | None = None,
     auto_resume: bool = True,
     logger: logging.Logger | None = None,
+    memory_root: Path | None = None,
 ) -> RunStatus | None:
     """Run the interactive REPL loop until ``/quit`` or reader exhaustion.
 
@@ -86,6 +88,7 @@ async def run_repl(
         stream_callbacks=send_callbacks,
         stream_writer=stream_sink,
         logger=logger,
+        memory_root=memory_root,
     )
 
     if auto_resume:

@@ -8,7 +8,15 @@ from typing import Any
 from rich.console import Console
 from rich.text import Text
 
+from cursor_agent.memory import (
+    TOTAL_MEMORY_BUDGET_BYTES,
+    EffectiveMemoryPayload,
+    EffectiveMemorySection,
+)
 from cursor_agent.sdk_facade import StreamCallbacks
+
+DISPLAY_MEMORY_ROOT = "~/.cursor-agent/"
+_EMPTY_CONTENT_LABEL = "(empty)"
 
 
 def _format_tool_badge(tool_name: str, state: str) -> Text:
@@ -19,6 +27,65 @@ def _format_tool_badge(tool_name: str, state: str) -> Text:
         f" {tool_name} ",
         (state, state_style),
     )
+
+
+def _format_memory_section_block(
+    section: EffectiveMemorySection,
+    *,
+    missing: bool,
+) -> list[str]:
+    """Format one memory section for ``/memory show`` output."""
+    display_path = f"{DISPLAY_MEMORY_ROOT}{section.filename}"
+    status = "missing" if missing else "present"
+    lines = [
+        f"--- {section.filename} ({display_path}) ---",
+        f"Status: {status}",
+        f"Quota: {section.budget_bytes} bytes",
+        f"Effective: {section.effective_bytes} bytes",
+    ]
+    if section.truncated:
+        lines.append(
+            f"Truncated: yes (original {section.original_bytes} bytes, "
+            f"kept tail within quota)"
+        )
+    else:
+        lines.append("Truncated: no")
+    content = section.effective_text if section.effective_text else _EMPTY_CONTENT_LABEL
+    lines.append("Content:")
+    lines.append(content)
+    return lines
+
+
+def format_memory_show_output(
+    payload: EffectiveMemoryPayload,
+    *,
+    user_missing: bool,
+    memory_missing: bool,
+) -> str:
+    """Format the effective Memory v1 payload for operator inspection.
+
+    Example:
+        >>> from cursor_agent.memory import LocalMemoryStore
+        >>> store = LocalMemoryStore(root=Path("/tmp/memory"))
+        >>> print(format_memory_show_output(
+        ...     store.build_effective_payload(),
+        ...     user_missing=True,
+        ...     memory_missing=True,
+        ... ))
+    """
+    lines = [
+        "Memory effective payload",
+        "",
+        *_format_memory_section_block(payload.user, missing=user_missing),
+        "",
+        *_format_memory_section_block(payload.memory, missing=memory_missing),
+        "",
+        (
+            "Total effective: "
+            f"{payload.total_effective_bytes} / {TOTAL_MEMORY_BUDGET_BYTES} bytes"
+        ),
+    ]
+    return "\n".join(lines)
 
 
 class RichDisplay:
