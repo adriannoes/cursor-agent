@@ -78,3 +78,37 @@ def test_typer_is_runtime_dependency() -> None:
     dependencies = project["dependencies"]
     assert isinstance(dependencies, list)
     assert any("typer" in dep for dep in dependencies)
+
+
+def _dependency_package_name(dependency: str) -> str:
+    """Return the PEP 508 package name before any version constraint."""
+    base = dependency.split("[", maxsplit=1)[0].strip()
+    for separator in (">=", "==", "~=", "!=", "<", ">"):
+        if separator in base:
+            return base.split(separator, maxsplit=1)[0].strip()
+    return base
+
+
+def test_aiogram_is_runtime_dependency_with_3x_constraint() -> None:
+    """Telegram adapter requires aiogram 3.x as a direct runtime dependency (PRD-007, ADR-006)."""
+    project = _project_section(_load_pyproject())
+    dependencies = project["dependencies"]
+    assert isinstance(dependencies, list)
+    aiogram_specs = [
+        dependency
+        for dependency in dependencies
+        if _dependency_package_name(dependency) == "aiogram"
+    ]
+    assert aiogram_specs, (
+        "aiogram must be a direct runtime dependency in project.dependencies; "
+        f"got dependencies={dependencies!r}"
+    )
+    aiogram_spec = aiogram_specs[0]
+    assert ">=3" in aiogram_spec, (
+        "aiogram dependency must declare a 3.x-compatible lower bound (>=3); "
+        f"got {aiogram_spec!r}"
+    )
+    assert ",<4" in aiogram_spec, (
+        "aiogram dependency must cap below 4.x for 3.x compatibility; "
+        f"got {aiogram_spec!r}"
+    )
