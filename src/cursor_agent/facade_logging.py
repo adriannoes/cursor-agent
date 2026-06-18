@@ -230,6 +230,28 @@ def emit_hook_deploy(
     logger.info(json.dumps(payload, separators=(",", ":")))
 
 
+def emit_pool_agent_reattach(
+    logger: logging.Logger,
+    *,
+    session_id: str,
+    session_key: str,
+    old_agent_id: str,
+    new_agent_id: str,
+) -> None:
+    """Emit NDJSON ``pool_agent_reattach`` after cold-start agent swap."""
+    payload: dict[str, Any] = {
+        "v": _LOG_SCHEMA_VERSION,
+        "ts": _utc_timestamp(),
+        "level": "info",
+        "event": "pool_agent_reattach",
+        "session_id": session_id,
+        "session_key": session_key,
+        "old_agent_id": _redact(old_agent_id),
+        "new_agent_id": _redact(new_agent_id),
+    }
+    logger.info(json.dumps(payload, separators=(",", ":")))
+
+
 def emit_gateway_auth_blocked(
     logger: logging.Logger,
     *,
