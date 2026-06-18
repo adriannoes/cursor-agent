@@ -11,6 +11,7 @@ Orchestration layer only — the SDK owns the agent loop, tools, and inference. 
 - Interactive local REPL (`cursor-agent`)
 - Persistent sessions (`cursor-agent sessions list`)
 - Long-running messaging gateway, including Telegram (`cursor-agent gateway`)
+- Local Memory v1 from `~/.cursor-agent/USER.md` and `~/.cursor-agent/MEMORY.md`
 - `coding` and `messaging` tool profiles for trusted dev vs untrusted input
 
 ## Documentation
@@ -57,6 +58,14 @@ uv run cursor-agent gateway --config /path/to/gateway.yaml
 ```
 
 Runtime config and session data live under `~/.cursor-agent/` (see [.env.example](.env.example) for overrides).
+
+## Memory
+
+Memory v1 reads `~/.cursor-agent/USER.md` and `~/.cursor-agent/MEMORY.md` by default. Override the directory with `memory_root` in `~/.cursor-agent/config.yaml` or `CURSOR_AGENT__MEMORY_ROOT` (see [.env.example](.env.example)). On the first user turn for a session, `cursor-agent` injects up to 8 KB before the message: up to 4 KB from `USER.md`, then the remaining budget from `MEMORY.md`. Oversized sections keep the end of the file.
+
+After that first turn, memory is frozen for the session: edits or new files on disk are not picked up until `/new` starts a fresh session row (or `/resume` on a row that has not yet injected memory). `/memory show` always reads from disk at command time.
+
+Use `/memory show` in the CLI to inspect the exact effective payload, quotas, byte counts, and truncation state. Missing files are treated as empty.
 
 ## Gateway (Telegram)
 

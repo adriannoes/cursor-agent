@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -22,12 +23,19 @@ from cursor_agent.platforms.base import (
     InboundMessage,
     OutboundMessage,
 )
-from cursor_agent.platforms.telegram import TelegramAdapter, _parse_telegram_command
+from cursor_agent.platforms.telegram import (
+    TELEGRAM_HELP_TEXT,
+    TelegramAdapter,
+    _parse_telegram_command,
+)
 from cursor_agent.platforms.telegram_chunking import (
     escape_telegram_html,
     telegram_session_key,
 )
-from cursor_agent.platforms.telegram_formatting import TelegramFormattingError
+from cursor_agent.platforms.telegram_formatting import (
+    TelegramFormattingError,
+    prepare_telegram_assistant_reply_chunks,
+)
 from cursor_agent.pool import SessionAgentPool
 from cursor_agent.product_copy import TELEGRAM_NO_SESSION_HINT
 from cursor_agent.sdk_facade import FakeSdkFacade
@@ -1467,3 +1475,105 @@ async def test_telegram_send_message_reraises_when_failure_after_first_chunk(
         )
 
     assert attempts.count(None) == 0
+
+
+# --- Memory presentation boundary guards (PRD-008 Wave 4B) ---
+
+
+_TELEGRAM_ADAPTER_SOURCE = (
+    Path(__file__).resolve().parents[2]
+    / "src"
+    / "cursor_agent"
+    / "platforms"
+    / "telegram.py"
+)
+_ADAPTER_MEMORY_BOUNDARY_PATTERN = re.compile(
+    r"LocalMemoryStore|memory_injected|USER\.md|MEMORY\.md|/memory\b|memory_",
+)
+
+
+def test_telegram_adapter_source_has_no_memory_implementation() -> None:
+    """Telegram adapter must not embed Memory v1 loader or injection logic."""
+    source = _TELEGRAM_ADAPTER_SOURCE.read_text(encoding="utf-8")
+    matches = _ADAPTER_MEMORY_BOUNDARY_PATTERN.findall(source)
+    assert matches == [], (
+        "telegram.py must stay presentation-agnostic; found forbidden memory symbols: "
+        f"{matches!r}"
+    )
+
+
+def test_telegram_adapter_help_text_has_no_memory_command_copy() -> None:
+    """Telegram help copy must not advertise memory-specific slash commands."""
+    lowered = TELEGRAM_HELP_TEXT.lower()
+    assert "/memory" not in lowered
+    assert "user.md" not in lowered
+    assert "memory.md" not in lowered
+    assert "memory_injected" not in lowered
+
+
+@pytest.mark.asyncio
+async def test_telegram_send_message_uses_shared_reply_chunking_helper(
+    tmp_path: object,
+) -> None:
+    """Assistant replies must flow through prepare_telegram_assistant_reply_chunks()."""
+    workspace = "/tmp/gateway-workspace"
+    adapter, fake_bot, _ = _make_adapter(tmp_path, workspace=workspace)
+    session_key = telegram_session_key(1, workspace)
+    reply_text = "**Summary**\n\nSee `README.md` and [docs](https://example.com/docs)."
+    captured: list[str] = []
+
+    def capture_chunks(
+        text: str,
+        *,
+        logger: logging.Logger | None = None,
+    ) -> list[str]:
+        captured.append(text)
+        return prepare_telegram_assistant_reply_chunks(text, logger=logger)
+
+    with patch(
+        "cursor_agent.platforms.telegram.prepare_telegram_assistant_reply_chunks",
+        side_effect=capture_chunks,
+    ):
+        await adapter.send_message(
+            OutboundMessage(
+                platform="telegram",
+                sender_id="1",
+                session_key=session_key,
+                text=reply_text,
+            ),
+        )
+
+    assert captured == [reply_text]
+    rendered = str(fake_bot.send_message_calls[0]["text"])
+    assert "<b>Summary</b>" in rendered
+    assert "<code>README.md</code>" in rendered
+    assert '<a href="https://example.com/docs">docs</a>' in rendered
+
+
+@pytest.mark.asyncio
+async def test_telegram_typing_remains_adapter_owned_without_memory_progress_copy(
+    tmp_path: object,
+) -> None:
+    """Typing feedback stays adapter-owned and does not emit memory-specific progress."""
+    adapter, fake_bot, fake_dispatcher = _make_adapter(tmp_path)
+    release = asyncio.Event()
+
+    async def slow_on_inbound(_message: InboundMessage) -> None:
+        await release.wait()
+
+    await _seed_inbound_session(adapter)
+    await adapter.start(slow_on_inbound)
+    handler = await _registered_handler(fake_dispatcher)
+    task = asyncio.create_task(handler(_private_message(text="first turn after /new")))
+    for _ in range(50):
+        if fake_bot.chat_action_calls:
+            break
+        await asyncio.sleep(0.01)
+
+    assert fake_bot.chat_action_calls
+    assert fake_bot.chat_action_calls[0]["action"] == "typing"
+    assert fake_bot.send_message_calls == []
+
+    release.set()
+    await task
+    await adapter.stop()

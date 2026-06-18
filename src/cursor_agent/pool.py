@@ -7,6 +7,11 @@ import logging
 from pathlib import Path
 
 from cursor_agent.config.loader import CursorAgentConfig
+from cursor_agent.memory import (
+    LocalMemoryStore,
+    format_memory_injection_message,
+    memory_store_from_config,
+)
 from cursor_agent.errors import (
     AgentBusyError,
     ConfigError,
@@ -97,11 +102,18 @@ class SessionAgentPool:
         store: SessionStore,
         facade: SdkFacade,
         config: CursorAgentConfig,
+        *,
+        memory_store: LocalMemoryStore | None = None,
     ) -> None:
         """Bind store, facade, and validated config."""
         self._store = store
         self._facade = facade
         self._config = config
+        self._memory_store = (
+            memory_store
+            if memory_store is not None
+            else memory_store_from_config(config)
+        )
         self._locks: dict[str, asyncio.Lock] = {}
         self._resumed_models: dict[str, str] = {}
         self._messaging_hooks_deployed: dict[str, str] = {}
@@ -231,6 +243,29 @@ class SessionAgentPool:
         self._resumed_models.pop(agent_id, None)
         self._cold_resumed_agent_ids.discard(agent_id)
 
+    async def _resolve_row_for_send(self, row: SessionRecord) -> SessionRecord:
+        """Return the latest persisted row immediately before SDK send."""
+        refreshed = await self._store.resolve(row.session_key, session_id=row.id)
+        if refreshed is None:
+            raise ConfigError(_session_not_found_message(row.session_key, row.id))
+        return refreshed
+
+    async def _compose_outgoing_message(
+        self,
+        row: SessionRecord,
+        user_message: str,
+    ) -> str:
+        """Prepend memory payload on the first turn when metadata allows injection."""
+        if row.metadata.get("memory_injected") is True:
+            return user_message
+        try:
+            payload = await asyncio.to_thread(
+                self._memory_store.build_effective_payload,
+            )
+        except ValueError as exc:
+            raise ConfigError(str(exc)) from exc
+        return format_memory_injection_message(payload, user_message)
+
     async def get(
         self,
         session_key: str,
@@ -278,6 +313,9 @@ class SessionAgentPool:
 
         try:
             row = await self._ensure_resumed(row, model_override=model_override)
+            row = await self._resolve_row_for_send(row)
+            memory_not_yet_injected = row.metadata.get("memory_injected") is not True
+            outgoing_message = await self._compose_outgoing_message(row, message)
             log_context = LogContext(
                 session_id=row.id,
                 session_key=row.session_key,
@@ -286,7 +324,7 @@ class SessionAgentPool:
             try:
                 result = await self._facade.send(
                     row.agent_id,
-                    message,
+                    outgoing_message,
                     callbacks=callbacks,
                     log_context=log_context,
                 )
@@ -300,6 +338,10 @@ class SessionAgentPool:
                         row,
                         model_override=model_override,
                     )
+                    row = await self._resolve_row_for_send(row)
+                    outgoing_message = await self._compose_outgoing_message(
+                        row, message
+                    )
                     log_context = LogContext(
                         session_id=row.id,
                         session_key=row.session_key,
@@ -307,7 +349,7 @@ class SessionAgentPool:
                     )
                     result = await self._facade.send(
                         row.agent_id,
-                        message,
+                        outgoing_message,
                         callbacks=callbacks,
                         log_context=log_context,
                     )
@@ -318,12 +360,15 @@ class SessionAgentPool:
                 title = title_from_first_user_message(message)
                 await self._store.update_title(row.id, title)
             await self._store.touch(row.id)
+            metadata_update: dict[str, object] = {
+                "last_run_id": result.run_id,
+                "last_status": result.status.value,
+            }
+            if memory_not_yet_injected:
+                metadata_update["memory_injected"] = True
             await self._store.update_metadata(
                 row.id,
-                {
-                    "last_run_id": result.run_id,
-                    "last_status": result.status.value,
-                },
+                metadata_update,
             )
             return result
         finally:

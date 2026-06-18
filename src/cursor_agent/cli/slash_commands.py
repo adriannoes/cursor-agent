@@ -16,8 +16,15 @@ from cursor_agent.cli.command_router import (
 )
 from cursor_agent.cli.compress import run_compress_session
 from cursor_agent.cli.error_display import format_error
+from cursor_agent.cli.rich_display import format_memory_show_output
 from cursor_agent.config.loader import CursorAgentConfig
-from cursor_agent.errors import CursorAgentError
+from cursor_agent.errors import ConfigError, CursorAgentError
+from cursor_agent.memory import (
+    MEMORY_FILENAME,
+    USER_FILENAME,
+    LocalMemoryStore,
+    memory_store_from_config,
+)
 from cursor_agent.pool import SessionAgentPool
 from cursor_agent.sdk_facade import RunStatus, SdkFacade
 from cursor_agent.sessions.models import SessionCreateParams
@@ -41,6 +48,7 @@ P2 — advanced:
   /retry          Resend the last user message
   /usage          Show usage from the last run
   /compress       Compress session context
+  /memory show    Inspect effective Memory v1 payload
 """
 
 _NO_ACTIVE_SESSION = "No active session. Use /new or /resume to continue."
@@ -50,6 +58,10 @@ _RUN_FAILED_NOTICE = "Run failed (status=error). You can retry or continue."
 _MODEL_USAGE = "Usage: /model <id>"
 _COMPRESSING_MESSAGE = "Compressing context..."
 _COMPRESS_SUCCESS = "Context compressed. New agent active."
+_MEMORY_USAGE = "Usage: /memory show"
+_MEMORY_UNSUPPORTED_SUBCOMMAND = (
+    "Unsupported /memory subcommand: {subcommand!r}. Only /memory show is available."
+)
 
 
 async def handle_new(
@@ -316,6 +328,46 @@ async def _route_compress(
     return CommandHandled()
 
 
+def _memory_store_for_context(ctx: CommandContext) -> LocalMemoryStore:
+    """Return a memory store using context override, config, or the default home path."""
+    return memory_store_from_config(ctx.config, override_root=ctx.memory_root)
+
+
+def _section_missing(store: LocalMemoryStore, filename: str) -> bool:
+    """Return True when a memory file is absent on disk."""
+    if not store.root.exists():
+        return True
+    return not (store.root / filename).is_file()
+
+
+async def _route_memory(
+    ctx: CommandContext,
+    arg: str | None,
+    writer: Callable[[str], None],
+) -> CommandResult:
+    """Show the effective Memory v1 payload from local files (CLI-only)."""
+    if arg is None or not arg.strip():
+        writer(_MEMORY_USAGE)
+        return CommandHandled()
+    subcommand = arg.strip().split(maxsplit=1)[0].lower()
+    if subcommand != "show":
+        writer(_MEMORY_UNSUPPORTED_SUBCOMMAND.format(subcommand=subcommand))
+        return CommandHandled()
+    store = _memory_store_for_context(ctx)
+    try:
+        payload = store.build_effective_payload()
+    except ValueError as exc:
+        writer(format_error(ConfigError(str(exc))))
+        return CommandFailed()
+    output = format_memory_show_output(
+        payload,
+        user_missing=_section_missing(store, USER_FILENAME),
+        memory_missing=_section_missing(store, MEMORY_FILENAME),
+    )
+    writer(output)
+    return CommandHandled()
+
+
 def build_repl_command_router() -> CommandRouter:
     """Build a router with P0 slash commands registered for the REPL."""
     router = CommandRouter()
@@ -328,5 +380,6 @@ def build_repl_command_router() -> CommandRouter:
     router.register("retry", _route_retry)
     router.register("usage", _route_usage)
     router.register("compress", _route_compress)
+    router.register("memory", _route_memory)
     router.register_alias("reset", "new")
     return router

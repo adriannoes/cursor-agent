@@ -91,7 +91,17 @@ This command starts the long-running Telegram gateway with aiogram polling.
 
 Keep this terminal open while testing. Stop the gateway with `Ctrl+C`.
 
-## 7. Test In Telegram
+## 7. Optional Memory Files
+
+The gateway inherits Memory v1 through the shared send path. If `~/.cursor-agent/USER.md` or `~/.cursor-agent/MEMORY.md` exist (or a custom `memory_root` in `gateway.yaml`), the first free-text message after `/new` receives the same bounded memory payload as the CLI. After that first message, memory is frozen for the session until `/new` creates a fresh session row; mid-session file edits are not re-injected. Telegram does not expose `/memory show`; use the CLI command when you need to inspect the effective payload.
+
+```bash
+printf '%s\n' 'Prefer concise answers.' > ~/.cursor-agent/USER.md
+```
+
+This command creates a local user-memory file for manual testing. Keep private preferences and facts local, and do not commit these files.
+
+## 8. Test In Telegram
 
 Open a private chat with your bot and run this flow:
 
@@ -110,7 +120,7 @@ Open a private chat with your bot and run this flow:
 7. Ask for a formatted answer with bold text, inline code, fenced code, and a link.
    Expected behavior: Telegram shows readable formatting (bold, monospace code blocks, and clickable `http://` or `https://` links) instead of raw Markdown syntax.
 
-## 8. Restart Test
+## 9. Restart Test
 
 1. Stop the gateway with `Ctrl+C`.
 2. Start it again:

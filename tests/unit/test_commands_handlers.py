@@ -14,8 +14,11 @@ from cursor_agent.cli.compress import load_compress_prompt
 from cursor_agent.cli.slash_commands import build_repl_command_router
 from cursor_agent.cli.startup import session_key_for
 from cursor_agent.config.loader import CursorAgentConfig
+from cursor_agent.memory import LocalMemoryStore
+from cursor_agent.memory.store import USER_MEMORY_SECTION_MARKER
 from cursor_agent.pool import SessionAgentPool
 from cursor_agent.sdk_facade import FakeSdkFacade, RunResult, RunStatus, StreamCallbacks
+from cursor_agent.sessions.models import SessionCreateParams
 from cursor_agent.sessions.store import SessionStore
 
 from tests.unit.test_commands_compress import (
@@ -31,6 +34,31 @@ from tests.unit.cli_repl_helpers import (
     line_reader,
     seed_session,
 )
+
+
+class SendCapturingFacade(FakeSdkFacade):
+    """FakeSdkFacade that records outgoing messages passed to send()."""
+
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(**kwargs)  # type: ignore[arg-type]
+        self.captured_send_messages: list[str] = []
+
+    async def send(
+        self,
+        agent_id: str,
+        message: str,
+        *,
+        callbacks: StreamCallbacks | None = None,
+        log_context: object | None = None,
+    ) -> RunResult:
+        """Record the composed outgoing message before delegating."""
+        self.captured_send_messages.append(message)
+        return await super().send(
+            agent_id,
+            message,
+            callbacks=callbacks,
+            log_context=log_context,  # type: ignore[arg-type]
+        )
 
 
 class CancelTrackingFacade(FakeSdkFacade):
@@ -300,6 +328,221 @@ async def test_p0_resume_with_id_activates_session(
     assert any("Resumed session" in line for line in output)
 
 
+def _write_memory_files(
+    memory_root: Path,
+    *,
+    user_text: str,
+    memory_text: str,
+) -> None:
+    """Write USER.md and MEMORY.md under a temporary memory root."""
+    memory_root.mkdir(parents=True, exist_ok=True)
+    (memory_root / "USER.md").write_text(user_text, encoding="utf-8")
+    (memory_root / "MEMORY.md").write_text(memory_text, encoding="utf-8")
+
+
+async def _seed_session_with_metadata(
+    session_store: SessionStore,
+    facade: FakeSdkFacade,
+    session_key: str,
+    *,
+    metadata: dict[str, object],
+    workspace: str = "/tmp/workspace",
+) -> str:
+    """Create a session row with explicit metadata for lifecycle regressions."""
+    agent_id = await facade.create_agent(workspace=workspace)
+    record = await session_store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id=agent_id,
+            workspace=workspace,
+            runtime="local",
+            metadata=metadata,
+        )
+    )
+    return record.id
+
+
+async def test_new_session_row_has_no_stale_memory_injected_metadata(
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """Existing behavior: /new creates a row without memory_injected set."""
+    facade = CreateAgentTrackingFacade()
+    store = SessionStore(tmp_path / "sessions.db")
+    await store.initialize()
+    session_key = session_key_for(config)
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    output: list[str] = []
+
+    await drive_repl(
+        pool,
+        session_key,
+        store,
+        config,
+        facade,
+        lines=("/new", "/quit"),
+        writer=output.append,
+        auto_resume=False,
+    )
+
+    rows = await store.list(session_key)
+    assert len(rows) == 1
+    assert rows[0].metadata.get("memory_injected") is not True
+
+
+async def test_new_creates_fresh_session_eligible_for_memory_injection(
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """/new after an injected session creates a fresh row that receives memory on first send."""
+    memory_root = tmp_path / "memory"
+    workspace = str(tmp_path / "workspace")
+    _write_memory_files(
+        memory_root,
+        user_text="prefer concise answers",
+        memory_text="project uses uv",
+    )
+    facade = SendCapturingFacade(scripted_replies={"default": "ok"})
+    store = SessionStore(tmp_path / "sessions.db")
+    await store.initialize()
+    session_key = session_key_for(config)
+    old_session_id = await _seed_session_with_metadata(
+        store,
+        facade,
+        session_key,
+        metadata={"memory_injected": True},
+        workspace=workspace,
+    )
+    pool = SendSpyPool(
+        store=store,
+        facade=facade,
+        config=config,
+        memory_store=LocalMemoryStore(root=memory_root),
+    )
+    output: list[str] = []
+
+    await drive_repl(
+        pool,
+        session_key,
+        store,
+        config,
+        facade,
+        lines=("/new", "hello after new", "/quit"),
+        writer=output.append,
+        auto_resume=True,
+        memory_root=memory_root,
+    )
+
+    rows = await store.list(session_key)
+    assert len(rows) == 2
+    new_row = next(row for row in rows if row.id != old_session_id)
+    assert new_row.metadata.get("memory_injected") is True
+    old_row = await store.resolve(session_key, session_id=old_session_id)
+    assert old_row is not None
+    assert old_row.metadata.get("memory_injected") is True
+    assert len(pool.send_calls) == 1
+    assert pool.send_calls[0]["session_id"] == new_row.id
+    assert len(facade.captured_send_messages) == 1
+    sent_message = facade.captured_send_messages[0]
+    assert USER_MEMORY_SECTION_MARKER in sent_message
+    assert "hello after new" in sent_message
+
+
+async def test_resume_preserves_memory_injected_and_skips_reinjection(
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """/resume keeps durable memory_injected metadata and does not re-inject memory."""
+    memory_root = tmp_path / "memory"
+    _write_memory_files(
+        memory_root,
+        user_text="prefer concise answers",
+        memory_text="project uses uv",
+    )
+    facade = SendCapturingFacade(scripted_replies={"default": "ok"})
+    store = SessionStore(tmp_path / "sessions.db")
+    await store.initialize()
+    session_key = session_key_for(config)
+    session_id = await _seed_session_with_metadata(
+        store,
+        facade,
+        session_key,
+        metadata={"memory_injected": True},
+    )
+    pool = SessionAgentPool(
+        store=store,
+        facade=facade,
+        config=config,
+        memory_store=LocalMemoryStore(root=memory_root),
+    )
+    output: list[str] = []
+
+    await drive_repl(
+        pool,
+        session_key,
+        store,
+        config,
+        facade,
+        lines=("/resume", "follow-up after resume", "/quit"),
+        writer=output.append,
+        auto_resume=False,
+        memory_root=memory_root,
+    )
+
+    row = await store.resolve(session_key, session_id=session_id)
+    assert row is not None
+    assert row.metadata.get("memory_injected") is True
+    assert len(facade.captured_send_messages) == 1
+    sent_message = facade.captured_send_messages[0]
+    assert USER_MEMORY_SECTION_MARKER not in sent_message
+    assert sent_message == "follow-up after resume"
+
+
+async def test_resume_without_memory_injected_eligible_for_injection(
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """/resume on a row without memory_injected injects memory on the first send."""
+    memory_root = tmp_path / "memory"
+    _write_memory_files(
+        memory_root,
+        user_text="prefer concise answers",
+        memory_text="project uses uv",
+    )
+    facade = SendCapturingFacade(scripted_replies={"default": "ok"})
+    store = SessionStore(tmp_path / "sessions.db")
+    await store.initialize()
+    session_key = session_key_for(config)
+    session_id = await seed_session(store, facade, session_key)
+    pool = SessionAgentPool(
+        store=store,
+        facade=facade,
+        config=config,
+        memory_store=LocalMemoryStore(root=memory_root),
+    )
+    output: list[str] = []
+
+    await drive_repl(
+        pool,
+        session_key,
+        store,
+        config,
+        facade,
+        lines=("/resume", "first question", "/quit"),
+        writer=output.append,
+        auto_resume=False,
+        memory_root=memory_root,
+    )
+
+    row = await store.resolve(session_key, session_id=session_id)
+    assert row is not None
+    assert row.metadata.get("memory_injected") is True
+    assert len(facade.captured_send_messages) == 1
+    sent_message = facade.captured_send_messages[0]
+    assert USER_MEMORY_SECTION_MARKER in sent_message
+    assert "first question" in sent_message
+
+
 async def test_help_lists_p0_p1_p2_commands(
     config: CursorAgentConfig,
     tmp_path: Path,
@@ -336,6 +579,7 @@ async def test_help_lists_p0_p1_p2_commands(
     assert "/retry" in help_text
     assert "/usage" in help_text
     assert "/compress" in help_text
+    assert "/memory show" in help_text
     assert "Command not available yet" not in help_text
 
 

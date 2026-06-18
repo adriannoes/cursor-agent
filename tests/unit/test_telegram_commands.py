@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -11,24 +12,30 @@ import pytest
 
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.platforms.base import InboundMessage
-from cursor_agent.platforms.telegram import TelegramAdapter
+from cursor_agent.platforms.telegram import TelegramAdapter, _parse_telegram_command
 from cursor_agent.platforms.telegram_chunking import telegram_session_key
 from cursor_agent.product_copy import TELEGRAM_NO_SESSION_HINT
 from cursor_agent.sdk_facade import FakeSdkFacade
+from cursor_agent.sessions.models import SessionCreateParams
 from cursor_agent.sessions.store import SessionStore
 
 from tests.unit.gateway_fakes import (
     gateway_config,
+    memory_enabled_pool_factory,
     seed_session_with_agent,
     track_inbound,
 )
+from tests.unit.test_memory_injection import _write_memory_files
 from tests.unit.test_telegram_adapter import (
     FakeBot,
     FakeChat,
     FakeDispatcher,
     FakeMessage,
     FakeUser,
+    INTEGRATION_CHAT_ID,
+    _private_message,
     _registered_handler,
+    _telegram_gateway_runtime,
 )
 
 ALLOWED_USER_ID = 123456789
@@ -325,6 +332,47 @@ async def test_telegram_new_resets_chat_by_creating_latest_row(
 
 
 @pytest.mark.asyncio
+async def test_telegram_new_reset_creates_row_eligible_for_memory_injection(
+    tmp_path: object,
+) -> None:
+    """Second /new after memory_injected must create a fresh row eligible for injection."""
+    facade = CreateAgentTrackingFacade()
+    adapter, _fake_bot, fake_dispatcher, handles = _make_command_adapter(
+        tmp_path,
+        facade=facade,
+    )
+    store = handles["store"]
+    assert isinstance(store, SessionStore)
+    await store.initialize()
+    session_key = telegram_session_key(DEFAULT_CHAT_ID, DEFAULT_WORKSPACE)
+    first_agent_id = await facade.create_agent(
+        workspace=DEFAULT_WORKSPACE,
+        tool_profile="messaging",
+    )
+    first_row = await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id=first_agent_id,
+            workspace=DEFAULT_WORKSPACE,
+            runtime="local",
+            tool_profile="messaging",
+            metadata={"memory_injected": True},
+        ),
+    )
+
+    await _start_adapter(adapter, handles, track_inbound([]))
+    handler = await _registered_handler(fake_dispatcher)
+    await handler(_command_message("/new"))
+
+    latest = await store.resolve(session_key)
+    assert latest is not None
+    assert latest.id != first_row.id
+    assert latest.metadata.get("memory_injected") is not True
+    assert len(await store.list(session_key)) == 2
+    await adapter.stop()
+
+
+@pytest.mark.asyncio
 async def test_telegram_new_does_not_affect_other_chat_session_key(
     tmp_path: object,
 ) -> None:
@@ -474,9 +522,44 @@ async def test_telegram_help_omits_unsupported_cli_commands(tmp_path: object) ->
     await handler(_command_message("/help"))
 
     body = str(fake_bot.send_message_calls[0]["text"])
-    for unsupported in ("/compress", "/model", "/retry", "/usage"):
+    for unsupported in ("/compress", "/model", "/retry", "/usage", "/memory"):
         assert unsupported not in body
     await adapter.stop()
+
+
+@pytest.mark.asyncio
+async def test_telegram_memory_show_is_not_a_supported_command(
+    tmp_path: object,
+) -> None:
+    """/memory show must not register as a Telegram slash command in PRD-008."""
+    assert _parse_telegram_command("/memory show") is None
+    assert _parse_telegram_command("/memory") is None
+
+
+@pytest.mark.asyncio
+async def test_telegram_memory_without_session_treated_as_free_text(
+    tmp_path: object,
+) -> None:
+    """Unsupported /memory input without a session follows the free-text no-session path."""
+    adapter, fake_bot, fake_dispatcher, handles = _make_command_adapter(tmp_path)
+    received: list[InboundMessage] = []
+    await _start_adapter(adapter, handles, track_inbound(received))
+
+    handler = await _registered_handler(fake_dispatcher)
+    await handler(_command_message("/memory show"))
+
+    assert fake_bot.send_message_calls
+    assert fake_bot.send_message_calls[0]["text"] == TELEGRAM_NO_SESSION_HINT
+    assert received == []
+    await adapter.stop()
+
+
+def test_telegram_memory_not_in_supported_command_scope() -> None:
+    """Telegram command scope remains /new, /stop, /help, and /start only."""
+    from cursor_agent.platforms.telegram import _SUPPORTED_TELEGRAM_COMMANDS
+
+    assert _SUPPORTED_TELEGRAM_COMMANDS == frozenset({"new", "stop", "help", "start"})
+    assert "memory" not in _SUPPORTED_TELEGRAM_COMMANDS
 
 
 @pytest.mark.asyncio
@@ -515,6 +598,31 @@ async def test_telegram_free_text_without_session_sends_hint(tmp_path: object) -
     assert fake_bot.send_message_calls[0]["text"] == TELEGRAM_NO_SESSION_HINT
     assert received == []
     await adapter.stop()
+
+
+@pytest.mark.asyncio
+async def test_telegram_no_session_free_text_with_memory_files_skips_pool(
+    tmp_path: Path,
+) -> None:
+    """Free text without a session must not reach dispatch or pool when memory exists."""
+    memory_root = tmp_path / "memory"
+    _write_memory_files(
+        memory_root,
+        user_text="prefer concise answers",
+        memory_text="project uses uv",
+    )
+
+    async with _telegram_gateway_runtime(
+        tmp_path,
+        pool_factory=memory_enabled_pool_factory(memory_root),
+    ) as (ctx, _adapter, fake_bot, fake_dispatcher, _config):
+        handler = await _registered_handler(fake_dispatcher)
+        await handler(_private_message(chat_id=INTEGRATION_CHAT_ID, text="hello there"))
+        await asyncio.sleep(0.05)
+
+        assert ctx.pool.send_calls == []
+        assert fake_bot.send_message_calls
+        assert fake_bot.send_message_calls[0]["text"] == TELEGRAM_NO_SESSION_HINT
 
 
 @pytest.mark.asyncio

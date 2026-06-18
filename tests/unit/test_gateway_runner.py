@@ -19,7 +19,12 @@ from cursor_agent.gateway.config import (
     resolve_gateway_startup_config,
 )
 from cursor_agent.gateway.runner import gateway_runtime, run_gateway
+from cursor_agent.memory.store import (
+    MEMORY_SECTION_MARKER,
+    USER_MEMORY_SECTION_MARKER,
+)
 from cursor_agent.platforms.telegram import TelegramAdapter
+from cursor_agent.platforms.telegram_chunking import telegram_session_key
 from cursor_agent.pool import SessionAgentPool
 from cursor_agent.sdk_facade import FakeSdkFacade
 from cursor_agent.sessions.store import SessionStore
@@ -30,23 +35,68 @@ from tests.unit.gateway_fakes import (
     OrderTrackingAdapter,
     SendSpyPool,
     gateway_config,
+    memory_enabled_pool_factory,
     seed_session,
     write_gateway_yaml,
 )
-from tests.unit.test_telegram_adapter import FakeBot, FakeDispatcher
+from tests.unit.test_memory_injection import (
+    SendCapturingFacade,
+    _write_memory_files,
+)
+from tests.unit.test_telegram_adapter import (
+    FakeBot,
+    FakeDispatcher,
+    INTEGRATION_CHAT_ID,
+    _private_message,
+    _registered_handler,
+    _telegram_gateway_runtime,
+)
 
 
 async def _wait_for_condition(
     condition: Callable[[], bool],
     *,
     description: str,
+    attempts: int = 20,
 ) -> None:
     """Wait for a background dispatch assertion to become true."""
-    for _attempt in range(20):
+    for _attempt in range(attempts):
         if condition():
             return
         await asyncio.sleep(0.01)
     raise AssertionError(f"condition did not become true: {description}")
+
+
+def _expected_injected_message(
+    *,
+    user_text: str,
+    memory_text: str,
+    user_message: str,
+) -> str:
+    """Build the locked first-turn injection message shape used in production."""
+    return (
+        f"{USER_MEMORY_SECTION_MARKER}\n"
+        f"{user_text}\n\n"
+        f"{MEMORY_SECTION_MARKER}\n"
+        f"{memory_text}\n\n"
+        f"{user_message}"
+    )
+
+
+async def _wait_for_memory_injected_metadata(
+    store: SessionStore,
+    session_key: str,
+    *,
+    attempts: int = 50,
+) -> None:
+    """Wait until the session row records memory_injected=true after first send."""
+    for _attempt in range(attempts):
+        row = await store.resolve(session_key)
+        if row is not None and row.metadata.get("memory_injected") is True:
+            return
+        await asyncio.sleep(0.01)
+    msg = f"memory_injected metadata did not persist for session_key={session_key!r}"
+    raise AssertionError(msg)
 
 
 def test_resolve_gateway_startup_config_rejects_coding_profile() -> None:
@@ -492,6 +542,62 @@ async def test_dispatch_missing_session_does_not_auto_create_or_call_pool(
         assert adapter.outbound_messages == []
 
 
+@pytest.mark.asyncio
+async def test_dispatch_injects_memory_through_blocking_false_pool_send(
+    tmp_path: Path,
+) -> None:
+    """Gateway dispatch injects memory through pool.send(..., blocking=False)."""
+    memory_root = tmp_path / "memory"
+    user_text = "prefer concise answers"
+    memory_text = "project uses uv and pytest"
+    _write_memory_files(memory_root, user_text=user_text, memory_text=memory_text)
+
+    config = gateway_config()
+    adapter = FakePlatformAdapter(platform="telegram")
+    facade = SendCapturingFacade(default_reply="ok")
+    session_key = "telegram:123456789:mem00001"
+    db_path = tmp_path / "sessions.db"
+    user_message = "what is the test command?"
+
+    async with gateway_runtime(
+        gateway_config=config,
+        adapters=[adapter],
+        facade=facade,
+        store_path=db_path,
+        pool_factory=memory_enabled_pool_factory(memory_root),
+    ) as ctx:
+        await seed_session(
+            ctx.store,
+            facade,
+            session_key,
+            workspace=config.workspace,
+            tool_profile="messaging",
+        )
+        await adapter.simulate_inbound(
+            InboundMessage(
+                platform="telegram",
+                sender_id="123456789",
+                session_key=session_key,
+                text=user_message,
+            )
+        )
+        await _wait_for_condition(
+            lambda: len(ctx.pool.send_calls) == 1 and len(facade.send_calls) == 1,
+            description="memory-injected pool send",
+        )
+
+    assert len(ctx.pool.send_calls) == 1
+    assert ctx.pool.send_calls[0]["blocking"] is False
+    assert ctx.pool.send_calls[0]["session_key"] == session_key
+    assert ctx.pool.send_calls[0]["message"] == user_message
+    expected = _expected_injected_message(
+        user_text=user_text,
+        memory_text=memory_text,
+        user_message=user_message,
+    )
+    assert facade.send_calls[0]["message"] == expected
+
+
 async def test_dispatch_uses_blocking_false_pool_send(tmp_path: Path) -> None:
     """Inbound dispatch calls pool.send with blocking=False."""
     config = gateway_config()
@@ -708,3 +814,59 @@ async def test_run_gateway_returns_zero_after_shutdown(tmp_path: Path) -> None:
 
     assert exit_code == 0
     assert ctx.shutting_down is True
+
+
+@pytest.mark.asyncio
+async def test_telegram_first_message_memory_injected_through_shared_send_path(
+    tmp_path: Path,
+) -> None:
+    """Telegram /new followed by first free text injects memory once via pool.send."""
+    memory_root = tmp_path / "memory"
+    user_text = "prefer concise answers"
+    memory_text = "project uses uv and pytest"
+    _write_memory_files(memory_root, user_text=user_text, memory_text=memory_text)
+
+    user_message = "first question after /new"
+    facade = SendCapturingFacade(default_reply="hello after first turn")
+
+    async with _telegram_gateway_runtime(
+        tmp_path,
+        facade=facade,
+        pool_factory=memory_enabled_pool_factory(memory_root),
+    ) as (ctx, _adapter, fake_bot, fake_dispatcher, config):
+        session_key = telegram_session_key(INTEGRATION_CHAT_ID, config.workspace)
+        handler = await _registered_handler(fake_dispatcher)
+        await handler(_private_message(chat_id=INTEGRATION_CHAT_ID, text="/new"))
+        await handler(
+            _private_message(
+                chat_id=INTEGRATION_CHAT_ID,
+                text=user_message,
+            ),
+        )
+        await _wait_for_condition(
+            lambda: len(ctx.pool.send_calls) == 1 and len(facade.send_calls) == 1,
+            description="telegram first-message memory injection",
+            attempts=50,
+        )
+        await _wait_for_memory_injected_metadata(ctx.store, session_key)
+
+        expected = _expected_injected_message(
+            user_text=user_text,
+            memory_text=memory_text,
+            user_message=user_message,
+        )
+        assert ctx.pool.send_calls[0]["blocking"] is False
+        assert ctx.pool.send_calls[0]["session_key"] == session_key
+        assert ctx.pool.send_calls[0]["message"] == user_message
+        assert facade.send_calls[0]["message"] == expected
+
+        row = await ctx.store.resolve(session_key)
+        assert row is not None
+        assert row.metadata.get("memory_injected") is True
+
+    reply_calls = [
+        call
+        for call in fake_bot.send_message_calls
+        if call.get("text") == "hello after first turn"
+    ]
+    assert len(reply_calls) == 1

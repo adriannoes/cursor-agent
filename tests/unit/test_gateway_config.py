@@ -267,6 +267,19 @@ def test_to_cursor_agent_config_ignores_cursor_agent_env(
     assert agent_config.tool_profile == "messaging"
 
 
+def test_gateway_yaml_memory_root_maps_to_cursor_agent_config(tmp_path: Path) -> None:
+    """Gateway memory_root is passed through to the shared CursorAgentConfig bridge."""
+    config_file = tmp_path / "gateway.yaml"
+    _write_gateway_yaml(
+        config_file,
+        _minimal_gateway_yaml() + "memory_root: /custom/memory\n",
+    )
+    gateway_config_loaded = load_gateway_config(config_path=config_file)
+    agent_config = to_cursor_agent_config(gateway_config_loaded)
+
+    assert agent_config.memory_root == "/custom/memory"
+
+
 def test_example_gateway_config_parses() -> None:
     """Documented example gateway.yaml.example loads and validates."""
     assert _EXAMPLE_GATEWAY_CONFIG.is_file(), (
