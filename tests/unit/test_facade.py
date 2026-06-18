@@ -755,7 +755,9 @@ async def test_fake_has_agent_tracks_create_and_resume() -> None:
     assert facade.has_agent("missing") is False
     agent_id = await facade.create_agent(workspace="/tmp")
     assert facade.has_agent(agent_id) is True
-    assert facade.has_agent(await facade.resume_agent(agent_id, workspace="/tmp")) is True
+    assert (
+        facade.has_agent(await facade.resume_agent(agent_id, workspace="/tmp")) is True
+    )
 
 
 @pytest.mark.asyncio
