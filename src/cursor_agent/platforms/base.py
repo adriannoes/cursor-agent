@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Final, Protocol
+from typing import Protocol
 
-GATEWAY_BUSY_MESSAGE: Final[str] = (
-    "Estou processando sua mensagem anterior. Aguarde ou envie /stop."
-)
+from cursor_agent import product_copy
+
+GATEWAY_BUSY_MESSAGE = product_copy.GATEWAY_BUSY_MESSAGE
 
 
 @dataclass(frozen=True, slots=True)

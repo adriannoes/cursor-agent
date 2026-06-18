@@ -119,9 +119,7 @@ async def test_dispatch_busy_session_sends_adr008_message(tmp_path: Path) -> Non
         session_key=session_key,
         text=GATEWAY_BUSY_MESSAGE,
     )
-    assert busy_outbound.text == (
-        "Estou processando sua mensagem anterior. Aguarde ou envie /stop."
-    )
+    assert busy_outbound.text == GATEWAY_BUSY_MESSAGE
     assert adapter.outbound_messages[1].text == "agent reply"
 
 

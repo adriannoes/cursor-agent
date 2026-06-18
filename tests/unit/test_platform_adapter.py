@@ -92,13 +92,12 @@ def test_platform_adapter_protocol_declares_platform_property() -> None:
 
 
 def test_gateway_busy_message_matches_adr_008() -> None:
-    """ADR-008 busy copy is exported as a stable constant."""
+    """ADR-008 busy copy is exported as a stable constant from product_copy."""
     from cursor_agent.platforms.base import GATEWAY_BUSY_MESSAGE
+    from cursor_agent.product_copy import GATEWAY_BUSY_MESSAGE as CANONICAL_BUSY_MESSAGE
 
-    assert (
-        GATEWAY_BUSY_MESSAGE
-        == "Estou processando sua mensagem anterior. Aguarde ou envie /stop."
-    )
+    assert GATEWAY_BUSY_MESSAGE == CANONICAL_BUSY_MESSAGE
+    assert "/stop" in GATEWAY_BUSY_MESSAGE
 
 
 def test_platform_adapter_protocol_lifecycle_shape() -> None:
