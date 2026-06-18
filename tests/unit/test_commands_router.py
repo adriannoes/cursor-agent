@@ -126,11 +126,10 @@ def test_builtin_handler_takes_precedence_over_skills_stub() -> None:
     assert result.handler is handler
 
 
-def test_skills_stub_returns_no_match_for_non_reserved_names() -> None:
-    """Non-reserved slash names consult skills; stub returns unknown feedback."""
+def test_non_reserved_slash_without_skill_falls_through_as_free_text() -> None:
+    """ADR-013: non-reserved slash names with no skill match return None for free text."""
     router = CommandRouter()
-    result = router.resolve("/custom-skill")
-    assert isinstance(result, UnknownSlashCommand)
+    assert router.resolve("/custom-skill") is None
 
 
 def test_reserved_name_without_handler_returns_unknown_feedback() -> None:
@@ -141,12 +140,10 @@ def test_reserved_name_without_handler_returns_unknown_feedback() -> None:
     assert "not available" in result.message.lower()
 
 
-def test_unknown_slash_command_returns_friendly_message() -> None:
-    """Unknown slash input never falls through to free-text agent sends."""
+def test_unknown_slash_without_skill_returns_none_for_free_text() -> None:
+    """ADR-013: unknown slash with no skill match falls through to agent free text."""
     router = CommandRouter()
-    result = router.resolve("/totally-unknown")
-    assert isinstance(result, UnknownSlashCommand)
-    assert result.message
+    assert router.resolve("/totally-unknown") is None
 
 
 def test_resolve_non_slash_line_returns_none() -> None:

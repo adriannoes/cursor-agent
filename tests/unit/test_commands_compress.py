@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from cursor_agent.cli.compress import load_compress_prompt, run_compress_session
-from cursor_agent.config.loader import CursorAgentConfig
+from cursor_agent.cli.startup import session_key_for
+from cursor_agent.config.loader import CursorAgentConfig, load_config
 from cursor_agent.errors import ConfigError
 from cursor_agent.memory.store import (
     MEMORY_FILENAME,
@@ -20,9 +22,11 @@ from cursor_agent.sdk_facade import (
     RunResult,
     StreamCallbacks,
 )
+from cursor_agent.skills.discovery import skill_discovery_from_config
+from cursor_agent.skills.injection import format_skill_section_marker
 from cursor_agent.sessions.store import SessionStore
 
-from tests.unit.cli_repl_helpers import seed_session
+from tests.unit.cli_repl_helpers import SendSpyPool, drive_repl, seed_session
 
 _SUMMARY_REPLY = """\
 ## Goal
@@ -43,6 +47,48 @@ None.
 
 _COMPRESS_TEST_USER_MEMORY = "compress-no-reinject-user-preference-unique"
 _COMPRESS_TEST_MEMORY_FACT = "compress-no-reinject-memory-fact-unique"
+_COMPRESS_TEST_SKILL_BODY = "compress-no-reinject-skill-body-unique-playbook-content"
+_COMPRESS_TEST_SKILL_NAME = "canvas"
+
+
+def _compress_skills_config(tmp_path: Path, *, workspace: Path) -> CursorAgentConfig:
+    """Build config with ``runtime.local.cwd`` pointed at an injectable workspace."""
+    return load_config(
+        config_path=tmp_path / "missing.yaml",
+        cli_overrides={"runtime": {"local": {"cwd": str(workspace)}}},
+    )
+
+
+def _project_skills_root(workspace: Path) -> Path:
+    """Return ``{workspace}/.cursor/skills``, creating parent dirs when needed."""
+    root = workspace / ".cursor" / "skills"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _write_compress_skill_fixture(
+    skills_root: Path,
+    *,
+    body: str,
+    name: str = _COMPRESS_TEST_SKILL_NAME,
+) -> None:
+    """Create a canvas skill SKILL.md with YAML frontmatter under a skills root."""
+    skill_dir = skills_root / name
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    skill_path = skill_dir / "SKILL.md"
+    skill_path.write_text(
+        "\n".join(
+            [
+                "---",
+                f"name: {name}",
+                "description: Compress regression skill fixture.",
+                "---",
+                "",
+                body,
+            ]
+        ),
+        encoding="utf-8",
+    )
 
 
 def _write_compress_memory_fixtures(memory_root: Path) -> None:
@@ -433,3 +479,84 @@ async def test_compress_session_rollback_preserves_memory_injected_metadata(
     assert row_after.metadata.get("last_run_id") == "compress-memory-regression-run"
     assert row_after.metadata.get("last_status") == "finished"
     assert "status" not in row_after.metadata
+
+
+async def test_compress_session_summary_seed_does_not_reinject_skill_after_invocation(
+    tmp_path: Path,
+) -> None:
+    """Summary delivery after prior skill invocation must not prepend a fresh skill block."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_compress_skill_fixture(
+        _project_skills_root(workspace),
+        body=_COMPRESS_TEST_SKILL_BODY,
+    )
+    config = _compress_skills_config(tmp_path, workspace=workspace)
+    store = SessionStore(tmp_path / "sessions.db")
+    await store.initialize()
+    session_key = session_key_for(config)
+    facade = _CompressSendSpyFacade(
+        scripted_replies={"default": _SUMMARY_REPLY},
+        store=store,
+        session_key=session_key,
+        session_id=None,
+    )
+    session_id = await seed_session(
+        store,
+        facade,
+        session_key,
+        workspace=str(workspace),
+    )
+    pool = SendSpyPool(store=store, facade=facade, config=config)
+
+    discovery_calls_before_compress = 0
+
+    def _counting_skill_discovery(*args: object, **kwargs: object) -> object:
+        nonlocal discovery_calls_before_compress
+        discovery_calls_before_compress += 1
+        return skill_discovery_from_config(*args, **kwargs)  # type: ignore[arg-type]
+
+    with patch(
+        "cursor_agent.cli.slash_commands.skill_discovery_from_config",
+        side_effect=_counting_skill_discovery,
+    ):
+        await drive_repl(
+            pool,
+            session_key,
+            store,
+            config,
+            facade,
+            lines=(f"/{_COMPRESS_TEST_SKILL_NAME}", "/quit"),
+            writer=lambda _line: None,
+            auto_resume=True,
+        )
+        discovery_calls_after_skill = discovery_calls_before_compress
+        assert discovery_calls_after_skill > 0
+
+        facade._status_session_id = session_id
+        result = await run_compress_session(
+            store=store,
+            facade=facade,
+            config=config,
+            session_key=session_key,
+            session_id=session_id,
+        )
+
+    assert discovery_calls_before_compress == discovery_calls_after_skill
+
+    assert len(pool.send_calls) == 1
+    skill_send = pool.send_calls[0]["message"]
+    assert isinstance(skill_send, str)
+    assert format_skill_section_marker(_COMPRESS_TEST_SKILL_NAME) in skill_send
+    assert _COMPRESS_TEST_SKILL_BODY in skill_send
+
+    assert len(facade.send_calls) == 3
+    summary_seed = facade.send_calls[2]
+    assert summary_seed["agent_id"] == result.new_agent_id
+    assert summary_seed["message"] == _SUMMARY_REPLY
+    assert "## Skill:" not in summary_seed["message"]
+    assert (
+        format_skill_section_marker(_COMPRESS_TEST_SKILL_NAME)
+        not in summary_seed["message"]
+    )
+    assert _COMPRESS_TEST_SKILL_BODY not in summary_seed["message"]

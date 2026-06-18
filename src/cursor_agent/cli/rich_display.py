@@ -14,6 +14,7 @@ from cursor_agent.memory import (
     EffectiveMemorySection,
 )
 from cursor_agent.sdk_facade import StreamCallbacks
+from cursor_agent.skills.discovery import SkillEntry
 
 DISPLAY_MEMORY_ROOT = "~/.cursor-agent/"
 _EMPTY_CONTENT_LABEL = "(empty)"
@@ -86,6 +87,38 @@ def format_memory_show_output(
         ),
     ]
     return "\n".join(lines)
+
+
+def format_skills_list_output(skills: list[SkillEntry]) -> str:
+    """Format discovered skills for ``/skills`` terminal output.
+
+    Example:
+        >>> from cursor_agent.skills.discovery import SkillEntry
+        >>> entry = SkillEntry(
+        ...     name="canvas",
+        ...     description="Canvas workflows",
+        ...     source="project",
+        ...     path="canvas/SKILL.md",
+        ...     content="",
+        ... )
+        >>> print(format_skills_list_output([entry]))
+    """
+    if not skills:
+        return "No skills discovered in the configured workspace and user paths."
+
+    lines = [f"Skills ({len(skills)}):", ""]
+    for skill in skills:
+        description = skill.description if skill.description else "(none)"
+        lines.extend(
+            [
+                skill.name,
+                f"  Description: {description}",
+                f"  Source: {skill.source}",
+                f"  Path: {skill.path}",
+                "",
+            ]
+        )
+    return "\n".join(lines).rstrip()
 
 
 class RichDisplay:

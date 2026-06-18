@@ -15,6 +15,7 @@ from cursor_agent.facade_logging import emit_command_end, emit_command_start
 from cursor_agent.pool import SessionAgentPool
 from cursor_agent.sdk_facade import RunStatus, SdkFacade, StreamCallbacks
 from cursor_agent.sessions.store import SessionStore
+from cursor_agent.skills.discovery import SkillEntry
 
 _MODULE_LOGGER = logging.getLogger(__name__)
 
@@ -67,6 +68,7 @@ class CommandContext:
     stream_writer: Callable[[str], None] | None = None
     logger: logging.Logger | None = None
     memory_root: Path | None = None
+    user_skills_root: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -116,12 +118,23 @@ class BuiltinMatch:
 
 @dataclass(frozen=True)
 class UnknownSlashCommand:
-    """Slash input did not resolve to a built-in or skill."""
+    """Reserved built-in name with no registered handler."""
 
     message: str
 
 
-ResolveResult = BuiltinMatch | UnknownSlashCommand
+@dataclass(frozen=True)
+class SkillMatch:
+    """A discovered skill matched the slash input (ADR-013 tier 2)."""
+
+    skill_name: str
+    arg: str | None
+    entry: SkillEntry
+
+
+SkillResolver = Callable[[str], SkillEntry | None]
+
+ResolveResult = BuiltinMatch | UnknownSlashCommand | SkillMatch
 
 
 def parse_slash_line(line: str) -> tuple[str, str | None]:
@@ -149,9 +162,16 @@ def parse_slash_line(line: str) -> tuple[str, str | None]:
 class CommandRouter:
     """Register built-in slash commands and resolve user slash input."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        skill_resolver: SkillResolver | None = None,
+    ) -> None:
         self._handlers: dict[str, CommandHandler] = {}
         self._aliases: dict[str, str] = dict(_DEFAULT_ALIASES)
+        self._skill_resolver: SkillResolver = (
+            skill_resolver if skill_resolver is not None else (lambda _name: None)
+        )
 
     def register(self, name: str, handler: CommandHandler) -> None:
         """Register a handler by bare command name (no leading ``/``)."""
@@ -178,7 +198,9 @@ class CommandRouter:
         name, arg = parse_slash_line(stripped)
         return self.resolve_name(name, arg=arg)
 
-    def resolve_name(self, name: str, *, arg: str | None = None) -> ResolveResult:
+    def resolve_name(
+        self, name: str, *, arg: str | None = None
+    ) -> ResolveResult | None:
         """Resolve a bare command name using ADR-013 precedence."""
         canonical = self._aliases.get(name, name)
         handler = self._handlers.get(canonical)
@@ -190,14 +212,13 @@ class CommandRouter:
             )
         if canonical in RESERVED_BUILTIN_COMMANDS:
             return UnknownSlashCommand(message=UNKNOWN_SLASH_MESSAGE)
-        if self._resolve_skill(canonical) is not None:
-            msg = f"skill routing is not implemented yet for {canonical!r}"
-            raise RuntimeError(msg)
-        return UnknownSlashCommand(message=UNKNOWN_SLASH_MESSAGE)
-
-    def _resolve_skill(self, name: str) -> CommandHandler | None:
-        """Skills stub until PRD-009; always returns no match."""
-        _ = name
+        entry = self._skill_resolver(canonical)
+        if entry is not None:
+            return SkillMatch(
+                skill_name=canonical,
+                arg=arg,
+                entry=entry,
+            )
         return None
 
 
