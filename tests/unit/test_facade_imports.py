@@ -7,6 +7,7 @@ import importlib
 from pathlib import Path
 
 import cursor_agent
+import pytest
 
 
 def _package_source_dir() -> Path:
@@ -73,3 +74,30 @@ def test_cursor_sdk_import_isolation() -> None:
         assert offenders == set(), (
             f"cursor_sdk must not be imported during scaffold; offenders: {sorted(offenders)!r}"
         )
+
+
+_GATEWAY_BOUNDARY_MODULES: tuple[str, ...] = (
+    "cursor_agent.platforms.telegram",
+    "cursor_agent.platforms.factory",
+    "cursor_agent.gateway.auth",
+    "cursor_agent.gateway.config",
+    "cursor_agent.gateway.context",
+    "cursor_agent.gateway.dispatch",
+    "cursor_agent.gateway.runner",
+    "cursor_agent.gateway.shutdown",
+)
+
+
+@pytest.mark.parametrize("module_name", _GATEWAY_BOUNDARY_MODULES)
+def test_gateway_and_telegram_modules_do_not_import_cursor_sdk(
+    module_name: str,
+) -> None:
+    """Telegram adapter, factory, and gateway modules must not import cursor_sdk."""
+    package_dir = _package_source_dir()
+    module_path = package_dir.joinpath(*module_name.split(".")[1:]).with_suffix(".py")
+    assert module_path.is_file(), (
+        f"missing module file for {module_name!r}: {module_path}"
+    )
+    assert not _file_imports_cursor_sdk(module_path), (
+        f"{module_name} must not import cursor_sdk; use cursor_agent.sdk_facade instead"
+    )
