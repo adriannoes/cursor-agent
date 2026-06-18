@@ -13,6 +13,7 @@ import pytest
 
 from cursor_agent.errors import (
     AuthError,
+    ConfigError,
     InvalidAgentError,
     NetworkError,
     TimeoutError,
@@ -40,8 +41,27 @@ from cursor_agent.tool_profile_policy import resolve_mcp_servers
 def _local_option(local_opts: object, key: str) -> object | None:
     """Read a LocalAgentOptions field from object or mapping test doubles."""
     if isinstance(local_opts, dict):
+        wire_key = {
+            "setting_sources": "settingSources",
+            "sandbox_options": "sandboxOptions",
+        }.get(key, key)
+        if wire_key in local_opts:
+            return local_opts.get(wire_key)
         return local_opts.get(key)
     return getattr(local_opts, key, None)
+
+
+def _resume_request_options(mock_client: MagicMock) -> dict[str, Any]:
+    """Extract JSON-serializable resume options passed to the SDK."""
+    resume_args = mock_client.agents.resume.await_args
+    options = (
+        resume_args.args[1]
+        if len(resume_args.args) > 1
+        else resume_args.kwargs.get("options")
+    )
+    assert isinstance(options, dict)
+    json.dumps(options)
+    return options
 
 
 def test_types_run_status_finished_value() -> None:
@@ -246,19 +266,11 @@ async def test_resume_agent_local_options_include_setting_sources_from_config() 
         tool_profile="coding",
     )
 
-    resume_args = mock_client.agents.resume.await_args
-    options = (
-        resume_args.args[1]
-        if len(resume_args.args) > 1
-        else resume_args.kwargs.get("options")
-    )
-    local_opts = (
-        options.get("local")
-        if isinstance(options, dict)
-        else getattr(options, "local", None)
-    )
+    options = _resume_request_options(mock_client)
+    local_opts = options.get("local")
+    assert isinstance(local_opts, dict)
     setting_sources = _local_option(local_opts, "setting_sources")
-    assert setting_sources == ["project", "user"]
+    assert setting_sources == ["SETTING_SOURCE_PROJECT", "SETTING_SOURCE_USER"]
     assert setting_sources != "all"
 
 
@@ -286,17 +298,9 @@ async def test_resume_agent_cloud_options_omit_local_setting_sources() -> None:
         runtime_mode="cloud",
     )
 
-    resume_args = mock_client.agents.resume.await_args
-    options = (
-        resume_args.args[1]
-        if len(resume_args.args) > 1
-        else resume_args.kwargs.get("options")
-    )
-    local_opts = (
-        options.get("local")
-        if isinstance(options, dict)
-        else getattr(options, "local", None)
-    )
+    options = _resume_request_options(mock_client)
+    local_opts = options.get("local")
+    assert isinstance(local_opts, dict)
     assert _local_option(local_opts, "setting_sources") is None
 
 
@@ -382,16 +386,10 @@ async def test_coding_resume_agent_passes_empty_mcp_without_sandbox() -> None:
         tool_profile="coding",
     )
 
-    resume_args = mock_client.agents.resume.await_args
-    options = (
-        resume_args.args[1]
-        if len(resume_args.args) > 1
-        else resume_args.kwargs.get("options")
-    )
-    assert isinstance(options, dict)
-    assert options.get("mcp_servers") == {}
+    options = _resume_request_options(mock_client)
+    assert options.get("mcpServers") == {}
     local_opts = options.get("local")
-    assert local_opts is not None
+    assert isinstance(local_opts, dict)
     assert _sandbox_enabled(local_opts) is None
 
 
@@ -415,18 +413,34 @@ async def test_resume_agent_reinjects_mcp_servers_from_profile() -> None:
         tool_profile="coding",
     )
 
-    resume_args = mock_client.agents.resume.await_args
-    options = (
-        resume_args.args[1]
-        if len(resume_args.args) > 1
-        else resume_args.kwargs.get("options")
+    options = _resume_request_options(mock_client)
+    assert options.get("mcpServers") == {}
+
+
+@pytest.mark.asyncio
+async def test_resume_agent_skips_sdk_call_when_agent_already_loaded() -> None:
+    """resume_agent short-circuits when the agent is already in memory."""
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-in-memory"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.create = AsyncMock(return_value=mock_agent)
+    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(api_key="test-key")
+    facade._client = mock_client
+
+    agent_id = await facade.create_agent(workspace="/repo", tool_profile="coding")
+    resumed_id = await facade.resume_agent(
+        agent_id,
+        workspace="/repo",
+        tool_profile="coding",
     )
-    mcp_servers = (
-        options.get("mcp_servers")
-        if isinstance(options, dict)
-        else getattr(options, "mcp_servers", None)
-    )
-    assert mcp_servers == {}
+
+    assert resumed_id == agent_id
+    mock_client.agents.resume.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -714,6 +728,15 @@ def test_map_sdk_exception_maps_sdk_internal_server_error() -> None:
     mapped = _map_sdk_exception(SdkInternalServerError("upstream 500"))
     assert isinstance(mapped, NetworkError)
     assert mapped.is_retryable is True
+
+
+def test_map_sdk_exception_maps_type_error_to_config_error() -> None:
+    """TypeError from SDK serialization maps to ConfigError."""
+    mapped = _map_sdk_exception(
+        TypeError("Object of type LocalAgentOptions is not JSON serializable")
+    )
+    assert isinstance(mapped, ConfigError)
+    assert "serialization failed" in str(mapped)
 
 
 @pytest.mark.asyncio

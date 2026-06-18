@@ -321,6 +321,8 @@ def _map_sdk_exception(exc: BaseException) -> BaseException:
         return AgentTimeoutError(message)
     if "network" in exc_name or "connection" in exc_name:
         return NetworkError(message)
+    if isinstance(exc, TypeError):
+        return ConfigError(f"SDK request serialization failed: {message}")
     return exc
 
 
@@ -451,6 +453,7 @@ class FakeSdkFacade:
 
 # SDK import boundary (see AGENTS.md).
 from cursor_sdk import AsyncClient, LocalAgentOptions, SandboxOptions  # noqa: E402
+from cursor_sdk.types import options_to_json  # noqa: E402
 
 
 def _build_local_agent_options(
@@ -578,24 +581,29 @@ class AsyncSdkFacade:
         runtime_mode: str = "local",
     ) -> str:
         """Resume an SDK agent and re-inject MCP servers for the profile."""
-        client = self._require_client()
         profile = tool_profile or self._agent_tool_profiles.get(agent_id, "coding")
+        if agent_id in self._agents:
+            self._agent_tool_profiles[agent_id] = profile
+            return agent_id
+
+        client = self._require_client()
         local_setting_sources = (
             self._local_setting_sources if runtime_mode == "local" else None
         )
-        options: dict[str, Any] = {
-            "local": _build_local_agent_options(
-                workspace=workspace,
-                setting_sources=local_setting_sources,
-                tool_profile=profile,
-            ),
-            "mcp_servers": resolve_mcp_servers(profile),
-        }
-        if model is not None:
-            options["model"] = model
+        local_options = _build_local_agent_options(
+            workspace=workspace,
+            setting_sources=local_setting_sources,
+            tool_profile=profile,
+        )
+        request_options = options_to_json(
+            {"mcp_servers": resolve_mcp_servers(profile)},
+            local=local_options,
+            model=model,
+            api_key=self._api_key,
+        )
 
         async def _resume() -> str:
-            agent = await client.agents.resume(agent_id, options)
+            agent = await client.agents.resume(agent_id, request_options)
             await agent.__aenter__()
             self._agents[agent.agent_id] = agent
             self._agent_tool_profiles[agent.agent_id] = profile
