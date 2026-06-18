@@ -23,11 +23,13 @@ from cursor_agent.platforms.base import (
     InboundMessage,
     OutboundMessage,
 )
-from cursor_agent.platforms.telegram_chunking import telegram_session_key
+from cursor_agent.platforms.telegram_chunking import (
+    split_plain_text_reply,
+    telegram_session_key,
+)
 from cursor_agent.platforms.telegram_formatting import (
     prepare_telegram_assistant_reply_chunks,
 )
-from cursor_agent.pool import SessionAgentPool
 from cursor_agent.product_copy import TELEGRAM_NO_SESSION_HINT
 from cursor_agent.sdk_facade import SdkFacade
 from cursor_agent.sessions.models import SessionCreateParams
@@ -151,7 +153,6 @@ class TelegramAdapter:
         ...     config=cursor_config,
         ...     store=store,
         ...     facade=facade,
-        ...     pool=pool,
         ...     logger=logger,
         ... )
         >>> adapter.platform
@@ -166,7 +167,6 @@ class TelegramAdapter:
         config: CursorAgentConfig,
         store: SessionStore,
         facade: SdkFacade,
-        pool: SessionAgentPool,
         logger: logging.Logger,
         bot_factory: BotFactory | None = None,
         dispatcher_factory: DispatcherFactory | None = None,
@@ -177,7 +177,6 @@ class TelegramAdapter:
         self._config = config
         self._store = store
         self._facade = facade
-        self._pool = pool
         self._logger = logger
         self._bot_factory = bot_factory or _default_bot_factory
         self._dispatcher_factory = dispatcher_factory or _default_dispatcher_factory
@@ -209,9 +208,28 @@ class TelegramAdapter:
             self._run_polling(),
             name="telegram-polling",
         )
+        self._polling_task.add_done_callback(self._handle_polling_task_done)
         self._logger.info(
             "telegram_adapter_started platform=telegram polling_task=%s",
             self._polling_task.get_name(),
+        )
+
+    def _handle_polling_task_done(self, task: asyncio.Task[None]) -> None:
+        """Surface unexpected polling termination so the operator is not blind.
+
+        Long polling running in a fire-and-forget task can crash (revoked token,
+        Telegram outage) and leave the gateway alive with no inbound path. A
+        CRITICAL log makes that operator-visible without leaking secrets.
+        """
+        if task.cancelled() or self._stopped:
+            return
+        exc = task.exception()
+        if exc is None:
+            return
+        self._logger.critical(
+            "telegram_polling_terminated platform=telegram exception_class=%s; "
+            "gateway has no inbound path until restarted",
+            exc.__class__.__name__,
         )
 
     async def stop(self) -> None:
@@ -267,6 +285,7 @@ class TelegramAdapter:
             outbound.session_key,
             len(chunks),
         )
+        sent_chunks = 0
         try:
             for chunk in chunks:
                 await bot.send_message(
@@ -274,6 +293,36 @@ class TelegramAdapter:
                     text=chunk,
                     parse_mode="HTML",
                 )
+                sent_chunks += 1
+        except Exception as exc:
+            if sent_chunks == 0:
+                self._logger.warning(
+                    "telegram_outbound_html_fallback platform=telegram chat_id=%s "
+                    "session_key=%s exception_class=%s",
+                    chat_id,
+                    outbound.session_key,
+                    exc.__class__.__name__,
+                )
+                await self._deliver_plain_text_fallback(bot, chat_id, outbound)
+                return
+            self._logger.exception(
+                "telegram_outbound_failed platform=telegram chat_id=%s "
+                "session_key=%s exception_class=%s",
+                chat_id,
+                outbound.session_key,
+                exc.__class__.__name__,
+            )
+            raise
+
+    async def _deliver_plain_text_fallback(
+        self,
+        bot: _BotProtocol,
+        chat_id: int,
+        outbound: OutboundMessage,
+    ) -> None:
+        """Send the plain-text fallback, keeping the safe-log guarantee on failure."""
+        try:
+            await self._send_plain_text_fallback(bot, chat_id, outbound.text)
         except Exception as exc:
             self._logger.exception(
                 "telegram_outbound_failed platform=telegram chat_id=%s "
@@ -283,6 +332,20 @@ class TelegramAdapter:
                 exc.__class__.__name__,
             )
             raise
+
+    async def _send_plain_text_fallback(
+        self,
+        bot: _BotProtocol,
+        chat_id: int,
+        text: str,
+    ) -> None:
+        """Deliver the reply as plain text when Telegram rejects parse_mode=HTML.
+
+        Only used when the first HTML chunk fails, so no partial HTML delivery is
+        duplicated. Sends raw (unescaped) text without ``parse_mode``.
+        """
+        for chunk in split_plain_text_reply(text):
+            await bot.send_message(chat_id=chat_id, text=chunk)
 
     def _register_handlers(self) -> None:
         if self._dispatcher is None:

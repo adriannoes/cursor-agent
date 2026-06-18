@@ -124,3 +124,41 @@ def test_build_platform_adapters_whitespace_token_raises_config_error(
 
     with pytest.raises(ConfigError, match="bot_token"):
         build_platform_adapters(**handles)  # type: ignore[arg-type]
+
+
+def test_build_platform_adapters_empty_allowlist_warns(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Enabled Telegram with an empty allowlist still builds but warns the operator."""
+    empty_allowlist_config = GatewayConfig(
+        workspace="/tmp/gateway-workspace",
+        tool_profile="messaging",
+        platforms=PlatformsConfig(
+            telegram=TelegramPlatformConfig(
+                enabled=True,
+                bot_token="bot123456:placeholder-token",
+                allowed_users=[],
+            ),
+        ),
+    )
+    handles = _runtime_handles(tmp_path, empty_allowlist_config)
+    caplog.set_level(logging.WARNING, logger="test.telegram.factory")
+
+    adapters = build_platform_adapters(**handles)  # type: ignore[arg-type]
+
+    assert len(adapters) == 1
+    assert "allowed_users is empty" in caplog.text
+
+
+def test_build_platform_adapters_nonempty_allowlist_does_not_warn(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A populated allowlist must not emit the empty-allowlist warning."""
+    handles = _runtime_handles(tmp_path, gateway_config())
+    caplog.set_level(logging.WARNING, logger="test.telegram.factory")
+
+    build_platform_adapters(**handles)  # type: ignore[arg-type]
+
+    assert "allowed_users is empty" not in caplog.text

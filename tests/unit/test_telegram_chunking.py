@@ -11,6 +11,7 @@ from cursor_agent.platforms.telegram_chunking import (
     TELEGRAM_FLUSH_THRESHOLD,
     TELEGRAM_MESSAGE_LIMIT,
     escape_telegram_html,
+    split_plain_text_reply,
     split_telegram_html_reply,
     telegram_session_key,
     telegram_workspace_hash,
@@ -181,3 +182,25 @@ def test_telegram_limits_are_documented_constants() -> None:
     """Named limits match Telegram Bot API and ADR-012."""
     assert TELEGRAM_MESSAGE_LIMIT == 4096
     assert TELEGRAM_FLUSH_THRESHOLD == 3800
+
+
+# --- Plain-text fallback splitter (send-time HTML rejection) ---
+
+
+def test_split_plain_text_reply_does_not_escape_markup() -> None:
+    """Plain-text fallback keeps raw characters without HTML escaping."""
+    assert split_plain_text_reply("<b> & </b>") == ["<b> & </b>"]
+
+
+def test_split_plain_text_reply_empty_returns_no_chunks() -> None:
+    """Empty input produces no fallback chunks."""
+    assert split_plain_text_reply("") == []
+
+
+def test_split_plain_text_reply_hard_splits_long_text() -> None:
+    """Long raw text is split at the Telegram hard limit without escaping."""
+    text = "z" * (TELEGRAM_MESSAGE_LIMIT + 500)
+    chunks = split_plain_text_reply(text)
+    assert len(chunks) == 2
+    assert len(chunks[0]) == TELEGRAM_MESSAGE_LIMIT
+    assert "".join(chunks) == text

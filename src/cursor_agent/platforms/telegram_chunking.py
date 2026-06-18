@@ -68,12 +68,28 @@ def split_telegram_html_reply(text: str) -> list[str]:
     Chunks are emitted when buffered text exceeds ``TELEGRAM_FLUSH_THRESHOLD`` or
     at completion. Each chunk is ``<= TELEGRAM_MESSAGE_LIMIT`` characters.
     """
-    escaped = escape_telegram_html(text)
-    if not escaped:
+    return _split_text_into_chunks(escape_telegram_html(text))
+
+
+def split_plain_text_reply(text: str) -> list[str]:
+    """Split raw assistant text into Telegram-safe chunks without HTML escaping.
+
+    Used as a send-time fallback when Telegram rejects ``parse_mode=HTML``.
+
+    Example:
+        >>> split_plain_text_reply("hello")
+        ['hello']
+    """
+    return _split_text_into_chunks(text)
+
+
+def _split_text_into_chunks(text: str) -> list[str]:
+    """Split already-final text into ``<= TELEGRAM_MESSAGE_LIMIT`` chunks."""
+    if not text:
         return []
 
     chunks: list[str] = []
-    remaining = escaped
+    remaining = text
 
     while remaining:
         if len(remaining) <= TELEGRAM_FLUSH_THRESHOLD:
