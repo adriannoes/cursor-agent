@@ -5,13 +5,17 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+import pytest
+
 from cursor_agent.cli.command_router import BuiltinMatch
+from cursor_agent.cli import slash_commands
 from cursor_agent.cli.slash_commands import build_repl_command_router
 from cursor_agent.cli.startup import session_key_for
 from cursor_agent.config.loader import CursorAgentConfig, load_config
 from cursor_agent.pool import SessionAgentPool
 from cursor_agent.sdk_facade import FakeSdkFacade
 from cursor_agent.sessions.store import SessionStore
+from cursor_agent.skills.discovery import SkillDiscovery
 
 from tests.unit.cli_repl_helpers import drive_repl
 
@@ -240,3 +244,41 @@ async def test_help_includes_skills_command(tmp_path: Path) -> None:
     help_text = "\n".join(output)
     assert "/skills" in help_text
     assert "Command not available yet" not in help_text
+
+
+def test_skill_resolver_caches_discovery_per_repl_session(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unknown slash resolution should not rescan the skills tree every time."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    config = _skills_config(tmp_path, workspace=workspace)
+    calls = 0
+
+    def fake_discovery_from_config(
+        config: CursorAgentConfig,
+        *,
+        override_workspace: Path | None = None,
+        override_user_skills: Path | None = None,
+        include_content: bool = True,
+    ) -> SkillDiscovery:
+        nonlocal calls
+        _ = config, override_workspace, override_user_skills, include_content
+        calls += 1
+        return SkillDiscovery({})
+
+    monkeypatch.setattr(
+        slash_commands,
+        "skill_discovery_from_config",
+        fake_discovery_from_config,
+    )
+
+    resolver = slash_commands._make_skill_resolver(
+        config,
+        user_skills_root=tmp_path / "user-skills",
+    )
+
+    assert resolver("unknown-one") is None
+    assert resolver("unknown-two") is None
+    assert calls == 1

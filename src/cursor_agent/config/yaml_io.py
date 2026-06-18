@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 from cursor_agent.errors import ConfigError
 

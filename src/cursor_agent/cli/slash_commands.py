@@ -259,7 +259,11 @@ async def _route_retry(
     arg: str | None,
     writer: Callable[[str], None],
 ) -> CommandResult:
-    """Resend the last free-text user message on the active session."""
+    """Resend the last delivered message on the active session.
+
+    After a skill invocation, this intentionally retries the already composed
+    ``## Skill:`` payload instead of re-reading SKILL.md from disk.
+    """
     _ = arg
     if ctx.state.last_user_message is None:
         writer(_NO_PREVIOUS_MESSAGE)
@@ -344,6 +348,7 @@ def _skill_discovery_for_context(ctx: CommandContext) -> SkillDiscovery:
     return skill_discovery_from_config(
         ctx.config,
         override_user_skills=ctx.user_skills_root,
+        include_content=False,
     )
 
 
@@ -352,14 +357,18 @@ def _make_skill_resolver(
     *,
     user_skills_root: Path | None,
 ) -> SkillResolver:
-    """Build a name resolver that reads discovery from config at resolve time."""
+    """Build a name resolver with per-REPL discovery caching."""
+    cached_discovery: SkillDiscovery | None = None
 
     def resolve_skill(name: str) -> SkillEntry | None:
-        discovery = skill_discovery_from_config(
-            config,
-            override_user_skills=user_skills_root,
-        )
-        return discovery.get_skill(name)
+        nonlocal cached_discovery
+        if cached_discovery is None:
+            cached_discovery = skill_discovery_from_config(
+                config,
+                override_user_skills=user_skills_root,
+                include_content=True,
+            )
+        return cached_discovery.get_skill(name)
 
     return resolve_skill
 
