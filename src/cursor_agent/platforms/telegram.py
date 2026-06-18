@@ -453,6 +453,7 @@ class TelegramAdapter:
         raise ValueError(msg)
 
     async def _handle_new_command(self, *, chat_id: int, session_key: str) -> None:
+        previous = await self._store.resolve(session_key)
         workspace = _resolved_workspace(self._gateway_config, self._config)
         agent_id = await self._facade.create_agent(
             workspace=workspace,
@@ -470,12 +471,35 @@ class TelegramAdapter:
                 title=None,
             ),
         )
+        if previous is not None and previous.agent_id != agent_id:
+            await self._cancel_superseded_agent(session_key, previous.agent_id)
         self._logger.info(
             "telegram_command_new platform=telegram chat_id=%s session_key=%s",
             chat_id,
             session_key,
         )
         await self._send_plain_reply(chat_id, TELEGRAM_NEW_CONFIRMATION)
+
+    async def _cancel_superseded_agent(self, session_key: str, agent_id: str) -> None:
+        """Best-effort cancel of the agent replaced by ``/new``.
+
+        Long-running gateways would otherwise leak superseded SDK agents on every
+        ``/new``. Cancellation is best-effort: a failure must not break ``/new``.
+        """
+        try:
+            await self._facade.cancel(agent_id)
+        except Exception as exc:
+            self._logger.warning(
+                "telegram_new_supersede_cancel_failed platform=telegram "
+                "session_key=%s exception_class=%s",
+                session_key,
+                exc.__class__.__name__,
+            )
+            return
+        self._logger.info(
+            "telegram_new_superseded_agent_cancelled platform=telegram session_key=%s",
+            session_key,
+        )
 
     async def _handle_stop_command(self, *, chat_id: int, session_key: str) -> None:
         row = await self._store.resolve(session_key)
