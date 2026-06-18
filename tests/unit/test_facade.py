@@ -16,6 +16,7 @@ from cursor_agent.errors import (
     ConfigError,
     InvalidAgentError,
     NetworkError,
+    SdkInternalError,
     TimeoutError,
 )
 from cursor_sdk.errors import (
@@ -724,9 +725,9 @@ def test_map_sdk_exception_maps_sdk_api_timeout() -> None:
 
 
 def test_map_sdk_exception_maps_sdk_internal_server_error() -> None:
-    """SDK InternalServerError maps to retryable NetworkError."""
+    """SDK InternalServerError maps to SdkInternalError for pool reattach detection."""
     mapped = _map_sdk_exception(SdkInternalServerError("upstream 500"))
-    assert isinstance(mapped, NetworkError)
+    assert isinstance(mapped, SdkInternalError)
     assert mapped.is_retryable is True
 
 
@@ -745,6 +746,16 @@ async def test_fake_resume_unknown_agent_raises() -> None:
     facade = FakeSdkFacade()
     with pytest.raises(ValueError, match="invalid fake agent_id"):
         await facade.resume_agent("missing", workspace="/tmp")
+
+
+@pytest.mark.asyncio
+async def test_fake_has_agent_tracks_create_and_resume() -> None:
+    """FakeSdkFacade.has_agent reflects create_agent and resume_agent state."""
+    facade = FakeSdkFacade()
+    assert facade.has_agent("missing") is False
+    agent_id = await facade.create_agent(workspace="/tmp")
+    assert facade.has_agent(agent_id) is True
+    assert facade.has_agent(await facade.resume_agent(agent_id, workspace="/tmp")) is True
 
 
 @pytest.mark.asyncio

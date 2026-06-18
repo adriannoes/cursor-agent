@@ -101,6 +101,10 @@ class SdkFacade(Protocol):
         """Release bridge and internal state."""
         ...
 
+    def has_agent(self, agent_id: str) -> bool:
+        """Return True when the facade holds an in-memory agent handle."""
+        ...
+
 
 def _map_run_status(raw_status: object) -> RunStatus:
     """Map SDK or string statuses onto facade ``RunStatus`` values."""
@@ -271,6 +275,7 @@ def _map_sdk_exception(exc: BaseException) -> BaseException:
         CursorAgentError,
         InvalidAgentError,
         NetworkError,
+        SdkInternalError,
         TimeoutError as AgentTimeoutError,
     )
 
@@ -305,9 +310,9 @@ def _map_sdk_exception(exc: BaseException) -> BaseException:
             return InvalidAgentError(message)
         if isinstance(exc, SdkConfigurationError):
             return ConfigError(message)
-        if isinstance(
-            exc, (SdkNetworkError, SdkInternalServerError, SdkRateLimitError)
-        ):
+        if isinstance(exc, SdkInternalServerError):
+            return SdkInternalError(message, retry_after=retry_after)
+        if isinstance(exc, (SdkNetworkError, SdkRateLimitError)):
             return NetworkError(message, retry_after=retry_after)
         if is_retryable:
             return NetworkError(message, retry_after=retry_after)
@@ -445,6 +450,10 @@ class FakeSdkFacade:
     async def cancel(self, agent_id: str) -> None:
         """No-op cancel for fake runs without an active bridge."""
         _ = agent_id
+
+    def has_agent(self, agent_id: str) -> bool:
+        """Return True when the fake facade tracks the agent in memory."""
+        return agent_id in self._messages_by_agent
 
     async def close(self) -> None:
         """Mark the fake facade as closed."""
@@ -698,6 +707,10 @@ class AsyncSdkFacade:
         if self._client is not None:
             await self._client.aclose()
             self._client = None
+
+    def has_agent(self, agent_id: str) -> bool:
+        """Return True when the facade holds a live SDK agent handle."""
+        return agent_id in self._agents
 
     def _require_client(self) -> AsyncClient:
         if self._client is None:
