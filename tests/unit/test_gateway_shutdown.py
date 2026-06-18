@@ -14,6 +14,7 @@ from cursor_agent.gateway.shutdown import (
     flush_logging_handlers,
 )
 from cursor_agent.platforms.base import InboundMessage
+from cursor_agent.platforms.telegram import TelegramAdapter
 from cursor_agent.sdk_facade import FakeSdkFacade
 
 from tests.unit.gateway_fakes import (
@@ -21,6 +22,12 @@ from tests.unit.gateway_fakes import (
     OrderTrackingStopAdapter,
     gateway_config,
     seed_session_with_agent,
+)
+from tests.unit.test_telegram_adapter import (
+    FakeBot,
+    FakeBotSession,
+    FakeDispatcher,
+    _telegram_adapter_factory,
 )
 
 
@@ -358,3 +365,83 @@ async def test_register_shutdown_signals_triggers_coordinator(
                     await asyncio.sleep(0.01)
                 assert ctx.shutting_down is True
                 assert facade._closed is True
+
+
+class ShutdownTrackingBotSession(FakeBotSession):
+    """Fake bot session that records close ordering for Telegram shutdown tests."""
+
+    def __init__(self, events: list[str]) -> None:
+        super().__init__()
+        self._events = events
+
+    async def close(self) -> None:
+        self._events.append("bot_session_closed")
+        await super().close()
+
+
+class ShutdownTrackingDispatcher(FakeDispatcher):
+    """Fake dispatcher that records polling stop ordering."""
+
+    def __init__(self, events: list[str]) -> None:
+        super().__init__()
+        self._events = events
+
+    def stop_polling(self) -> None:
+        self._events.append("polling_stopped")
+        super().stop_polling()
+
+
+class ShutdownTrackingFacade(CancelTrackingFacade):
+    """Fake facade that records close ordering for Telegram shutdown tests."""
+
+    def __init__(self, events: list[str], **kwargs: object) -> None:
+        super().__init__(**kwargs)  # type: ignore[arg-type]
+        self._events = events
+
+    async def close(self) -> None:
+        self._events.append("facade_close")
+        await super().close()
+
+
+async def test_telegram_shutdown_stops_polling_before_facade_close(
+    tmp_path: Path,
+) -> None:
+    """TelegramAdapter stops polling and closes the bot session before facade.close()."""
+    shutdown_events: list[str] = []
+    config = gateway_config()
+    facade = ShutdownTrackingFacade(shutdown_events)
+    fake_bot = FakeBot(token=config.platforms.telegram.bot_token)
+    fake_bot.session = ShutdownTrackingBotSession(shutdown_events)
+    fake_dispatcher = ShutdownTrackingDispatcher(shutdown_events)
+    factory = _telegram_adapter_factory(fake_bot, fake_dispatcher)
+    db_path = tmp_path / "telegram-shutdown-sessions.db"
+
+    with (
+        patch("cursor_agent.gateway.runner.bootstrap_messaging_hooks"),
+        patch(
+            "cursor_agent.gateway.runner.build_platform_adapters",
+            side_effect=factory,
+        ),
+    ):
+        async with gateway_runtime(
+            gateway_config=config,
+            facade=facade,
+            store_path=db_path,
+            register_signals=False,
+            shutdown_timeout_seconds=0.05,
+        ) as ctx:
+            adapter = ctx.adapters[0]
+            assert isinstance(adapter, TelegramAdapter)
+            await asyncio.sleep(0)
+            assert fake_dispatcher.polling_started is True
+
+    assert "polling_stopped" in shutdown_events
+    assert "bot_session_closed" in shutdown_events
+    assert "facade_close" in shutdown_events
+    assert shutdown_events.index("polling_stopped") < shutdown_events.index(
+        "facade_close",
+    )
+    assert shutdown_events.index("bot_session_closed") < shutdown_events.index(
+        "facade_close",
+    )
+    assert facade._closed is True

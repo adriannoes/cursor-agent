@@ -1,0 +1,456 @@
+"""Cursor-style Markdown to Telegram HTML rendering and tag-safe chunking (ADR-012)."""
+
+from __future__ import annotations
+
+import html
+import logging
+import re
+from dataclasses import dataclass
+from typing import Final
+
+from cursor_agent.platforms.telegram_chunking import (
+    TELEGRAM_FLUSH_THRESHOLD,
+    TELEGRAM_MESSAGE_LIMIT,
+    _hard_split_index,
+    _preferred_break_index,
+    split_telegram_html_reply,
+)
+
+_ALLOWED_LINK_SCHEMES: Final[tuple[str, ...]] = ("http://", "https://")
+_FENCE_PATTERN: Final[re.Pattern[str]] = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
+_HEADING_PATTERN: Final[re.Pattern[str]] = re.compile(r"^#{1,6}\s+(.+)$")
+_LINK_PATTERN: Final[re.Pattern[str]] = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+_BOLD_PATTERN: Final[re.Pattern[str]] = re.compile(r"\*\*(.+?)\*\*")
+_INLINE_CODE_PATTERN: Final[re.Pattern[str]] = re.compile(r"`([^`]+)`")
+_TAG_TOKEN_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"(</?(?:b|code|pre|a)(?:\s[^>]*)?>)",
+    re.IGNORECASE,
+)
+_PLACEHOLDER_PREFIX: Final[str] = "\x00TGHTML"
+_SEPARATOR_CELL_PATTERN: Final[re.Pattern[str]] = re.compile(r":?-+:?")
+_SUPPORTED_OPEN_TAG_NAMES: Final[frozenset[str]] = frozenset({"b", "code", "pre", "a"})
+
+
+@dataclass(frozen=True)
+class _MarkdownTableBlock:
+    """Parsed GitHub-flavored Markdown table block."""
+
+    header_cells: list[str]
+    data_rows: list[list[str]]
+    raw_lines: list[str]
+
+
+class TelegramFormattingError(ValueError):
+    """Raised when Markdown cannot be rendered safely for Telegram HTML."""
+
+
+def prepare_telegram_assistant_reply_chunks(
+    text: str,
+    *,
+    logger: logging.Logger | None = None,
+) -> list[str]:
+    """Render assistant Markdown to Telegram HTML chunks with plain-text fallback."""
+    try:
+        rendered = render_cursor_markdown_for_telegram(text)
+        return split_telegram_html_fragments(rendered)
+    except Exception as exc:
+        if logger is not None:
+            logger.warning(
+                "telegram_formatting_fallback platform=telegram exception_class=%s",
+                exc.__class__.__name__,
+            )
+        return split_telegram_html_reply(text)
+
+
+def render_cursor_markdown_for_telegram(text: str) -> str:
+    """Render a conservative Cursor-style Markdown subset to Telegram HTML.
+
+    Supported: bold, inline code, fenced code, headings, http(s) links, plain
+    list lines, and GitHub-flavored Markdown tables. All model text is
+    HTML-escaped before entering tags.
+
+    Example:
+        >>> render_cursor_markdown_for_telegram("**hi**")
+        '<b>hi</b>'
+    """
+    if not text:
+        return ""
+
+    try:
+        blocks: list[str] = []
+        last_end = 0
+        for match in _FENCE_PATTERN.finditer(text):
+            if match.start() > last_end:
+                prose = _render_prose_block(text[last_end : match.start()])
+                if prose:
+                    blocks.append(prose)
+            code_body = match.group(1)
+            blocks.append(
+                f"<pre><code>{html.escape(code_body, quote=False)}</code></pre>",
+            )
+            last_end = match.end()
+        if last_end < len(text):
+            prose = _render_prose_block(text[last_end:])
+            if prose:
+                blocks.append(prose)
+        return "\n\n".join(blocks)
+    except Exception as exc:
+        msg = (
+            "failed to render cursor markdown for telegram: "
+            f"input_length={len(text)!r}, exception_class={exc.__class__.__name__}"
+        )
+        raise TelegramFormattingError(msg) from exc
+
+
+def split_telegram_html_fragments(rendered_html: str) -> list[str]:
+    """Split rendered Telegram HTML without breaking supported tag balance."""
+    if not rendered_html:
+        return []
+
+    tokens = _tokenize_html(rendered_html)
+    chunks: list[str] = []
+    current_parts: list[str] = []
+    current_len = 0
+    open_tags: list[tuple[str, str]] = []
+
+    def closing_suffix() -> str:
+        return "".join(f"</{name}>" for name, _ in reversed(open_tags))
+
+    def reopening_prefix() -> str:
+        return "".join(open_token for _, open_token in open_tags)
+
+    def flush_chunk() -> None:
+        nonlocal current_parts, current_len
+        if not current_parts:
+            return
+        chunk = "".join(current_parts)
+        if open_tags:
+            chunk += closing_suffix()
+        chunks.append(chunk)
+        current_parts = [reopening_prefix()] if open_tags else []
+        current_len = len(current_parts[0]) if current_parts else 0
+
+    def append_text_with_splits(text: str) -> None:
+        nonlocal current_len
+        remaining = text
+        while remaining:
+            overhead = len(closing_suffix()) if open_tags else 0
+            max_chunk_room = TELEGRAM_MESSAGE_LIMIT - current_len - overhead
+            flush_room = TELEGRAM_FLUSH_THRESHOLD - current_len - overhead
+            limit = min(max_chunk_room, flush_room)
+            if limit <= 0:
+                flush_chunk()
+                continue
+            if len(remaining) <= limit:
+                current_parts.append(remaining)
+                current_len += len(remaining)
+                return
+            split_at = _preferred_break_index(remaining, limit)
+            if split_at is None:
+                split_at = _preferred_break_index(remaining, max_chunk_room)
+            if split_at is None:
+                split_at = _hard_split_index(len(remaining))
+            split_at = min(split_at, limit, max_chunk_room)
+            if split_at <= 0:
+                msg = (
+                    "invalid telegram html fragment split: "
+                    f"split_at={split_at!r}, limit={limit!r}, "
+                    f"remaining_length={len(remaining)!r}"
+                )
+                raise ValueError(msg)
+            piece = remaining[:split_at]
+            current_parts.append(piece)
+            current_len += len(piece)
+            flush_chunk()
+            remaining = remaining[split_at:]
+
+    for token in tokens:
+        token_len = len(token)
+        overhead = len(closing_suffix()) if open_tags else 0
+        is_open_tag = token.startswith("<") and not token.startswith("</")
+        is_close_tag = token.startswith("</")
+
+        if is_open_tag:
+            if (
+                current_len + token_len + overhead > TELEGRAM_FLUSH_THRESHOLD
+                and current_parts
+            ):
+                flush_chunk()
+                overhead = len(closing_suffix()) if open_tags else 0
+            current_parts.append(token)
+            current_len += token_len
+            name, open_token = _parse_open_tag(token)
+            if name in _SUPPORTED_OPEN_TAG_NAMES:
+                open_tags.append((name, open_token))
+            continue
+
+        if is_close_tag:
+            if (
+                current_len + token_len + overhead > TELEGRAM_FLUSH_THRESHOLD
+                and current_parts
+            ):
+                flush_chunk()
+            current_parts.append(token)
+            current_len += token_len
+            name = token[2:-1].lower()
+            if open_tags and open_tags[-1][0] == name:
+                open_tags.pop()
+            continue
+
+        if (
+            current_len + token_len + overhead > TELEGRAM_FLUSH_THRESHOLD
+            and current_parts
+        ):
+            flush_chunk()
+        append_text_with_splits(token)
+
+    if current_parts:
+        chunk = "".join(current_parts)
+        if open_tags:
+            chunk += closing_suffix()
+        chunks.append(chunk)
+
+    return [chunk for chunk in chunks if chunk]
+
+
+def _render_prose_block(text: str) -> str:
+    lines = text.split("\n")
+    rendered_lines: list[str] = []
+    index = 0
+    while index < len(lines):
+        table_end, table_block = _try_parse_markdown_table_block(lines, index)
+        if table_block is not None:
+            rendered_lines.append(_render_markdown_table_block(table_block))
+            index = table_end
+            continue
+
+        line = lines[index]
+        if not line:
+            rendered_lines.append("")
+            index += 1
+            continue
+        heading_match = _HEADING_PATTERN.match(line)
+        if heading_match is not None:
+            rendered_lines.append(
+                f"<b>{_render_inline(heading_match.group(1), allow_bold=False)}</b>",
+            )
+            index += 1
+            continue
+        rendered_lines.append(_render_inline(line))
+        index += 1
+    return "\n".join(rendered_lines)
+
+
+def _try_parse_markdown_table_block(
+    lines: list[str],
+    start: int,
+) -> tuple[int, _MarkdownTableBlock | None]:
+    """Return the end index and parsed table when *start* begins a GFM table."""
+    if start >= len(lines):
+        return start, None
+
+    header_line = lines[start]
+    if "|" not in header_line:
+        return start, None
+    if start + 1 >= len(lines):
+        return start, None
+    if not _is_markdown_table_separator_row(lines[start + 1]):
+        return start, None
+
+    data_start = start + 2
+    data_end = data_start
+    while data_end < len(lines):
+        row_line = lines[data_end]
+        if not row_line or "|" not in row_line:
+            break
+        if _is_markdown_table_separator_row(row_line):
+            break
+        data_end += 1
+
+    if data_end == data_start:
+        return start, None
+
+    raw_lines = lines[start:data_end]
+    header_cells = _split_markdown_table_row_cells(header_line)
+    data_rows = [
+        _split_markdown_table_row_cells(lines[row_index])
+        for row_index in range(data_start, data_end)
+    ]
+    return data_end, _MarkdownTableBlock(
+        header_cells=header_cells,
+        data_rows=data_rows,
+        raw_lines=raw_lines,
+    )
+
+
+def _is_markdown_table_separator_row(line: str) -> bool:
+    """Return True when *line* is a GFM alignment/separator row."""
+    if "|" not in line:
+        return False
+    cells = _split_markdown_table_row_cells(line)
+    if not cells:
+        return False
+    return all(_is_markdown_table_separator_cell(cell) for cell in cells)
+
+
+def _is_markdown_table_separator_cell(cell: str) -> bool:
+    """Return True when a table cell is only dash/colon alignment markup."""
+    stripped = cell.strip()
+    if not stripped:
+        return False
+    return _SEPARATOR_CELL_PATTERN.fullmatch(stripped) is not None
+
+
+def _split_markdown_table_row_cells(row: str) -> list[str]:
+    """Split a Markdown table row on pipes outside inline code spans."""
+    cells: list[str] = []
+    current: list[str] = []
+    in_inline_code = False
+    for character in row:
+        if character == "`":
+            in_inline_code = not in_inline_code
+            current.append(character)
+            continue
+        if character == "|" and not in_inline_code:
+            cells.append("".join(current).strip())
+            current = []
+            continue
+        current.append(character)
+    cells.append("".join(current).strip())
+    if cells and cells[0] == "":
+        cells = cells[1:]
+    if cells and cells[-1] == "":
+        cells = cells[:-1]
+    return cells
+
+
+def _render_markdown_table_block(block: _MarkdownTableBlock) -> str:
+    """Render a parsed Markdown table or fall back to escaped plain text."""
+    column_count = len(block.header_cells)
+    if column_count < 2:
+        return _render_markdown_table_fallback(block.raw_lines)
+
+    for row in block.data_rows:
+        if len(row) != column_count:
+            return _render_markdown_table_fallback(block.raw_lines)
+
+    if column_count == 2:
+        return _render_two_column_markdown_table(block.data_rows)
+    return _render_multi_column_markdown_table(block.header_cells, block.data_rows)
+
+
+def _render_markdown_table_fallback(raw_lines: list[str]) -> str:
+    """Escape malformed table blocks as plain Telegram-safe text."""
+    return "\n".join(html.escape(line, quote=False) for line in raw_lines)
+
+
+def _render_two_column_markdown_table(rows: list[list[str]]) -> str:
+    """Render a two-column table as compact Telegram bullet lines."""
+    bullets: list[str] = []
+    for row in rows:
+        first_cell = _render_two_column_table_first_cell(row[0])
+        second_cell = _render_inline(row[1])
+        bullets.append(f"• {first_cell}: {second_cell}")
+    return "\n".join(bullets)
+
+
+def _render_two_column_table_first_cell(cell: str) -> str:
+    """Render the first table column with structural bold when still plain."""
+    rendered = _render_inline(cell)
+    if "<b>" in rendered:
+        return rendered
+    return f"<b>{rendered}</b>"
+
+
+def _render_multi_column_markdown_table(
+    header_cells: list[str],
+    rows: list[list[str]],
+) -> str:
+    """Render a multi-column table as labeled row blocks."""
+    blocks: list[str] = []
+    for item_index, row in enumerate(rows, start=1):
+        block_lines = [f"<b>Item {item_index}</b>"]
+        for header, cell in zip(header_cells, row, strict=True):
+            header_label = _render_inline(header, allow_bold=False)
+            cell_value = _render_inline(cell)
+            block_lines.append(f"{header_label}: {cell_value}")
+        blocks.append("\n".join(block_lines))
+    return "\n\n".join(blocks)
+
+
+def _render_inline(text: str, *, allow_bold: bool = True) -> str:
+    placeholders: dict[str, str] = {}
+    counter = 0
+
+    def stash(fragment: str) -> str:
+        nonlocal counter
+        key = f"{_PLACEHOLDER_PREFIX}{counter}\x00"
+        counter += 1
+        placeholders[key] = fragment
+        return key
+
+    working = text
+
+    def replace_links(value: str) -> str:
+        def repl(match: re.Match[str]) -> str:
+            label = match.group(1)
+            url = match.group(2)
+            if not url.lower().startswith(_ALLOWED_LINK_SCHEMES):
+                return match.group(0)
+            escaped_label = html.escape(label, quote=False)
+            escaped_url = html.escape(url, quote=True)
+            return stash(f'<a href="{escaped_url}">{escaped_label}</a>')
+
+        return _LINK_PATTERN.sub(repl, value)
+
+    def replace_bold(value: str) -> str:
+        def repl(match: re.Match[str]) -> str:
+            inner = _render_inline(match.group(1), allow_bold=False)
+            return stash(f"<b>{inner}</b>")
+
+        return _BOLD_PATTERN.sub(repl, value)
+
+    def replace_inline_code(value: str) -> str:
+        def repl(match: re.Match[str]) -> str:
+            escaped = html.escape(match.group(1), quote=False)
+            return stash(f"<code>{escaped}</code>")
+
+        return _INLINE_CODE_PATTERN.sub(repl, value)
+
+    working = replace_links(working)
+    if allow_bold:
+        working = replace_bold(working)
+    working = replace_inline_code(working)
+    escaped = html.escape(working, quote=False)
+    for key, fragment in placeholders.items():
+        escaped = escaped.replace(html.escape(key, quote=False), fragment)
+    return escaped
+
+
+def _tokenize_html(rendered_html: str) -> list[str]:
+    tokens: list[str] = []
+    position = 0
+    for match in _TAG_TOKEN_PATTERN.finditer(rendered_html):
+        if match.start() > position:
+            tokens.append(rendered_html[position : match.start()])
+        tokens.append(match.group(0))
+        position = match.end()
+    if position < len(rendered_html):
+        tokens.append(rendered_html[position:])
+    return tokens
+
+
+def _parse_open_tag(token: str) -> tuple[str, str]:
+    lowered = token.lower()
+    if lowered.startswith("<a "):
+        return "a", token
+    tag_name = token[1:].split(maxsplit=1)[0].rstrip(">").lower()
+    return tag_name, token
+
+
+__all__ = [
+    "TelegramFormattingError",
+    "prepare_telegram_assistant_reply_chunks",
+    "render_cursor_markdown_for_telegram",
+    "split_telegram_html_fragments",
+]

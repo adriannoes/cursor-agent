@@ -35,7 +35,7 @@ def gateway_config(
         platforms=PlatformsConfig(
             telegram=TelegramPlatformConfig(
                 enabled=True,
-                bot_token="placeholder-token",
+                bot_token="123456789:AAFakeTestTokenForUnitTests",
                 allowed_users=users,
             ),
         ),
@@ -56,7 +56,7 @@ def write_gateway_yaml(
             "platforms:\n"
             "  telegram:\n"
             "    enabled: true\n"
-            "    bot_token: placeholder-token\n"
+            "    bot_token: 123456789:AAFakeTestTokenForUnitTests\n"
             "    allowed_users:\n"
             f"      - {allowed_users}\n"
         ),

@@ -19,6 +19,7 @@ from cursor_agent.gateway.config import (
     resolve_gateway_startup_config,
 )
 from cursor_agent.gateway.runner import gateway_runtime, run_gateway
+from cursor_agent.platforms.telegram import TelegramAdapter
 from cursor_agent.pool import SessionAgentPool
 from cursor_agent.sdk_facade import FakeSdkFacade
 from cursor_agent.sessions.store import SessionStore
@@ -32,6 +33,7 @@ from tests.unit.gateway_fakes import (
     seed_session,
     write_gateway_yaml,
 )
+from tests.unit.test_telegram_adapter import FakeBot, FakeDispatcher
 
 
 async def _wait_for_condition(
@@ -291,6 +293,104 @@ async def test_dispatch_blocked_inbound_skips_pool_and_emits_auth_log(
     assert blocked[0]["platform"] == "telegram"
     assert blocked[0]["sender_id"] == "999888777"
     assert blocked[0]["session_key"] == session_key
+
+
+async def test_gateway_runtime_builds_adapters_via_factory_when_adapters_omitted(
+    tmp_path: Path,
+) -> None:
+    """Production startup calls the factory when adapters= is not supplied."""
+    config = gateway_config()
+    facade = FakeSdkFacade()
+    db_path = tmp_path / "sessions.db"
+    factory_adapter = FakePlatformAdapter(platform="telegram")
+    captured_kwargs: dict[str, object] = {}
+
+    def _capture_factory(**kwargs: object) -> list[FakePlatformAdapter]:
+        captured_kwargs.update(kwargs)
+        return [factory_adapter]
+
+    with (
+        patch("cursor_agent.gateway.runner.bootstrap_messaging_hooks"),
+        patch(
+            "cursor_agent.gateway.runner.build_platform_adapters",
+            side_effect=_capture_factory,
+        ) as mock_factory,
+    ):
+        async with gateway_runtime(
+            gateway_config=config,
+            facade=facade,
+            store_path=db_path,
+            register_signals=False,
+        ) as ctx:
+            mock_factory.assert_called_once()
+            assert captured_kwargs["gateway_config"] == config
+            assert captured_kwargs["facade"] is facade
+            assert isinstance(captured_kwargs["store"], SessionStore)
+            assert isinstance(captured_kwargs["pool"], SessionAgentPool)
+            assert captured_kwargs["pool"] is ctx.pool
+            assert factory_adapter.started is True
+
+    assert factory_adapter.stopped is True
+
+
+async def test_gateway_runtime_injected_adapters_bypass_factory(
+    tmp_path: Path,
+) -> None:
+    """Explicit adapters= bypasses factory construction for deterministic tests."""
+    config = gateway_config()
+    adapter = FakePlatformAdapter(platform="telegram")
+    facade = FakeSdkFacade()
+    db_path = tmp_path / "sessions.db"
+
+    with (
+        patch("cursor_agent.gateway.runner.bootstrap_messaging_hooks"),
+        patch(
+            "cursor_agent.gateway.runner.build_platform_adapters",
+        ) as mock_factory,
+    ):
+        async with gateway_runtime(
+            gateway_config=config,
+            adapters=[adapter],
+            facade=facade,
+            store_path=db_path,
+            register_signals=False,
+        ):
+            mock_factory.assert_not_called()
+            assert adapter.started is True
+
+
+async def test_gateway_runtime_enabled_telegram_with_factory_passes_validation(
+    tmp_path: Path,
+) -> None:
+    """Enabled Telegram with factory-built adapter passes startup validation.
+
+    Exercises the real factory + TelegramAdapter but injects offline aiogram
+    bot/dispatcher doubles so the runner suite never touches the network.
+    """
+    config = gateway_config()
+    facade = FakeSdkFacade()
+    db_path = tmp_path / "sessions.db"
+
+    with (
+        patch("cursor_agent.gateway.runner.bootstrap_messaging_hooks"),
+        patch(
+            "cursor_agent.platforms.telegram._default_bot_factory",
+            lambda token: FakeBot(token=token),
+        ),
+        patch(
+            "cursor_agent.platforms.telegram._default_dispatcher_factory",
+            FakeDispatcher,
+        ),
+    ):
+        async with gateway_runtime(
+            gateway_config=config,
+            facade=facade,
+            store_path=db_path,
+            register_signals=False,
+        ) as ctx:
+            assert len(ctx.adapters) == 1
+            assert isinstance(ctx.adapters[0], TelegramAdapter)
+            assert ctx.adapters[0].platform == "telegram"
 
 
 async def test_gateway_enabled_platform_without_adapter_fails_fast(
