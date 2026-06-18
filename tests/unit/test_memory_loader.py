@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from cursor_agent.config.loader import load_config
 from cursor_agent.memory import (
     MEMORY_SECTION_MARKER,
     TOTAL_MEMORY_BUDGET_BYTES,
@@ -14,6 +15,7 @@ from cursor_agent.memory import (
     EffectiveMemoryPayload,
     LocalMemoryStore,
     format_memory_injection_message,
+    memory_store_from_config,
 )
 
 _USER_FILENAME = "USER.md"
@@ -270,3 +272,32 @@ def test_format_memory_injection_omits_empty_memory_section(tmp_path: Path) -> N
     assert MEMORY_SECTION_MARKER not in message
     assert "prefer dark mode" in message
     assert message.endswith("hello")
+
+
+def test_memory_store_from_config_uses_override_root(tmp_path: Path) -> None:
+    """Test-only override_root wins over config.memory_root."""
+    override = tmp_path / "override-memory"
+    override.mkdir()
+    configured = tmp_path / "configured-memory"
+    configured.mkdir()
+    config = load_config(
+        config_path=tmp_path / "missing.yaml",
+        cli_overrides={
+            "memory_root": str(configured),
+        },
+    )
+    store = memory_store_from_config(config, override_root=override)
+    assert store.root == override
+
+
+def test_memory_store_from_config_uses_env_memory_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CURSOR_AGENT__MEMORY_ROOT selects the memory directory for injection."""
+    memory_root = tmp_path / "env-memory-root"
+    memory_root.mkdir()
+    monkeypatch.setenv("CURSOR_AGENT__MEMORY_ROOT", str(memory_root))
+    config = load_config(config_path=tmp_path / "missing.yaml")
+    store = memory_store_from_config(config)
+    assert store.root == memory_root

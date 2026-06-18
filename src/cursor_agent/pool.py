@@ -7,7 +7,11 @@ import logging
 from pathlib import Path
 
 from cursor_agent.config.loader import CursorAgentConfig
-from cursor_agent.memory import LocalMemoryStore, format_memory_injection_message
+from cursor_agent.memory import (
+    LocalMemoryStore,
+    format_memory_injection_message,
+    memory_store_from_config,
+)
 from cursor_agent.errors import (
     AgentBusyError,
     ConfigError,
@@ -106,7 +110,9 @@ class SessionAgentPool:
         self._facade = facade
         self._config = config
         self._memory_store = (
-            memory_store if memory_store is not None else LocalMemoryStore()
+            memory_store
+            if memory_store is not None
+            else memory_store_from_config(config)
         )
         self._locks: dict[str, asyncio.Lock] = {}
         self._resumed_models: dict[str, str] = {}

@@ -12,6 +12,7 @@ from cursor_agent.memory.store import (
     LoadedMemorySection,
     LocalMemoryStore,
     format_memory_injection_message,
+    memory_store_from_config,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "LoadedMemorySection",
     "LocalMemoryStore",
     "format_memory_injection_message",
+    "memory_store_from_config",
 ]

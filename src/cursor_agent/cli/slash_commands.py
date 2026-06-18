@@ -19,7 +19,12 @@ from cursor_agent.cli.error_display import format_error
 from cursor_agent.cli.rich_display import format_memory_show_output
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.errors import ConfigError, CursorAgentError
-from cursor_agent.memory import MEMORY_FILENAME, USER_FILENAME, LocalMemoryStore
+from cursor_agent.memory import (
+    MEMORY_FILENAME,
+    USER_FILENAME,
+    LocalMemoryStore,
+    memory_store_from_config,
+)
 from cursor_agent.pool import SessionAgentPool
 from cursor_agent.sdk_facade import RunStatus, SdkFacade
 from cursor_agent.sessions.models import SessionCreateParams
@@ -324,10 +329,8 @@ async def _route_compress(
 
 
 def _memory_store_for_context(ctx: CommandContext) -> LocalMemoryStore:
-    """Return a memory store using the injected root or the default home path."""
-    if ctx.memory_root is not None:
-        return LocalMemoryStore(root=ctx.memory_root)
-    return LocalMemoryStore()
+    """Return a memory store using context override, config, or the default home path."""
+    return memory_store_from_config(ctx.config, override_root=ctx.memory_root)
 
 
 def _section_missing(store: LocalMemoryStore, filename: str) -> bool:

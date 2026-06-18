@@ -69,6 +69,7 @@ class CursorAgentConfig(BaseSettings):
     model: str = "composer-2.5"
     tool_profile: ToolProfile = "coding"
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
+    memory_root: str | None = None
 
     @model_validator(mode="before")
     @classmethod

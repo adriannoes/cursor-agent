@@ -93,7 +93,7 @@ Keep this terminal open while testing. Stop the gateway with `Ctrl+C`.
 
 ## 7. Optional Memory Files
 
-The gateway inherits Memory v1 through the shared send path. If `~/.cursor-agent/USER.md` or `~/.cursor-agent/MEMORY.md` exist, the first free-text message after `/new` receives the same bounded memory payload as the CLI. After that first message, memory is frozen for the session until `/new` creates a fresh session row; mid-session file edits are not re-injected. Telegram does not expose `/memory show`; use the CLI command when you need to inspect the effective payload.
+The gateway inherits Memory v1 through the shared send path. If `~/.cursor-agent/USER.md` or `~/.cursor-agent/MEMORY.md` exist (or a custom `memory_root` in `gateway.yaml`), the first free-text message after `/new` receives the same bounded memory payload as the CLI. After that first message, memory is frozen for the session until `/new` creates a fresh session row; mid-session file edits are not re-injected. Telegram does not expose `/memory show`; use the CLI command when you need to inspect the effective payload.
 
 ```bash
 printf '%s\n' 'Prefer concise answers.' > ~/.cursor-agent/USER.md
