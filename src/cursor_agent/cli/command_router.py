@@ -6,6 +6,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 from cursor_agent.config.loader import CursorAgentConfig
@@ -65,6 +66,7 @@ class CommandContext:
     stream_callbacks: StreamCallbacks | None = None
     stream_writer: Callable[[str], None] | None = None
     logger: logging.Logger | None = None
+    memory_root: Path | None = None
 
 
 @dataclass(frozen=True)
