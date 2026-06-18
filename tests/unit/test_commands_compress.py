@@ -9,6 +9,12 @@ import pytest
 from cursor_agent.cli.compress import load_compress_prompt, run_compress_session
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.errors import ConfigError
+from cursor_agent.memory.store import (
+    MEMORY_FILENAME,
+    MEMORY_SECTION_MARKER,
+    USER_FILENAME,
+    USER_MEMORY_SECTION_MARKER,
+)
 from cursor_agent.sdk_facade import (
     FakeSdkFacade,
     RunResult,
@@ -34,6 +40,47 @@ None.
 ## Next steps
 1. Wire handler in slash_commands.
 """
+
+_COMPRESS_TEST_USER_MEMORY = "compress-no-reinject-user-preference-unique"
+_COMPRESS_TEST_MEMORY_FACT = "compress-no-reinject-memory-fact-unique"
+
+
+def _write_compress_memory_fixtures(memory_root: Path) -> None:
+    """Write distinctive USER.md and MEMORY.md under a temporary memory root."""
+    memory_root.mkdir(parents=True, exist_ok=True)
+    (memory_root / USER_FILENAME).write_text(
+        _COMPRESS_TEST_USER_MEMORY,
+        encoding="utf-8",
+    )
+    (memory_root / MEMORY_FILENAME).write_text(
+        _COMPRESS_TEST_MEMORY_FACT,
+        encoding="utf-8",
+    )
+
+
+async def _seed_session_with_memory_injected(
+    store: SessionStore,
+    facade: FakeSdkFacade,
+    session_key: str,
+    *,
+    workspace: str,
+) -> str:
+    """Create a session row that already has durable memory injection metadata."""
+    session_id = await seed_session(
+        store,
+        facade,
+        session_key,
+        workspace=workspace,
+    )
+    await store.update_metadata(
+        session_id,
+        {
+            "memory_injected": True,
+            "last_run_id": "compress-memory-regression-run",
+            "last_status": "finished",
+        },
+    )
+    return session_id
 
 
 def test_load_compress_prompt_reads_versioned_file() -> None:
@@ -95,6 +142,7 @@ class _CompressSendSpyFacade(FakeSdkFacade):
         self._status_session_id = session_id
         self.send_calls: list[dict[str, str]] = []
         self.create_agent_calls: list[dict[str, object]] = []
+        self.metadata_at_send: list[dict[str, object]] = []
         self._summary_generated = False
 
     async def create_agent(
@@ -142,6 +190,7 @@ class _CompressSendSpyFacade(FakeSdkFacade):
             )
             assert row is not None
             assert row.metadata.get("status") == "compressing"
+            self.metadata_at_send.append(dict(row.metadata))
         self.send_calls.append({"agent_id": agent_id, "message": message})
         if self.fail_on_summary_delivery and self._summary_generated:
             msg = (
@@ -258,3 +307,129 @@ async def test_compress_session_rollback_on_summary_delivery_failure(
 
     assert len(facade.create_agent_calls) == 2
     assert len(facade.send_calls) == 2
+
+
+async def test_compress_session_preserves_memory_injected_metadata(
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """Successful /compress keeps memory_injected on the same session row."""
+    store = SessionStore(tmp_path / "sessions.db")
+    await store.initialize()
+    session_key = "cli:default:compress-memory-preserve"
+    facade = _CompressSendSpyFacade(
+        scripted_replies={"default": _SUMMARY_REPLY},
+        store=store,
+        session_key=session_key,
+        session_id=None,
+    )
+    session_id = await _seed_session_with_memory_injected(
+        store,
+        facade,
+        session_key,
+        workspace=str(tmp_path),
+    )
+    facade._status_session_id = session_id
+    _write_compress_memory_fixtures(tmp_path / "memory")
+
+    result = await run_compress_session(
+        store=store,
+        facade=facade,
+        config=config,
+        session_key=session_key,
+        session_id=session_id,
+    )
+
+    row_after = await store.resolve(session_key, session_id=result.session_id)
+    assert row_after is not None
+    assert row_after.metadata.get("memory_injected") is True
+    assert row_after.metadata.get("last_run_id") == "compress-memory-regression-run"
+    assert row_after.metadata.get("last_status") == "finished"
+    assert "status" not in row_after.metadata
+    assert facade.metadata_at_send
+    assert facade.metadata_at_send[0].get("memory_injected") is True
+
+
+async def test_compress_session_summary_seed_does_not_reinject_memory(
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """Summary delivery to the new agent must not prepend Memory v1 payload."""
+    store = SessionStore(tmp_path / "sessions.db")
+    await store.initialize()
+    session_key = "cli:default:compress-no-reinject"
+    facade = _CompressSendSpyFacade(
+        scripted_replies={"default": _SUMMARY_REPLY},
+        store=store,
+        session_key=session_key,
+        session_id=None,
+    )
+    session_id = await _seed_session_with_memory_injected(
+        store,
+        facade,
+        session_key,
+        workspace=str(tmp_path),
+    )
+    facade._status_session_id = session_id
+    _write_compress_memory_fixtures(tmp_path / "memory")
+
+    result = await run_compress_session(
+        store=store,
+        facade=facade,
+        config=config,
+        session_key=session_key,
+        session_id=session_id,
+    )
+
+    assert len(facade.send_calls) == 2
+    summary_seed = facade.send_calls[1]
+    assert summary_seed["agent_id"] == result.new_agent_id
+    assert summary_seed["message"] == _SUMMARY_REPLY
+    assert USER_MEMORY_SECTION_MARKER not in summary_seed["message"]
+    assert MEMORY_SECTION_MARKER not in summary_seed["message"]
+    assert _COMPRESS_TEST_USER_MEMORY not in summary_seed["message"]
+    assert _COMPRESS_TEST_MEMORY_FACT not in summary_seed["message"]
+
+
+async def test_compress_session_rollback_preserves_memory_injected_metadata(
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """Failed /compress rollback restores agent_id and keeps memory_injected."""
+    store = SessionStore(tmp_path / "sessions.db")
+    await store.initialize()
+    session_key = "cli:default:compress-memory-rollback"
+    facade = _CompressSendSpyFacade(
+        scripted_replies={"default": _SUMMARY_REPLY},
+        fail_on_summary_delivery=True,
+        store=store,
+        session_key=session_key,
+        session_id=None,
+    )
+    session_id = await _seed_session_with_memory_injected(
+        store,
+        facade,
+        session_key,
+        workspace=str(tmp_path),
+    )
+    facade._status_session_id = session_id
+    row_before = await store.resolve(session_key, session_id=session_id)
+    assert row_before is not None
+    previous_agent_id = row_before.agent_id
+
+    with pytest.raises(ConfigError, match="summary delivery"):
+        await run_compress_session(
+            store=store,
+            facade=facade,
+            config=config,
+            session_key=session_key,
+            session_id=session_id,
+        )
+
+    row_after = await store.resolve(session_key, session_id=session_id)
+    assert row_after is not None
+    assert row_after.agent_id == previous_agent_id
+    assert row_after.metadata.get("memory_injected") is True
+    assert row_after.metadata.get("last_run_id") == "compress-memory-regression-run"
+    assert row_after.metadata.get("last_status") == "finished"
+    assert "status" not in row_after.metadata
