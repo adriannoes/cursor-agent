@@ -52,6 +52,7 @@ class GatewayConfig(BaseModel):
 
     workspace: str
     tool_profile: ToolProfile
+    memory_root: str | None = None
     platforms: PlatformsConfig = Field(default_factory=PlatformsConfig)
 
 
@@ -101,6 +102,7 @@ def to_cursor_agent_config(gateway_config: GatewayConfig) -> CursorAgentConfig:
     return CursorAgentConfig(
         model=_DEFAULT_MODEL,
         tool_profile=gateway_config.tool_profile,
+        memory_root=gateway_config.memory_root,
         runtime=RuntimeConfig(
             mode=_DEFAULT_RUNTIME_MODE,
             local=LocalRuntimeConfig(
