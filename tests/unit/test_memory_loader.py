@@ -7,10 +7,13 @@ from pathlib import Path
 import pytest
 
 from cursor_agent.memory import (
+    MEMORY_SECTION_MARKER,
     TOTAL_MEMORY_BUDGET_BYTES,
     USER_MEMORY_BUDGET_BYTES,
+    USER_MEMORY_SECTION_MARKER,
     EffectiveMemoryPayload,
     LocalMemoryStore,
+    format_memory_injection_message,
 )
 
 _USER_FILENAME = "USER.md"
@@ -215,3 +218,55 @@ def test_effective_payload_type_is_structured(tmp_path: Path) -> None:
     store = LocalMemoryStore(root=tmp_path)
     payload = store.build_effective_payload()
     assert isinstance(payload, EffectiveMemoryPayload)
+
+
+def test_invalid_memory_root_raises_when_not_directory(tmp_path: Path) -> None:
+    """A memory root that is a regular file raises a clear ValueError."""
+    invalid_root = tmp_path / "not-a-directory"
+    invalid_root.write_text("not a directory", encoding="utf-8")
+    store = LocalMemoryStore(root=invalid_root)
+
+    with pytest.raises(ValueError, match="is not a directory"):
+        store.build_effective_payload()
+
+
+def test_oversized_file_uses_bounded_tail_read(tmp_path: Path) -> None:
+    """Very large memory files truncate from the tail without loading the full file."""
+    tail = "HUGE_FILE_TAIL_MARKER"
+    # 2 MiB of filler — far larger than the 8 KB injection budget.
+    (tmp_path / _USER_FILENAME).write_bytes(b"x" * (2 * 1024 * 1024) + tail.encode())
+    store = LocalMemoryStore(root=tmp_path)
+    payload = store.build_effective_payload()
+
+    assert payload.user.truncated is True
+    assert payload.user.original_bytes > TOTAL_MEMORY_BUDGET_BYTES
+    assert payload.user.effective_text.endswith(tail)
+    assert payload.user.effective_bytes <= USER_MEMORY_BUDGET_BYTES
+
+
+def test_format_memory_injection_omits_empty_user_section(tmp_path: Path) -> None:
+    """Injection skips the USER marker when only MEMORY.md has content."""
+    (tmp_path / _MEMORY_FILENAME).write_text("project uses uv", encoding="utf-8")
+    store = LocalMemoryStore(root=tmp_path)
+    payload = store.build_effective_payload()
+
+    message = format_memory_injection_message(payload, "hello")
+
+    assert USER_MEMORY_SECTION_MARKER not in message
+    assert MEMORY_SECTION_MARKER in message
+    assert "project uses uv" in message
+    assert message.endswith("hello")
+
+
+def test_format_memory_injection_omits_empty_memory_section(tmp_path: Path) -> None:
+    """Injection skips the MEMORY marker when only USER.md has content."""
+    (tmp_path / _USER_FILENAME).write_text("prefer dark mode", encoding="utf-8")
+    store = LocalMemoryStore(root=tmp_path)
+    payload = store.build_effective_payload()
+
+    message = format_memory_injection_message(payload, "hello")
+
+    assert USER_MEMORY_SECTION_MARKER in message
+    assert MEMORY_SECTION_MARKER not in message
+    assert "prefer dark mode" in message
+    assert message.endswith("hello")
