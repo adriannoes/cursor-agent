@@ -12,6 +12,8 @@ TOTAL_MEMORY_BUDGET_BYTES: Final[int] = 8192
 USER_MEMORY_BUDGET_BYTES: Final[int] = 4096
 USER_MEMORY_SECTION_MARKER: Final[str] = "## User memory"
 MEMORY_SECTION_MARKER: Final[str] = "## Memory"
+# Max UTF-8 code unit length minus one — read slack so tail decode never splits a code point.
+_UTF8_TAIL_SLACK_BYTES: Final[int] = 4
 
 _DEFAULT_MEMORY_ROOT = Path.home() / ".cursor-agent"
 
@@ -68,18 +70,26 @@ class LocalMemoryStore:
 
     def build_effective_payload(self) -> EffectiveMemoryPayload:
         """Load memory files and apply ADR-010 quota and truncation rules."""
-        user_loaded = self._read_section(USER_FILENAME)
-        memory_loaded = self._read_section(MEMORY_FILENAME)
+        user_loaded = self._read_section(
+            USER_FILENAME,
+            max_tail_bytes=USER_MEMORY_BUDGET_BYTES,
+        )
+        memory_loaded = self._read_section(
+            MEMORY_FILENAME,
+            max_tail_bytes=TOTAL_MEMORY_BUDGET_BYTES,
+        )
 
         user_effective = _apply_section_budget(
             filename=USER_FILENAME,
             text=user_loaded.text,
+            original_bytes=user_loaded.byte_length,
             budget_bytes=USER_MEMORY_BUDGET_BYTES,
         )
         memory_budget = TOTAL_MEMORY_BUDGET_BYTES - user_effective.effective_bytes
         memory_effective = _apply_section_budget(
             filename=MEMORY_FILENAME,
             text=memory_loaded.text,
+            original_bytes=memory_loaded.byte_length,
             budget_bytes=memory_budget,
         )
         total_effective_bytes = (
@@ -91,7 +101,9 @@ class LocalMemoryStore:
             total_effective_bytes=total_effective_bytes,
         )
 
-    def _read_section(self, filename: str) -> LoadedMemorySection:
+    def _read_section(
+        self, filename: str, *, max_tail_bytes: int
+    ) -> LoadedMemorySection:
         path = self._root / filename
         if not self._root.exists():
             return LoadedMemorySection(
@@ -113,7 +125,7 @@ class LocalMemoryStore:
                 missing=True,
             )
         try:
-            text = path.read_text(encoding="utf-8")
+            text, file_byte_length = _read_utf8_file_tail(path, max_tail_bytes)
         except UnicodeDecodeError as exc:
             raise ValueError(
                 f"invalid memory file: {path!r} is not valid UTF-8 text, "
@@ -122,7 +134,7 @@ class LocalMemoryStore:
         return LoadedMemorySection(
             filename=filename,
             text=text,
-            byte_length=len(text.encode("utf-8")),
+            byte_length=file_byte_length,
             missing=False,
         )
 
@@ -155,9 +167,9 @@ def _apply_section_budget(
     *,
     filename: str,
     text: str,
+    original_bytes: int,
     budget_bytes: int,
 ) -> EffectiveMemorySection:
-    original_bytes = len(text.encode("utf-8"))
     if budget_bytes <= 0 or original_bytes == 0:
         return EffectiveMemorySection(
             filename=filename,
@@ -189,6 +201,32 @@ def _apply_section_budget(
         budget_bytes=budget_bytes,
         truncated=True,
     )
+
+
+def _read_utf8_file_tail(path: Path, max_tail_bytes: int) -> tuple[str, int]:
+    """Read at most ``max_tail_bytes`` UTF-8 bytes from the end of ``path``.
+
+    Returns decoded text and the on-disk file size in bytes. Only the tail is
+    loaded into memory — enough for ADR-010 truncation while avoiding unbounded
+    reads when a memory file is accidentally very large.
+
+    Example:
+        >>> _read_utf8_file_tail(Path("USER.md"), 4096)
+        ('prefer dark mode', 18)
+    """
+    file_size = path.stat().st_size
+    if file_size == 0:
+        return "", 0
+
+    read_size = min(file_size, max_tail_bytes + _UTF8_TAIL_SLACK_BYTES)
+    with path.open("rb") as handle:
+        handle.seek(file_size - read_size)
+        raw = handle.read(read_size)
+
+    if read_size == file_size:
+        return raw.decode("utf-8"), file_size
+
+    return _decode_without_split_code_point(raw), file_size
 
 
 def _truncate_utf8_from_end(text: str, max_bytes: int) -> str:

@@ -244,7 +244,7 @@ class SessionAgentPool:
             raise ConfigError(_session_not_found_message(row.session_key, row.id))
         return refreshed
 
-    def _compose_outgoing_message(
+    async def _compose_outgoing_message(
         self,
         row: SessionRecord,
         user_message: str,
@@ -253,7 +253,9 @@ class SessionAgentPool:
         if row.metadata.get("memory_injected") is True:
             return user_message
         try:
-            payload = self._memory_store.build_effective_payload()
+            payload = await asyncio.to_thread(
+                self._memory_store.build_effective_payload,
+            )
         except ValueError as exc:
             raise ConfigError(str(exc)) from exc
         return format_memory_injection_message(payload, user_message)
@@ -307,7 +309,7 @@ class SessionAgentPool:
             row = await self._ensure_resumed(row, model_override=model_override)
             row = await self._resolve_row_for_send(row)
             memory_not_yet_injected = row.metadata.get("memory_injected") is not True
-            outgoing_message = self._compose_outgoing_message(row, message)
+            outgoing_message = await self._compose_outgoing_message(row, message)
             log_context = LogContext(
                 session_id=row.id,
                 session_key=row.session_key,
@@ -331,7 +333,9 @@ class SessionAgentPool:
                         model_override=model_override,
                     )
                     row = await self._resolve_row_for_send(row)
-                    outgoing_message = self._compose_outgoing_message(row, message)
+                    outgoing_message = await self._compose_outgoing_message(
+                        row, message
+                    )
                     log_context = LogContext(
                         session_id=row.id,
                         session_key=row.session_key,
