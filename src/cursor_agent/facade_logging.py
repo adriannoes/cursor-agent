@@ -165,6 +165,56 @@ def emit_command_start(
     logger.info(json.dumps(payload, separators=(",", ":")))
 
 
+def _skill_payload(
+    *,
+    skill_name: str,
+    source: str,
+    session_id: str | None,
+    session_key: str | None,
+) -> dict[str, Any]:
+    """Build NDJSON schema v1 fields for skill invocation events."""
+    return {
+        "v": _LOG_SCHEMA_VERSION,
+        "ts": _utc_timestamp(),
+        "level": "info",
+        "event": "skill_invoked",
+        "session_id": session_id,
+        "session_key": session_key,
+        "skill_name": skill_name,
+        "source": source,
+    }
+
+
+def emit_skill_invoked(
+    logger: logging.Logger,
+    *,
+    skill_name: str,
+    source: str,
+    session_id: str | None = None,
+    session_key: str | None = None,
+) -> None:
+    """Emit NDJSON ``skill_invoked`` when a skill slash command is sent.
+
+    Logs only ``skill_name`` and ``source`` — never skill body or filesystem paths.
+
+    Example:
+        emit_skill_invoked(
+            logger,
+            skill_name="canvas",
+            source="project",
+            session_id="sess-1",
+            session_key="cli:default:abc",
+        )
+    """
+    payload = _skill_payload(
+        skill_name=skill_name,
+        source=source,
+        session_id=session_id,
+        session_key=session_key,
+    )
+    logger.info(json.dumps(payload, separators=(",", ":")))
+
+
 def emit_command_end(
     logger: logging.Logger,
     *,

@@ -147,11 +147,11 @@ async def test_run_repl_quit_exits_and_returns_none(
     assert status is None
 
 
-async def test_run_repl_unknown_slash_command_placeholder(
+async def test_run_repl_unknown_slash_without_skill_uses_free_text_path(
     config: CursorAgentConfig,
     tmp_path: Path,
 ) -> None:
-    """Unknown slash commands write placeholder until routing is implemented."""
+    """ADR-013: unknown slash with no skill match follows the free-text REPL path."""
     facade = FakeSdkFacade()
     store = SessionStore(tmp_path / "sessions.db")
     await store.initialize()
@@ -170,7 +170,8 @@ async def test_run_repl_unknown_slash_command_placeholder(
         auto_resume=False,
     )
 
-    assert any("Command not available yet" in line for line in output)
+    assert any("No active session" in line for line in output)
+    assert not any("Command not available yet" in line for line in output)
 
 
 async def test_run_repl_free_text_without_session_guidance(

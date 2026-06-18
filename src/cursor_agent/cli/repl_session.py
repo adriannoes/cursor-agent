@@ -2,21 +2,29 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 
 from cursor_agent.cli.command_router import (
+    BuiltinMatch,
     CommandContext,
     CommandResult,
     QuitRequested,
     ReplState,
     SessionActivated,
+    SkillMatch,
     UnknownSlashCommand,
     execute_builtin_command,
 )
 from cursor_agent.cli.error_display import format_error
-from cursor_agent.cli.slash_commands import build_repl_command_router
+from cursor_agent.facade_logging import emit_skill_invoked
+from cursor_agent.cli.slash_commands import (
+    _make_skill_resolver,
+    build_repl_command_router,
+)
+from cursor_agent.skills.injection import format_skill_injection_message
 from cursor_agent.cli.stream_renderer import build_stream_callbacks
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.errors import CursorAgentError
@@ -55,6 +63,7 @@ async def run_repl(
     auto_resume: bool = True,
     logger: logging.Logger | None = None,
     memory_root: Path | None = None,
+    user_skills_root: Path | None = None,
 ) -> RunStatus | None:
     """Run the interactive REPL loop until ``/quit`` or reader exhaustion.
 
@@ -77,7 +86,12 @@ async def run_repl(
         else build_stream_callbacks(stream_sink)
     )
     state = ReplState()
-    router = build_repl_command_router()
+    router = build_repl_command_router(
+        skill_resolver=_make_skill_resolver(
+            config,
+            user_skills_root=user_skills_root,
+        ),
+    )
     ctx = CommandContext(
         pool=pool,
         store=store,
@@ -89,6 +103,7 @@ async def run_repl(
         stream_writer=stream_sink,
         logger=logger,
         memory_root=memory_root,
+        user_skills_root=user_skills_root,
     )
 
     if auto_resume:
@@ -109,11 +124,11 @@ async def run_repl(
         stripped = line.strip()
         if not stripped:
             continue
-        resolved = router.resolve(stripped)
-        if resolved is not None:
-            if isinstance(resolved, UnknownSlashCommand):
-                writer(resolved.message)
-                continue
+        resolved = await asyncio.to_thread(router.resolve, stripped)
+        if isinstance(resolved, UnknownSlashCommand):
+            writer(resolved.message)
+            continue
+        if isinstance(resolved, BuiltinMatch):
             command_result = await execute_builtin_command(
                 resolved,
                 ctx,
@@ -122,6 +137,41 @@ async def run_repl(
             )
             if _apply_command_result(command_result, state):
                 break
+            continue
+        if isinstance(resolved, SkillMatch):
+            if state.active_session_id is None:
+                writer(_NO_ACTIVE_SESSION_GUIDANCE)
+                continue
+            composed_message = format_skill_injection_message(
+                resolved.entry,
+                resolved.arg,
+            )
+            try:
+                send_result = await pool.send(
+                    session_key,
+                    composed_message,
+                    session_id=state.active_session_id,
+                    callbacks=send_callbacks,
+                    blocking=True,
+                    model_override=state.model_override,
+                )
+            except CursorAgentError as exc:
+                writer(format_error(exc))
+                continue
+            skill_logger = logger if logger is not None else logging.getLogger(__name__)
+            emit_skill_invoked(
+                skill_logger,
+                skill_name=resolved.skill_name,
+                source=resolved.entry.source,
+                session_id=state.active_session_id,
+                session_key=session_key,
+            )
+            state.last_user_message = composed_message
+            state.last_status = send_result.status
+            state.last_usage = send_result.usage
+            stream_sink("\n")
+            if send_result.status == RunStatus.ERROR:
+                writer(_RUN_FAILED_NOTICE)
             continue
         if state.active_session_id is None:
             writer(_NO_ACTIVE_SESSION_GUIDANCE)
