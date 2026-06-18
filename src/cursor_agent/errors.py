@@ -56,6 +56,12 @@ class NetworkError(CursorAgentError):
     is_retryable = True
 
 
+class SdkInternalError(NetworkError):
+    """SDK bridge internal server error after resume or send."""
+
+    is_retryable = True
+
+
 class TimeoutError(CursorAgentError):
     """Run or bridge exceeded a configured time limit."""
 

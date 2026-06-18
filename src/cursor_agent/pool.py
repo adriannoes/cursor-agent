@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 
 from cursor_agent.config.loader import CursorAgentConfig
-from cursor_agent.errors import AgentBusyError, ConfigError
-from cursor_agent.facade_logging import LogContext
+from cursor_agent.errors import (
+    AgentBusyError,
+    ConfigError,
+    CursorAgentError,
+    InvalidAgentError,
+    SdkInternalError,
+)
+from cursor_agent.facade_logging import LogContext, emit_pool_agent_reattach
 from cursor_agent.messaging_hooks import (
     ensure_messaging_hooks,
     messaging_hook_source_fingerprint,
@@ -19,6 +26,8 @@ from cursor_agent.tool_profile_policy import (
 )
 from cursor_agent.sessions.models import SessionRecord, title_from_first_user_message
 from cursor_agent.sessions.store import SessionStore
+
+_MODULE_LOGGER = logging.getLogger(__name__)
 
 
 def _runtime_mismatch_message(session_runtime: str, config_runtime: str) -> str:
@@ -69,6 +78,11 @@ def _validate_send_message(message: str) -> None:
         )
 
 
+def _is_reattachable_send_error(exc: CursorAgentError) -> bool:
+    """Return True for SDK internal failures observed after cold resume."""
+    return isinstance(exc, SdkInternalError)
+
+
 class SessionAgentPool:
     """Serialize SDK access per session_key with lazy resume from SessionStore.
 
@@ -91,6 +105,7 @@ class SessionAgentPool:
         self._locks: dict[str, asyncio.Lock] = {}
         self._resumed_models: dict[str, str] = {}
         self._messaging_hooks_deployed: dict[str, str] = {}
+        self._cold_resumed_agent_ids: set[str] = set()
 
     def _resolve_model(self, model_override: str | None) -> str:
         """Return the effective model for resume/send (override wins over config)."""
@@ -143,7 +158,7 @@ class SessionAgentPool:
         row: SessionRecord,
         *,
         model_override: str | None = None,
-    ) -> None:
+    ) -> SessionRecord:
         """Resume the SDK agent when missing or when the effective resume key changed."""
         model = self._resolve_model(model_override)
         tool_profile = effective_tool_profile(
@@ -151,20 +166,70 @@ class SessionAgentPool:
         )
         resume_key = f"{model}:{tool_profile}"
         if self._resumed_models.get(row.agent_id) == resume_key:
-            return
+            return row
+        cold_start = not self._facade.has_agent(row.agent_id)
         await self._ensure_messaging_hooks_for_row(row)
-        await self._facade.resume_agent(
-            row.agent_id,
+        try:
+            await self._facade.resume_agent(
+                row.agent_id,
+                workspace=row.workspace,
+                model=model,
+                tool_profile=tool_profile,
+                runtime_mode=row.runtime,
+            )
+        except InvalidAgentError:
+            if not cold_start:
+                raise
+            return await self._reattach_agent(
+                row,
+                model_override=model_override,
+            )
+        if cold_start:
+            self._cold_resumed_agent_ids.add(row.agent_id)
+        self._resumed_models[row.agent_id] = resume_key
+        return row
+
+    async def _reattach_agent(
+        self,
+        row: SessionRecord,
+        *,
+        model_override: str | None = None,
+    ) -> SessionRecord:
+        """Create a fresh SDK agent and swap the persisted session row agent_id.
+
+        Reattach starts a new SDK agent; conversation history on the stale handle
+        is not preserved (session row and SQLite metadata are kept).
+        """
+        model = self._resolve_model(model_override)
+        tool_profile = effective_tool_profile(
+            self._config.tool_profile, row.tool_profile
+        )
+        previous_agent_id = row.agent_id
+        await self._ensure_messaging_hooks_for_row(row)
+        new_agent_id = await self._facade.create_agent(
             workspace=row.workspace,
             model=model,
             tool_profile=tool_profile,
             runtime_mode=row.runtime,
         )
-        self._resumed_models[row.agent_id] = resume_key
+        updated = await self._store.update_agent_id(row.id, new_agent_id)
+        self.forget_resumed_agent(previous_agent_id)
+        self._cold_resumed_agent_ids.discard(previous_agent_id)
+        resume_key = f"{model}:{tool_profile}"
+        self._resumed_models[new_agent_id] = resume_key
+        emit_pool_agent_reattach(
+            _MODULE_LOGGER,
+            session_id=row.id,
+            session_key=row.session_key,
+            old_agent_id=previous_agent_id,
+            new_agent_id=new_agent_id,
+        )
+        return updated
 
     def forget_resumed_agent(self, agent_id: str) -> None:
         """Drop resume cache for ``agent_id`` after agent swaps (e.g. /compress)."""
         self._resumed_models.pop(agent_id, None)
+        self._cold_resumed_agent_ids.discard(agent_id)
 
     async def get(
         self,
@@ -176,7 +241,7 @@ class SessionAgentPool:
         """Resolve and lazily resume the session for ``session_key``."""
         row = await self._resolve_or_raise(session_key, session_id)
         self._assert_runtime_match(row)
-        await self._ensure_resumed(row, model_override=model_override)
+        row = await self._ensure_resumed(row, model_override=model_override)
         return row
 
     async def send(
@@ -212,18 +277,43 @@ class SessionAgentPool:
                 )
 
         try:
-            await self._ensure_resumed(row, model_override=model_override)
+            row = await self._ensure_resumed(row, model_override=model_override)
             log_context = LogContext(
                 session_id=row.id,
                 session_key=row.session_key,
                 agent_id=row.agent_id,
             )
-            result = await self._facade.send(
-                row.agent_id,
-                message,
-                callbacks=callbacks,
-                log_context=log_context,
-            )
+            try:
+                result = await self._facade.send(
+                    row.agent_id,
+                    message,
+                    callbacks=callbacks,
+                    log_context=log_context,
+                )
+            except CursorAgentError as exc:
+                if (
+                    row.agent_id in self._cold_resumed_agent_ids
+                    and _is_reattachable_send_error(exc)
+                ):
+                    self._cold_resumed_agent_ids.discard(row.agent_id)
+                    row = await self._reattach_agent(
+                        row,
+                        model_override=model_override,
+                    )
+                    log_context = LogContext(
+                        session_id=row.id,
+                        session_key=row.session_key,
+                        agent_id=row.agent_id,
+                    )
+                    result = await self._facade.send(
+                        row.agent_id,
+                        message,
+                        callbacks=callbacks,
+                        log_context=log_context,
+                    )
+                else:
+                    raise
+            self._cold_resumed_agent_ids.discard(row.agent_id)
             if not row.title:
                 title = title_from_first_user_message(message)
                 await self._store.update_title(row.id, title)

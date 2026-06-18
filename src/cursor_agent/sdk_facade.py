@@ -101,6 +101,10 @@ class SdkFacade(Protocol):
         """Release bridge and internal state."""
         ...
 
+    def has_agent(self, agent_id: str) -> bool:
+        """Return True when the facade holds an in-memory agent handle."""
+        ...
+
 
 def _map_run_status(raw_status: object) -> RunStatus:
     """Map SDK or string statuses onto facade ``RunStatus`` values."""
@@ -271,6 +275,7 @@ def _map_sdk_exception(exc: BaseException) -> BaseException:
         CursorAgentError,
         InvalidAgentError,
         NetworkError,
+        SdkInternalError,
         TimeoutError as AgentTimeoutError,
     )
 
@@ -305,9 +310,9 @@ def _map_sdk_exception(exc: BaseException) -> BaseException:
             return InvalidAgentError(message)
         if isinstance(exc, SdkConfigurationError):
             return ConfigError(message)
-        if isinstance(
-            exc, (SdkNetworkError, SdkInternalServerError, SdkRateLimitError)
-        ):
+        if isinstance(exc, SdkInternalServerError):
+            return SdkInternalError(message, retry_after=retry_after)
+        if isinstance(exc, (SdkNetworkError, SdkRateLimitError)):
             return NetworkError(message, retry_after=retry_after)
         if is_retryable:
             return NetworkError(message, retry_after=retry_after)
@@ -321,6 +326,8 @@ def _map_sdk_exception(exc: BaseException) -> BaseException:
         return AgentTimeoutError(message)
     if "network" in exc_name or "connection" in exc_name:
         return NetworkError(message)
+    if isinstance(exc, TypeError):
+        return ConfigError(f"SDK request serialization failed: {message}")
     return exc
 
 
@@ -444,6 +451,10 @@ class FakeSdkFacade:
         """No-op cancel for fake runs without an active bridge."""
         _ = agent_id
 
+    def has_agent(self, agent_id: str) -> bool:
+        """Return True when the fake facade tracks the agent in memory."""
+        return agent_id in self._messages_by_agent
+
     async def close(self) -> None:
         """Mark the fake facade as closed."""
         self._closed = True
@@ -451,6 +462,7 @@ class FakeSdkFacade:
 
 # SDK import boundary (see AGENTS.md).
 from cursor_sdk import AsyncClient, LocalAgentOptions, SandboxOptions  # noqa: E402
+from cursor_sdk.types import options_to_json  # noqa: E402
 
 
 def _build_local_agent_options(
@@ -578,24 +590,29 @@ class AsyncSdkFacade:
         runtime_mode: str = "local",
     ) -> str:
         """Resume an SDK agent and re-inject MCP servers for the profile."""
-        client = self._require_client()
         profile = tool_profile or self._agent_tool_profiles.get(agent_id, "coding")
+        if agent_id in self._agents:
+            self._agent_tool_profiles[agent_id] = profile
+            return agent_id
+
+        client = self._require_client()
         local_setting_sources = (
             self._local_setting_sources if runtime_mode == "local" else None
         )
-        options: dict[str, Any] = {
-            "local": _build_local_agent_options(
-                workspace=workspace,
-                setting_sources=local_setting_sources,
-                tool_profile=profile,
-            ),
-            "mcp_servers": resolve_mcp_servers(profile),
-        }
-        if model is not None:
-            options["model"] = model
+        local_options = _build_local_agent_options(
+            workspace=workspace,
+            setting_sources=local_setting_sources,
+            tool_profile=profile,
+        )
+        request_options = options_to_json(
+            {"mcp_servers": resolve_mcp_servers(profile)},
+            local=local_options,
+            model=model,
+            api_key=self._api_key,
+        )
 
         async def _resume() -> str:
-            agent = await client.agents.resume(agent_id, options)
+            agent = await client.agents.resume(agent_id, request_options)
             await agent.__aenter__()
             self._agents[agent.agent_id] = agent
             self._agent_tool_profiles[agent.agent_id] = profile
@@ -690,6 +707,10 @@ class AsyncSdkFacade:
         if self._client is not None:
             await self._client.aclose()
             self._client = None
+
+    def has_agent(self, agent_id: str) -> bool:
+        """Return True when the facade holds a live SDK agent handle."""
+        return agent_id in self._agents
 
     def _require_client(self) -> AsyncClient:
         if self._client is None:
