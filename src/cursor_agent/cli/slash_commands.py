@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from pathlib import Path
 
@@ -13,10 +14,14 @@ from cursor_agent.cli.command_router import (
     CommandRouter,
     QuitRequested,
     SessionActivated,
+    SkillResolver,
 )
 from cursor_agent.cli.compress import run_compress_session
 from cursor_agent.cli.error_display import format_error
-from cursor_agent.cli.rich_display import format_memory_show_output
+from cursor_agent.cli.rich_display import (
+    format_memory_show_output,
+    format_skills_list_output,
+)
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.errors import ConfigError, CursorAgentError
 from cursor_agent.memory import (
@@ -29,6 +34,11 @@ from cursor_agent.pool import SessionAgentPool
 from cursor_agent.sdk_facade import RunStatus, SdkFacade
 from cursor_agent.sessions.models import SessionCreateParams
 from cursor_agent.sessions.store import SessionStore
+from cursor_agent.skills.discovery import (
+    SkillDiscovery,
+    SkillEntry,
+    skill_discovery_from_config,
+)
 
 _HELP_TEXT = """\
 Slash commands:
@@ -48,6 +58,7 @@ P2 — advanced:
   /retry          Resend the last user message
   /usage          Show usage from the last run
   /compress       Compress session context
+  /skills         List discovered workspace skills
   /memory show    Inspect effective Memory v1 payload
 """
 
@@ -328,6 +339,31 @@ async def _route_compress(
     return CommandHandled()
 
 
+def _skill_discovery_for_context(ctx: CommandContext) -> SkillDiscovery:
+    """Return skill discovery using context overrides and config at command time."""
+    return skill_discovery_from_config(
+        ctx.config,
+        override_user_skills=ctx.user_skills_root,
+    )
+
+
+def _make_skill_resolver(
+    config: CursorAgentConfig,
+    *,
+    user_skills_root: Path | None,
+) -> SkillResolver:
+    """Build a name resolver that reads discovery from config at resolve time."""
+
+    def resolve_skill(name: str) -> SkillEntry | None:
+        discovery = skill_discovery_from_config(
+            config,
+            override_user_skills=user_skills_root,
+        )
+        return discovery.get_skill(name)
+
+    return resolve_skill
+
+
 def _memory_store_for_context(ctx: CommandContext) -> LocalMemoryStore:
     """Return a memory store using context override, config, or the default home path."""
     return memory_store_from_config(ctx.config, override_root=ctx.memory_root)
@@ -368,9 +404,24 @@ async def _route_memory(
     return CommandHandled()
 
 
-def build_repl_command_router() -> CommandRouter:
+async def _route_skills(
+    ctx: CommandContext,
+    arg: str | None,
+    writer: Callable[[str], None],
+) -> CommandResult:
+    """List discovered skills from project and user sources (CLI-only)."""
+    _ = arg
+    discovery = await asyncio.to_thread(_skill_discovery_for_context, ctx)
+    writer(format_skills_list_output(discovery.list_skills()))
+    return CommandHandled()
+
+
+def build_repl_command_router(
+    *,
+    skill_resolver: SkillResolver | None = None,
+) -> CommandRouter:
     """Build a router with P0 slash commands registered for the REPL."""
-    router = CommandRouter()
+    router = CommandRouter(skill_resolver=skill_resolver)
     router.register("new", _route_new)
     router.register("resume", _route_resume)
     router.register("quit", _route_quit)
@@ -380,6 +431,7 @@ def build_repl_command_router() -> CommandRouter:
     router.register("retry", _route_retry)
     router.register("usage", _route_usage)
     router.register("compress", _route_compress)
+    router.register("skills", _route_skills)
     router.register("memory", _route_memory)
     router.register_alias("reset", "new")
     return router
