@@ -164,6 +164,7 @@ async def drive_repl(
     stream_writer: Callable[[str], None] | None = None,
     auto_resume: bool = False,
     memory_root: Path | None = None,
+    user_skills_root: Path | None = None,
 ) -> RunStatus | None:
     """Invoke ``run_repl`` with the PRD-003 keyword-only contract."""
     return await run_repl(
@@ -177,4 +178,5 @@ async def drive_repl(
         stream_writer=stream_writer,
         auto_resume=auto_resume,
         memory_root=memory_root,
+        user_skills_root=user_skills_root,
     )
