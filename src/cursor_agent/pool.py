@@ -12,6 +12,7 @@ from cursor_agent.errors import (
     ConfigError,
     CursorAgentError,
     InvalidAgentError,
+    SdkInternalError,
 )
 from cursor_agent.facade_logging import LogContext, emit_pool_agent_reattach
 from cursor_agent.messaging_hooks import (
@@ -77,16 +78,9 @@ def _validate_send_message(message: str) -> None:
         )
 
 
-def _agent_loaded_in_facade(facade: SdkFacade, agent_id: str) -> bool:
-    """Return True when the facade already holds an in-memory SDK agent handle."""
-    live_agents = getattr(facade, "_agents", None)
-    return isinstance(live_agents, dict) and agent_id in live_agents
-
-
 def _is_reattachable_send_error(exc: CursorAgentError) -> bool:
     """Return True for SDK internal failures observed after cold resume."""
-    return "internal" in str(exc).casefold()
-
+    return isinstance(exc, SdkInternalError)
 
 class SessionAgentPool:
     """Serialize SDK access per session_key with lazy resume from SessionStore.
@@ -172,7 +166,7 @@ class SessionAgentPool:
         resume_key = f"{model}:{tool_profile}"
         if self._resumed_models.get(row.agent_id) == resume_key:
             return row
-        cold_start = not _agent_loaded_in_facade(self._facade, row.agent_id)
+        cold_start = not self._facade.has_agent(row.agent_id)
         await self._ensure_messaging_hooks_for_row(row)
         try:
             await self._facade.resume_agent(
@@ -200,7 +194,11 @@ class SessionAgentPool:
         *,
         model_override: str | None = None,
     ) -> SessionRecord:
-        """Create a fresh SDK agent and swap the persisted session row agent_id."""
+        """Create a fresh SDK agent and swap the persisted session row agent_id.
+
+        Reattach starts a new SDK agent; conversation history on the stale handle
+        is not preserved (session row and SQLite metadata are kept).
+        """
         model = self._resolve_model(model_override)
         tool_profile = effective_tool_profile(
             self._config.tool_profile, row.tool_profile
@@ -230,6 +228,7 @@ class SessionAgentPool:
     def forget_resumed_agent(self, agent_id: str) -> None:
         """Drop resume cache for ``agent_id`` after agent swaps (e.g. /compress)."""
         self._resumed_models.pop(agent_id, None)
+        self._cold_resumed_agent_ids.discard(agent_id)
 
     async def get(
         self,
@@ -313,6 +312,7 @@ class SessionAgentPool:
                     )
                 else:
                     raise
+            self._cold_resumed_agent_ids.discard(row.agent_id)
             if not row.title:
                 title = title_from_first_user_message(message)
                 await self._store.update_title(row.id, title)

@@ -1,4 +1,8 @@
-"""User-facing product copy (English) for CLI, gateway, and platform adapters."""
+"""User-facing product copy (English) for CLI, gateway, and platform adapters.
+
+PRD-007 targets English-first gateway/Telegram UX; Portuguese copy is out of scope
+for this module until locale support is added.
+"""
 
 from __future__ import annotations
 

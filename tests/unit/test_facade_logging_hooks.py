@@ -74,3 +74,37 @@ def test_hook_deny_log_emits_ndjson_with_redacted_fields() -> None:
     assert payload["agent_id"] == "[REDACTED]"
     assert "command_end" not in payload["event"]
     assert "payload" not in payload
+
+
+def test_pool_agent_reattach_log_emits_ndjson_with_redacted_agent_ids() -> None:
+    """pool_agent_reattach logs session ids and redacts agent ids."""
+    from cursor_agent.facade_logging import emit_pool_agent_reattach
+
+    logger = logging.getLogger("test.pool.reattach")
+    records: list[str] = []
+
+    class _ListHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record.getMessage())
+
+    handler = _ListHandler()
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
+    emit_pool_agent_reattach(
+        logger,
+        session_id="sess-reattach-1",
+        session_key="telegram:123:coldstart",
+        old_agent_id="sk-old-agent-secret",
+        new_agent_id="sk-new-agent-secret",
+    )
+
+    logger.removeHandler(handler)
+    payload = json.loads(records[0])
+    assert payload["event"] == "pool_agent_reattach"
+    assert payload["session_id"] == "sess-reattach-1"
+    assert payload["session_key"] == "telegram:123:coldstart"
+    assert payload["old_agent_id"] == "[REDACTED]"
+    assert payload["new_agent_id"] == "[REDACTED]"
+    assert "sk-old-agent-secret" not in records[0]
+    assert "sk-new-agent-secret" not in records[0]

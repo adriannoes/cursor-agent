@@ -54,7 +54,7 @@ async def test_facade_resume_after_close_send_round_trip() -> None:
     """Resume and send after facade close exercises the raw SDK path.
 
     Known limitation: SDK may return internal error on send after cross-process
-    resume without pool reattach (see ADR-027). Pool/gateway paths reattach.
+    resume without pool reattach. Pool/gateway paths reattach automatically.
     """
     workspace = str(repo_root())
     async with AsyncSdkFacade(bridge_options={"workspace": workspace}) as facade:
