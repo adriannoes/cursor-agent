@@ -6,18 +6,20 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.gateway.config import (
     GatewayConfig,
     PlatformsConfig,
     TelegramPlatformConfig,
 )
+from cursor_agent.memory import LocalMemoryStore
 from cursor_agent.platforms.base import (
     GatewayInboundCallback,
     InboundMessage,
     OutboundMessage,
 )
 from cursor_agent.pool import SessionAgentPool
-from cursor_agent.sdk_facade import FakeSdkFacade
+from cursor_agent.sdk_facade import FakeSdkFacade, SdkFacade
 from cursor_agent.sessions.models import SessionCreateParams
 from cursor_agent.sessions.store import SessionStore
 
@@ -105,6 +107,26 @@ async def seed_session_with_agent(
         )
     )
     return record.id, agent_id
+
+
+def memory_enabled_pool_factory(
+    memory_root: Path,
+) -> Callable[[SessionStore, SdkFacade, CursorAgentConfig], SessionAgentPool]:
+    """Build a pool factory that reads memory files from a temporary root."""
+
+    def factory(
+        store: SessionStore,
+        facade: SdkFacade,
+        config: CursorAgentConfig,
+    ) -> SessionAgentPool:
+        return SendSpyPool(
+            store,
+            facade,
+            config,
+            memory_store=LocalMemoryStore(root=memory_root),
+        )
+
+    return factory
 
 
 class SendSpyPool(SessionAgentPool):

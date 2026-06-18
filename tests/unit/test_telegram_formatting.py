@@ -92,6 +92,62 @@ def test_prepare_long_table_reply_chunks_valid_telegram_html() -> None:
         _assert_telegram_html_chunk_valid(chunk)
 
 
+def _build_memory_heavy_assistant_reply() -> str:
+    """Build a long Markdown-rich reply similar to memory-informed first turns."""
+    preference_rows = [
+        (
+            f"| Preference {index} | "
+            f"Value with `opt|{index}` and [guide](https://example.com/prefs/{index}) |"
+        )
+        for index in range(60)
+    ]
+    checklist_rows = [
+        (
+            f"| Task {index} | "
+            f"Verify with `pytest -k item_{index}` and "
+            f"[runbook](https://example.com/tasks/{index}) |"
+        )
+        for index in range(40)
+    ]
+    return (
+        "**Session context**\n\n"
+        "I loaded your workspace preferences and prior notes:\n\n"
+        "- Prefer `uv run pytest` for local verification\n"
+        "- Keep adapter code free of memory-specific progress copy\n"
+        "- Deliver replies through shared Telegram chunking helpers\n\n"
+        "1. Confirm loader quotas\n"
+        "2. Validate injection on the first free-text turn\n"
+        "3. Check gateway inheritance without adapter branching\n\n"
+        "Preference | Detail |\n| --- | --- |\n" + "\n".join(preference_rows) + "\n\n"
+        "Example tooling snippet:\n\n"
+        "```toml\n"
+        "[tool.pytest.ini_options]\n"
+        'markers = ["integration: needs CURSOR_API_KEY"]\n'
+        "```\n\n"
+        "Checklist | Next step |\n| --- | --- |\n"
+        + "\n".join(checklist_rows)
+        + "\n\n"
+        + ("Boundary note: memory stays presentation-agnostic for Telegram. " * 80)
+    )
+
+
+def test_memory_heavy_assistant_reply_chunks_valid_telegram_html() -> None:
+    """Memory-heavy assistant replies chunk safely with balanced Telegram HTML."""
+    source = _build_memory_heavy_assistant_reply()
+    rendered = render_cursor_markdown_for_telegram(source)
+    assert len(rendered) > 3800, "fixture must exceed flush threshold to force chunking"
+    chunks = prepare_telegram_assistant_reply_chunks(source)
+    assert len(chunks) >= 2
+    for chunk in chunks:
+        _assert_telegram_html_chunk_valid(chunk)
+    combined = "".join(chunks)
+    assert "<b>Session context</b>" in combined
+    assert "<pre><code>" in combined
+    assert '<a href="https://example.com/prefs/0">guide</a>' in combined
+    assert "• <b>Preference 0</b>" in combined
+    assert "- Prefer <code>uv run pytest</code>" in combined
+
+
 def test_split_long_three_column_table_chunks_valid_telegram_html() -> None:
     """Multi-column table blocks must also chunk without orphan closing tags."""
     rows = [
