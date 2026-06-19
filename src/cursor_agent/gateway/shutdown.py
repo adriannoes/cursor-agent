@@ -45,6 +45,17 @@ class GatewayShutdownCoordinator:
                 return GATEWAY_SHUTDOWN_EXIT_CODE
 
             ctx.shutting_down = True
+            if ctx.cron_scheduler is not None:
+                ctx.cron_scheduler.pause_scheduling()
+
+            # Drain in-flight cron jobs (including Telegram delivery) before
+            # stopping adapters, otherwise a job finishing after stop_adapters
+            # would silently fail delivery against a stopped adapter. Cron jobs
+            # that exceed the drain timeout are cancelled by the scheduler, and
+            # the executor cancels their SDK agent on cancellation.
+            # (review: Must Fix shutdown ordering)
+            await self._shutdown_cron_scheduler(ctx)
+
             await stop_adapters(ctx.adapters)
 
             for agent_id in list(ctx._active_agent_ids):
@@ -93,6 +104,11 @@ class GatewayShutdownCoordinator:
         for task in still_pending:
             task.cancel()
         await asyncio.gather(*still_pending, return_exceptions=True)
+
+    async def _shutdown_cron_scheduler(self, ctx: GatewayContext) -> None:
+        if ctx.cron_scheduler is None:
+            return
+        await ctx.cron_scheduler.shutdown(timeout=self.shutdown_timeout_seconds)
 
 
 def register_shutdown_signals(

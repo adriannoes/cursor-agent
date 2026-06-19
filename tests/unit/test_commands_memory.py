@@ -1,4 +1,4 @@
-"""Unit tests for CLI /memory show command (PRD-008 Wave 2B)."""
+"""Unit tests for CLI /memory show command (PRD-008)."""
 
 from __future__ import annotations
 

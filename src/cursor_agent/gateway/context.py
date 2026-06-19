@@ -15,6 +15,7 @@ from cursor_agent.sdk_facade import SdkFacade
 from cursor_agent.sessions.store import SessionStore
 
 if TYPE_CHECKING:
+    from cursor_agent.cron.scheduler import CronScheduler
     from cursor_agent.gateway.shutdown import GatewayShutdownCoordinator
 
 _MODULE_LOGGER = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ class GatewayContext:
     facade: SdkFacade
     adapters: list[PlatformAdapter]
     shutdown_coordinator: GatewayShutdownCoordinator
+    cron_scheduler: CronScheduler | None = None
     shutting_down: bool = False
     _adapter_by_platform: dict[str, PlatformAdapter] = field(
         default_factory=dict,

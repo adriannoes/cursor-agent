@@ -216,7 +216,7 @@ def test_utf8_boundary_truncation_keeps_valid_text(tmp_path: Path) -> None:
 
 
 def test_effective_payload_type_is_structured(tmp_path: Path) -> None:
-    """Public payload type is the structured contract for later injection tasks."""
+    """EffectiveMemoryPayload is the structured contract returned by the loader."""
     store = LocalMemoryStore(root=tmp_path)
     payload = store.build_effective_payload()
     assert isinstance(payload, EffectiveMemoryPayload)

@@ -10,6 +10,7 @@ from typing import Annotated
 
 import typer
 
+from cursor_agent.cli.cron_commands import cron_app
 from cursor_agent.cli.exit_codes import exit_code_for_error, exit_code_for_status
 from cursor_agent.cli.repl_session import run_repl
 from cursor_agent.cli.rich_display import RichDisplay
@@ -25,6 +26,7 @@ app = typer.Typer()
 
 sessions_app = typer.Typer(help="Manage sessions")
 app.add_typer(sessions_app, name="sessions")
+app.add_typer(cron_app, name="cron")
 
 _EMPTY_SESSIONS_MESSAGE = "No sessions found for this workspace."
 _UNTITLED_PLACEHOLDER = "(untitled)"

@@ -17,7 +17,7 @@ from cursor_agent.platforms.telegram_chunking import (
 )
 
 _ALLOWED_LINK_SCHEMES: Final[tuple[str, ...]] = ("http://", "https://")
-_FENCE_PATTERN: Final[re.Pattern[str]] = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
+_FENCE_PATTERN: Final[re.Pattern[str]] = re.compile(r"```([^\n]*)\n(.*?)```", re.DOTALL)
 _HEADING_PATTERN: Final[re.Pattern[str]] = re.compile(r"^#{1,6}\s+(.+)$")
 _LINK_PATTERN: Final[re.Pattern[str]] = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 _BOLD_PATTERN: Final[re.Pattern[str]] = re.compile(r"\*\*(.+?)\*\*")
@@ -65,9 +65,9 @@ def prepare_telegram_assistant_reply_chunks(
 def render_cursor_markdown_for_telegram(text: str) -> str:
     """Render a conservative Cursor-style Markdown subset to Telegram HTML.
 
-    Supported: bold, inline code, fenced code, headings, http(s) links, plain
-    list lines, and GitHub-flavored Markdown tables. All model text is
-    HTML-escaped before entering tags.
+    Supported: bold, inline code, language-tagged fenced code as ``<b>Lang:</b> <code>``,
+    headings, http(s) links, plain list lines, and GitHub-flavored Markdown tables.
+    All model text is HTML-escaped before entering tags.
 
     Example:
         >>> render_cursor_markdown_for_telegram("**hi**")
@@ -82,24 +82,72 @@ def render_cursor_markdown_for_telegram(text: str) -> str:
         for match in _FENCE_PATTERN.finditer(text):
             if match.start() > last_end:
                 prose = _render_prose_block(text[last_end : match.start()])
-                if prose:
+                if prose.strip():
                     blocks.append(prose)
-            code_body = match.group(1)
-            blocks.append(
-                f"<pre><code>{html.escape(code_body, quote=False)}</code></pre>",
-            )
+            language_info = match.group(1)
+            code_body = match.group(2)
+            blocks.append(_render_fenced_code_block(language_info, code_body))
             last_end = match.end()
         if last_end < len(text):
             prose = _render_prose_block(text[last_end:])
-            if prose:
+            if prose.strip():
                 blocks.append(prose)
-        return "\n\n".join(blocks)
+        return _join_rendered_blocks(blocks)
     except Exception as exc:
         msg = (
             "failed to render cursor markdown for telegram: "
             f"input_length={len(text)!r}, exception_class={exc.__class__.__name__}"
         )
         raise TelegramFormattingError(msg) from exc
+
+
+def _fence_language_label(language_info: str) -> str | None:
+    """Return a Telegram-safe label for a fenced-code language tag, if any."""
+    tag = language_info.strip()
+    if not tag:
+        return None
+    return tag.split()[0].title()
+
+
+def _render_fenced_code_block(language_info: str, code_body: str) -> str:
+    """Render fenced code as bold label + inline code.
+
+    ``<pre>`` blocks collapse into the same Shell pill UI on mobile Telegram
+    clients, so language-tagged fences use ``<b>Lang:</b> <code>...`` instead.
+    """
+    normalized_body = code_body.rstrip("\n")
+    escaped_body = html.escape(normalized_body, quote=False)
+    label = _fence_language_label(language_info)
+    if label is None:
+        return f"<code>{escaped_body}</code>"
+    return f"<b>{label}:</b> <code>{escaped_body}</code>"
+
+
+def _collapse_vertical_whitespace(text: str, *, max_blank_run: int = 1) -> str:
+    """Collapse consecutive blank lines and trim outer whitespace."""
+    collapsed: list[str] = []
+    blank_run = 0
+    for line in text.split("\n"):
+        if not line.strip():
+            blank_run += 1
+            if blank_run <= max_blank_run:
+                collapsed.append("")
+            continue
+        blank_run = 0
+        collapsed.append(line)
+    while collapsed and not collapsed[0].strip():
+        collapsed.pop(0)
+    while collapsed and not collapsed[-1].strip():
+        collapsed.pop()
+    return "\n".join(collapsed)
+
+
+def _join_rendered_blocks(blocks: list[str]) -> str:
+    """Join rendered prose and code blocks with Telegram-friendly spacing."""
+    non_empty_blocks = [block for block in blocks if block.strip()]
+    if not non_empty_blocks:
+        return ""
+    return _collapse_vertical_whitespace("\n".join(non_empty_blocks))
 
 
 def split_telegram_html_fragments(rendered_html: str) -> list[str]:
@@ -238,7 +286,7 @@ def _render_prose_block(text: str) -> str:
             continue
         rendered_lines.append(_render_inline(line))
         index += 1
-    return "\n".join(rendered_lines)
+    return _collapse_vertical_whitespace("\n".join(rendered_lines))
 
 
 def _try_parse_markdown_table_block(

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from rich.console import Console
+from rich.table import Table
 from rich.text import Text
 
 from cursor_agent.memory import (
@@ -87,6 +88,42 @@ def format_memory_show_output(
         ),
     ]
     return "\n".join(lines)
+
+
+def format_cron_jobs_table(rows: Sequence[Mapping[str, str]]) -> str:
+    """Format cron job metadata rows as a Rich table for ``cron list``.
+
+    Example:
+        >>> print(format_cron_jobs_table([
+        ...     {
+        ...         "id": "daily-report",
+        ...         "schedule": "0 9 * * *",
+        ...         "next_run": "2026-06-19 09:00:00 UTC",
+        ...         "runtime": "local",
+        ...         "telegram_chat_id": "-",
+        ...     },
+        ... ]))
+    """
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("ID")
+    table.add_column("Schedule")
+    table.add_column("Next run (UTC)")
+    table.add_column("Runtime")
+    table.add_column("Telegram chat_id")
+
+    for row in rows:
+        table.add_row(
+            row["id"],
+            row["schedule"],
+            row["next_run"],
+            row["runtime"],
+            row["telegram_chat_id"],
+        )
+
+    console = Console()
+    with console.capture() as capture:
+        console.print(table)
+    return capture.get().rstrip()
 
 
 def format_skills_list_output(skills: list[SkillEntry]) -> str:

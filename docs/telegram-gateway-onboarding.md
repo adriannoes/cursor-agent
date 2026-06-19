@@ -120,7 +120,46 @@ Open a private chat with your bot and run this flow:
 7. Ask for a formatted answer with bold text, inline code, fenced code, and a link.
    Expected behavior: Telegram shows readable formatting (bold, monospace code blocks, and clickable `http://` or `https://` links) instead of raw Markdown syntax.
 
-## 9. Restart Test
+## 9. Optional Scheduled Cron Jobs
+
+Cron jobs run inside the long-running gateway process. They use `~/.cursor-agent/cron/jobs.yaml`, reload when the file mtime changes, and never share a Telegram or CLI session key. Each run uses a fresh `cron:{job_id}:{run_id}` session row.
+
+Cron schedules use UTC by default and must not fire more often than once per minute for the same job. The `prompt` field is capped at 64 KiB. Oversized prompts are rejected before writes, and invalid gateway reloads keep the last known-good job cache.
+
+```bash
+uv run cursor-agent cron list
+```
+
+This command lists configured jobs with schedule, next run, runtime, and Telegram chat ID metadata.
+
+```bash
+uv run cursor-agent cron add telegram-demo-report --schedule "*/1 * * * *" --prompt "Create a concise status update with a Markdown table, one link to https://example.com, and a short fenced code block." --runtime cloud --chat-id "123456789"
+```
+
+This command writes a demo job to `~/.cursor-agent/cron/jobs.yaml`; replace `123456789` with the destination Telegram chat ID and remove the job after testing to avoid recurring SDK usage.
+
+```bash
+uv run cursor-agent gateway --config ~/.cursor-agent/gateway.yaml
+```
+
+This command starts the embedded scheduler and Telegram gateway; keep it running until the demo job fires.
+
+Expected Telegram delivery:
+
+1. The scheduled job creates a dedicated cron session, not a chat session.
+2. The result is rendered through the same Telegram formatter/chunker used for assistant replies.
+3. Markdown tables are shown as bullets or row blocks, links remain clickable for `http://` and `https://`, and code stays readable.
+4. If Telegram delivery fails, the cron run status remains independent and logs include only safe metadata such as job id and exception class.
+
+```bash
+uv run cursor-agent cron remove telegram-demo-report
+```
+
+This command removes the demo job after validation so it does not continue running every minute.
+
+Cron prompts do not resolve CLI skills. The job `prompt` is the source of truth; `/<skill-name>` and `/skills` remain CLI/REPL behavior.
+
+## 10. Restart Test
 
 1. Stop the gateway with `Ctrl+C`.
 2. Start it again:
@@ -159,6 +198,16 @@ Common causes:
 - `workspace` is not an absolute path to the intended repository.
 - The Telegram token format is invalid.
 
+### Cron Job Does Not Appear In Telegram
+
+- Confirm the gateway process was running when the scheduled time passed.
+- Confirm the job has `delivery.telegram.chat_id` configured.
+- Confirm the chat ID is numeric for normal private chats, or a Telegram-supported string destination if you intentionally use one.
+- Confirm the schedule is UTC and not in local time.
+- Confirm the job prompt is no larger than 64 KiB.
+- Confirm `cursor-agent cron list` shows the job after `cron add`.
+- Confirm you removed demo jobs that use `*/1 * * * *` after testing to avoid repeated SDK runs.
+
 ### User Is Ignored
 
 The Telegram adapter silently ignores blocked users. Add only trusted numeric IDs to `allowed_users`.
@@ -171,7 +220,7 @@ Supported in answers:
 
 - `**bold**`
 - `` `inline code` ``
-- fenced code blocks
+- fenced code blocks (language tag shown as bold label + inline monospace, e.g. **Shell:** `echo ok`)
 - `#` headings (shown as bold)
 - `[label](https://example.com)` links with `http://` or `https://` only
 - GitHub-flavored Markdown tables (rendered as compact bullet lines or labeled row blocks)
