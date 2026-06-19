@@ -5,7 +5,7 @@ Executable integration demo: AsyncClient.launch_bridge, Composer 2.5, multi-turn
 context, and cold-start measurement. Not importable production API.
 """
 
-# Cold start measured: ~4.33s on 2026-06-15 (host=adrianno, model=composer-2.5).
+# Cold start measured: ~4.33s on 2026-06-15 (model=composer-2.5).
 # Re-measure: `uv run python examples/async_repl.py` with CURSOR_API_KEY set.
 
 from __future__ import annotations
