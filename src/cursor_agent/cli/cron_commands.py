@@ -14,10 +14,10 @@ from cursor_agent.config.loader import CursorAgentConfig, load_config
 from cursor_agent.cron.models import CronJob, cron_trigger_for_schedule
 from cursor_agent.cron.store import (
     add_cron_job_atomic,
+    build_cron_job,
     default_cron_root,
     load_cron_jobs_catalog,
     remove_cron_job_atomic,
-    build_cron_job,
 )
 from cursor_agent.errors import CursorAgentError
 

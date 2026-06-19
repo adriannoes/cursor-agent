@@ -77,9 +77,7 @@ class CronJob(BaseModel):
     @classmethod
     def _validate_prompt(cls, value: str, info: ValidationInfo) -> str:
         job_id = info.data.get("id", "unknown")
-        if not isinstance(job_id, str):
-            job_id = "unknown"
-        return validate_cron_prompt(value, job_id=job_id)
+        return validate_cron_prompt(value, job_id=str(job_id))
 
 
 def validate_cron_schedule(schedule: str) -> str:
