@@ -1115,8 +1115,13 @@ def test_default_cli_invocation_does_not_run_gateway_command(
         _ = config_path
         return 0
 
-    async def stub_run_default(_config: object) -> None:
+    async def stub_run_default(
+        _config: object,
+        *,
+        no_banner: bool = False,
+    ) -> None:
         called["repl"] = True
+        _ = no_banner
         return None
 
     monkeypatch.setattr("cursor_agent.cli.app.run_gateway", stub_run_gateway)

@@ -7,7 +7,8 @@ its own module to avoid an import cycle between ``repl_session`` and
 
 from __future__ import annotations
 
-from cursor_agent.errors import CursorAgentError
+from cursor_agent.errors import AuthError, CursorAgentError
+from cursor_agent.product_copy import CURSOR_API_KEY_SETUP_HINT
 
 
 def format_error(exc: CursorAgentError) -> str:
@@ -19,3 +20,16 @@ def format_error(exc: CursorAgentError) -> str:
         'Error: bad runtime'
     """
     return f"Error: {exc}"
+
+
+def format_startup_error(exc: CursorAgentError) -> str:
+    """Render a CLI bootstrap failure with optional API-key setup guidance.
+
+    Example:
+        >>> format_startup_error(AuthError("invalid api key")).count("CURSOR_API_KEY")
+        1
+    """
+    message = format_error(exc)
+    if isinstance(exc, AuthError):
+        return f"{message}\n{CURSOR_API_KEY_SETUP_HINT}"
+    return message
