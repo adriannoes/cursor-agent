@@ -18,11 +18,212 @@ from cursor_agent.product_copy import CURSOR_API_KEY_SETUP_HINT
 from cursor_agent.sdk_facade import RunStatus
 
 
+# --- PRD-012 Task 1.1: advertised env / dotenv regressions ---
+
+
+def test_cli_startup_loads_dotenv_workspace_into_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default CLI bootstrap loads gitignored CWD .env into load_config workspace cwd."""
+    workspace = tmp_path / "cli-dotenv-workspace"
+    workspace.mkdir()
+    (tmp_path / ".env").write_text(
+        f"CURSOR_AGENT__RUNTIME__LOCAL__CWD={workspace}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("CURSOR_AGENT__RUNTIME__LOCAL__CWD", raising=False)
+    monkeypatch.chdir(tmp_path)
+    captured: dict[str, object] = {}
+
+    async def stub_run_default(
+        config: CursorAgentConfig,
+        *,
+        no_banner: bool = False,
+    ) -> RunStatus | None:
+        _ = no_banner
+        captured["cwd"] = config.runtime.local.cwd
+        return None
+
+    monkeypatch.setattr("cursor_agent.cli.app.run_default", stub_run_default)
+
+    result = CliRunner().invoke(app, [])
+    assert result.exit_code == 0
+    assert captured["cwd"] == str(workspace)
+
+
+def test_cli_dotenv_does_not_override_exported_env_vars(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLI .env bootstrap must not override variables already exported in the shell."""
+    (tmp_path / ".env").write_text(
+        "CURSOR_AGENT__MODEL=from-dotenv\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("CURSOR_AGENT__MODEL", "from-shell")
+    monkeypatch.chdir(tmp_path)
+    captured: dict[str, object] = {}
+
+    async def stub_run_default(
+        config: CursorAgentConfig,
+        *,
+        no_banner: bool = False,
+    ) -> RunStatus | None:
+        _ = no_banner
+        captured["model"] = config.model
+        return None
+
+    monkeypatch.setattr("cursor_agent.cli.app.run_default", stub_run_default)
+
+    result = CliRunner().invoke(app, [])
+    assert result.exit_code == 0
+    assert captured["model"] == "from-shell"
+
+
+def test_cli_startup_loads_cursor_api_key_from_dotenv(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default CLI path makes CURSOR_API_KEY from CWD .env visible to facade bootstrap."""
+    captured_api_keys: list[str | None] = []
+
+    class RecordingSdkFacade:
+        """Capture api_key for the production facade constructor during CLI startup."""
+
+        def __init__(
+            self,
+            *,
+            api_key: str | None = None,
+            local_setting_sources: list[str] | None = None,
+            **kwargs: object,
+        ) -> None:
+            _ = (local_setting_sources, kwargs)
+            captured_api_keys.append(api_key)
+
+        async def __aenter__(self) -> RecordingSdkFacade:
+            return self
+
+        async def __aexit__(self, *_exc: object) -> None:
+            return None
+
+    (tmp_path / ".env").write_text("CURSOR_API_KEY=from-dotenv-key\n", encoding="utf-8")
+    monkeypatch.delenv("CURSOR_API_KEY", raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("cursor_agent.cli.startup.AsyncSdkFacade", RecordingSdkFacade)
+
+    @asynccontextmanager
+    async def real_repl_runtime(cfg: CursorAgentConfig):
+        from cursor_agent.cli.startup import repl_runtime
+
+        async with repl_runtime(cfg) as runtime:
+            yield runtime
+
+    async def stub_run_repl(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr("cursor_agent.cli.app.repl_runtime", real_repl_runtime)
+    monkeypatch.setattr("cursor_agent.cli.app.run_repl", stub_run_repl)
+    monkeypatch.setattr(
+        "cursor_agent.cli.app.render_welcome",
+        lambda *_args, **_kwargs: False,
+    )
+
+    result = CliRunner().invoke(app, [])
+    assert result.exit_code == 0
+    assert captured_api_keys == ["from-dotenv-key"]
+
+
 def test_help_shows_sessions_subcommand() -> None:
     """Root --help lists the sessions subcommand group."""
     result = CliRunner().invoke(app, ["--help"])
     assert result.exit_code == 0
     assert "sessions" in result.stdout
+
+
+# --- PRD-012 Task 6.3: documented CLI command smoke checks ---
+
+
+def test_documented_root_help_exposes_product_subcommands() -> None:
+    """examples/README.md commands: root --help lists gateway, sessions, and cron."""
+    result = CliRunner().invoke(app, ["--help"])
+    assert result.exit_code == 0
+    stdout = result.stdout.lower()
+    assert "gateway" in stdout
+    assert "sessions" in stdout
+    assert "cron" in stdout
+    assert "--profile" in stdout
+
+
+def test_documented_profile_messaging_invokes_cli(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """examples/README.md: --profile messaging is a registered CLI entry."""
+    captured: dict[str, object] = {"profile": None}
+
+    async def stub_run_default(
+        config: CursorAgentConfig,
+        *,
+        no_banner: bool = False,
+    ) -> RunStatus | None:
+        _ = no_banner
+        captured["profile"] = config.tool_profile
+        return None
+
+    monkeypatch.setattr("cursor_agent.cli.app.run_default", stub_run_default)
+
+    result = CliRunner().invoke(app, ["--profile", "messaging"])
+    assert result.exit_code == 0
+    assert captured["profile"] == "messaging"
+
+
+def test_documented_sessions_list_command_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """examples/README.md: sessions list runs without CURSOR_API_KEY."""
+
+    async def stub_list_sessions(_config: CursorAgentConfig) -> list[object]:
+        return []
+
+    monkeypatch.setattr(
+        "cursor_agent.cli.app._list_sessions_for_config",
+        stub_list_sessions,
+    )
+
+    result = CliRunner().invoke(app, ["sessions", "list"])
+    assert result.exit_code == 0
+    assert "No sessions found" in result.stdout
+
+
+def test_documented_gateway_command_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """examples/README.md: gateway subcommand is registered and invokable."""
+
+    async def stub_run_gateway(config_path: Path | None = None) -> int:
+        _ = config_path
+        return 0
+
+    monkeypatch.setattr("cursor_agent.cli.app.run_gateway", stub_run_gateway)
+
+    result = CliRunner().invoke(app, ["gateway"])
+    assert result.exit_code == 0
+
+
+def test_documented_cron_list_command_exists(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """examples/README.md: cron list runs without CURSOR_API_KEY."""
+    cron_root = tmp_path / "cron"
+    cron_root.mkdir()
+    monkeypatch.setattr(
+        "cursor_agent.cli.cron_commands.resolve_cron_root",
+        lambda _config: cron_root,
+    )
+
+    result = CliRunner().invoke(app, ["cron", "list"])
+    assert result.exit_code == 0
+    assert "No cron jobs configured" in result.stdout
 
 
 def test_cli_registers_no_banner_option() -> None:
