@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,6 +15,10 @@ from cursor_agent.gateway.config import (
     TelegramPlatformConfig,
 )
 from cursor_agent.memory import LocalMemoryStore
+from cursor_agent.memory.store import (
+    MEMORY_SECTION_MARKER,
+    USER_MEMORY_SECTION_MARKER,
+)
 from cursor_agent.platforms.base import (
     GatewayInboundCallback,
     InboundMessage,
@@ -22,6 +28,76 @@ from cursor_agent.pool import SessionAgentPool
 from cursor_agent.sdk_facade import FakeSdkFacade, SdkFacade
 from cursor_agent.sessions.models import SessionCreateParams
 from cursor_agent.sessions.store import SessionStore
+
+
+class NoopCronScheduler:
+    """Default cron scheduler fake so gateway tests never read operator cron files."""
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        pass
+
+    def set_shutting_down_check(self, _check: object) -> None:
+        """Accept gateway shutdown wiring without tracking state."""
+        return None
+
+    def pause_scheduling(self) -> None:
+        """No-op pause for gateway tests without a real scheduler."""
+        return None
+
+    async def start(self) -> None:
+        """Pretend to start the embedded cron scheduler."""
+        return None
+
+    async def shutdown(self, *, timeout: float | None = None) -> None:
+        """Pretend to stop the embedded cron scheduler."""
+        _ = timeout
+        return None
+
+
+async def _wait_for_condition(
+    condition: Callable[[], bool],
+    *,
+    description: str,
+    attempts: int = 20,
+) -> None:
+    """Wait for a background dispatch assertion to become true."""
+    for _attempt in range(attempts):
+        if condition():
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"condition did not become true: {description}")
+
+
+def _expected_injected_message(
+    *,
+    user_text: str,
+    memory_text: str,
+    user_message: str,
+) -> str:
+    """Build the locked first-turn injection message shape used in production."""
+    return (
+        f"{USER_MEMORY_SECTION_MARKER}\n"
+        f"{user_text}\n\n"
+        f"{MEMORY_SECTION_MARKER}\n"
+        f"{memory_text}\n\n"
+        f"{user_message}"
+    )
+
+
+async def _wait_for_memory_injected_metadata(
+    store: SessionStore,
+    session_key: str,
+    *,
+    attempts: int = 50,
+) -> None:
+    """Wait until the session row records memory_injected=true after first send."""
+    for _attempt in range(attempts):
+        row = await store.resolve(session_key)
+        if row is not None and row.metadata.get("memory_injected") is True:
+            return
+        await asyncio.sleep(0.01)
+    msg = f"memory_injected metadata did not persist for session_key={session_key!r}"
+    raise AssertionError(msg)
 
 
 def gateway_config(
@@ -279,3 +355,86 @@ async def make_run_tracker(events: list[str]) -> RunTracker:
         events.append(event)
 
     return _track
+
+
+# --- Gateway shutdown test fakes (ADR-021) ---
+
+
+class FlushRecordingHandler(logging.Handler):
+    """Logging handler that records ``flush`` invocations."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.flush_count = 0
+
+    def emit(self, record: logging.LogRecord) -> None:
+        """No-op emit for flush-only assertions."""
+        _ = record
+
+    def flush(self) -> None:
+        self.flush_count += 1
+
+
+class CancelTrackingFacade(FakeSdkFacade):
+    """FakeSdkFacade that records ``cancel`` and ``close`` calls."""
+
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(**kwargs)  # type: ignore[arg-type]
+        self.cancel_calls: list[str] = []
+        self.close_calls = 0
+
+    async def cancel(self, agent_id: str) -> None:
+        """Record cancel and release blocked sends when configured."""
+        self.cancel_calls.append(agent_id)
+        if self._send_release is not None:
+            self._send_release.set()
+        await super().cancel(agent_id)
+
+    async def close(self) -> None:
+        """Record close before delegating to the fake facade."""
+        self.close_calls += 1
+        await super().close()
+
+
+class OrderTrackingCronScheduler:
+    """Minimal cron scheduler double that records when its drain runs."""
+
+    def __init__(self, events: list[str]) -> None:
+        self._events = events
+
+    def set_shutting_down_check(self, check: object) -> None:
+        """Accept the shutting-down predicate without using it."""
+        _ = check
+
+    async def start(self) -> None:
+        """No-op start for shutdown ordering tests."""
+
+    def pause_scheduling(self) -> None:
+        """Record nothing; new fires are irrelevant to ordering."""
+
+    async def shutdown(self, *, timeout: float) -> None:
+        """Record the cron drain step relative to adapter stop."""
+        _ = timeout
+        self._events.append("cron_drain")
+
+
+def cron_root_for_tests(tmp_path: Path) -> Path:
+    """Return a temporary cron root directory for shutdown tests."""
+    root = tmp_path / "cron"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def write_shutdown_cron_jobs_yaml(cron_root: Path) -> None:
+    """Write a minimal jobs.yaml for gateway shutdown cron tests."""
+    from cursor_agent.cron.models import JOBS_FILENAME
+
+    (cron_root / JOBS_FILENAME).write_text(
+        (
+            "jobs:\n"
+            "  - id: shutdown-job\n"
+            '    schedule: "0 9 * * *"\n'
+            '    prompt: "Shutdown cron job."\n'
+        ),
+        encoding="utf-8",
+    )
