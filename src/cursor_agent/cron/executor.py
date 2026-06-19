@@ -72,6 +72,18 @@ def build_cron_session_metadata(job_id: str, run_id: str) -> dict[str, object]:
     }
 
 
+async def _cancel_agent_quietly(facade: SdkFacade, agent_id: str) -> None:
+    """Best-effort cancel of an SDK agent; never raises to the caller."""
+    try:
+        await facade.cancel(agent_id)
+    except Exception:
+        _MODULE_LOGGER.warning(
+            "cron cleanup: failed to cancel orphaned agent_id=%s",
+            agent_id,
+            exc_info=True,
+        )
+
+
 async def create_cron_run_session(
     job: CronJob,
     *,
@@ -80,7 +92,12 @@ async def create_cron_run_session(
     config: CursorAgentConfig,
     run_id: str | None = None,
 ) -> SessionRecord:
-    """Create a dedicated SDK agent and session row for one cron execution."""
+    """Create a dedicated SDK agent and session row for one cron execution.
+
+    If persisting the session row fails after the SDK agent is created, the
+    agent is cancelled before re-raising so it does not leak without a backing
+    session record (review: orphaned SDK agent on store.create failure).
+    """
     effective_run_id = run_id if run_id is not None else uuid.uuid4().hex
     session_key = build_cron_session_key(job.id, effective_run_id)
     workspace = str(Path(config.runtime.local.cwd).resolve())
@@ -90,17 +107,21 @@ async def create_cron_run_session(
         tool_profile=config.tool_profile,
         runtime_mode=job.runtime,
     )
-    return await store.create(
-        SessionCreateParams(
-            session_key=session_key,
-            agent_id=agent_id,
-            workspace=workspace,
-            runtime=job.runtime,
-            tool_profile=config.tool_profile,
-            title=None,
-            metadata=build_cron_session_metadata(job.id, effective_run_id),
+    try:
+        return await store.create(
+            SessionCreateParams(
+                session_key=session_key,
+                agent_id=agent_id,
+                workspace=workspace,
+                runtime=job.runtime,
+                tool_profile=config.tool_profile,
+                title=None,
+                metadata=build_cron_session_metadata(job.id, effective_run_id),
+            )
         )
-    )
+    except Exception:
+        await _cancel_agent_quietly(facade, agent_id)
+        raise
 
 
 def _map_run_status(result: RunResult) -> CronRunStatus:
@@ -127,13 +148,29 @@ async def run_cron_job(
     delivery layer. Prompt bodies and assistant output are never logged here.
     """
     effective_run_id = run_id if run_id is not None else uuid.uuid4().hex
-    row = await create_cron_run_session(
-        job,
-        store=store,
-        facade=facade,
-        config=config,
-        run_id=effective_run_id,
-    )
+    try:
+        row = await create_cron_run_session(
+            job,
+            store=store,
+            facade=facade,
+            config=config,
+            run_id=effective_run_id,
+        )
+    except Exception as exc:
+        _MODULE_LOGGER.warning(
+            "cron job setup failed: job_id=%s run_id=%s exception_class=%s",
+            job.id,
+            effective_run_id,
+            exc.__class__.__name__,
+        )
+        return CronJobRunOutcome(
+            job_id=job.id,
+            run_id=effective_run_id,
+            session_id="",
+            session_key=build_cron_session_key(job.id, effective_run_id),
+            status=CronRunStatus.ERROR,
+            error_message=str(exc),
+        )
     session_key = row.session_key
 
     try:
