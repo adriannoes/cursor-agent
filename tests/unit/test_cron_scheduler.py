@@ -371,13 +371,15 @@ async def test_mtime_watcher_reloads_after_disk_write(tmp_path: Path) -> None:
             cron_root,
             _single_job_yaml(job_id="after-write", schedule="0 11 * * *"),
         )
-        poll_trigger.set()
-        for _attempt in range(20):
+        # The watcher reload parses jobs.yaml via asyncio.to_thread, so the poll
+        # loop must yield real wall-clock time for the worker thread to finish.
+        # A bare sleep(0) spin completed too fast on CI and missed the reload.
+        for _attempt in range(100):
+            poll_trigger.set()
+            await asyncio.sleep(0.02)
             jobs = scheduler.list_jobs_with_next_run()
             if jobs and jobs[0].job.id == "after-write":
                 break
-            poll_trigger.set()
-            await asyncio.sleep(0)
         else:
             pytest.fail("mtime watcher did not reload updated jobs.yaml")
 
