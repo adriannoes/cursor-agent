@@ -77,7 +77,16 @@ hooks/messaging/                          # repo source of truth
     └── sensitive-paths.sh
 ```
 
-Messaging create/resume also pass `mcp_servers: {}` and `sandbox_options.enabled: true` via the SDK facade (defense in depth alongside hooks).
+### MCP and sandbox on create and resume
+
+Profile policy applies on **both** agent create and resume:
+
+| Profile | Create | Resume |
+|---------|--------|--------|
+| `coding` | Omits `mcp_servers` — Cursor project (`.cursor/mcp.json`) and user MCP settings apply | Omits `mcp_servers` — persisted SDK/project MCP settings apply |
+| `messaging` | `mcp_servers: {}` + `sandbox_options.enabled: true` (network off) | Re-injects `mcp_servers: {}` + sandbox (defense in depth alongside hooks) |
+
+`coding` is not gateway-safe even when MCP is preserved; `messaging` layers empty MCP, sandbox, and deny hooks together.
 
 ---
 

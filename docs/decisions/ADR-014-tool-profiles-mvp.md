@@ -14,8 +14,10 @@ The SDK does not disable native tools. Real restriction requires hooks, MCP conf
 
 | Profile | MCP | Hooks | Use |
 |---------|-----|-------|-----|
-| `coding` | configurable (project `.cursor/mcp.json`) | optional dev template | CLI, trusted local dev |
-| `messaging` | `{}` (empty inline) | deny hooks deployed to workspace | Gateway, bots |
+| `coding` | project/user settings preserved (omit `mcp_servers` on create and resume) | optional dev template | CLI, trusted local dev |
+| `messaging` | `{}` on create and resume; sandbox enabled | deny hooks deployed to workspace | Gateway, bots |
+
+On **create**, `coding` omits `mcp_servers` so Cursor project (`.cursor/mcp.json`) and user MCP configuration apply; `messaging` passes an explicit empty map and enables sandbox (network off). On **resume**, the same rule holds: `coding` omits the field so persisted SDK/project MCP settings apply; `messaging` re-injects `mcp_servers: {}` and sandbox for defense in depth.
 
 Additional profiles (`minimal`, `full`) are deferred until MCP search and related integrations are promoted.
 
