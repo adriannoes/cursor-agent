@@ -101,10 +101,14 @@ class CronScheduler:
         if self._started:
             return
 
+        # Load and register jobs before starting APScheduler. An invalid
+        # jobs.yaml then fails fast without leaving a running scheduler behind
+        # (APScheduler buffers jobs added before start). (review: start() cleanup)
+        await self.load_jobs()
+
         if not self._scheduler.running:
             self._scheduler.start()
 
-        await self.load_jobs()
         for job in self._pending_jobs:
             self._register_job(job)
         self._pending_jobs.clear()
