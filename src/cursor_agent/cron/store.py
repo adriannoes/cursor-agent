@@ -16,6 +16,7 @@ from cursor_agent.cron.models import (
     CronJob,
     CronJobDelivery,
     CronTelegramDelivery,
+    validate_cron_prompt,
 )
 from cursor_agent.errors import ConfigError
 
@@ -68,6 +69,7 @@ def build_cron_job(
         payload["delivery"] = delivery.model_dump()
 
     try:
+        validate_cron_prompt(prompt, job_id=job_id)
         return CronJob.model_validate(payload)
     except (ValidationError, ValueError) as exc:
         msg = _format_job_validation_error(job_id=job_id, exc=exc)

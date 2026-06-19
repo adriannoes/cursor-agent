@@ -76,8 +76,11 @@ class CronJob(BaseModel):
     @field_validator("prompt")
     @classmethod
     def _validate_prompt(cls, value: str, info: ValidationInfo) -> str:
+        # Model-level enforcement is size-only so metadata-only listing can use
+        # an empty prompt placeholder; blank-prompt rejection happens in the
+        # loader/CLI boundaries via validate_cron_prompt.
         job_id = info.data.get("id", "unknown")
-        return validate_cron_prompt(value, job_id=str(job_id))
+        return _validate_cron_prompt_size(value, job_id=str(job_id))
 
 
 def validate_cron_schedule(schedule: str) -> str:
@@ -139,6 +142,17 @@ def validate_cron_prompt(prompt: str, *, job_id: str) -> str:
     Raises:
         ValueError: Prompt exceeds the MVP byte cap.
     """
+    if not prompt.strip():
+        msg = (
+            f"invalid prompt for job {job_id!r}: received {prompt!r}, "
+            "expected non-empty prompt text"
+        )
+        raise ValueError(msg)
+    return _validate_cron_prompt_size(prompt, job_id=job_id)
+
+
+def _validate_cron_prompt_size(prompt: str, *, job_id: str) -> str:
+    """Reject prompt bodies larger than ``CRON_PROMPT_MAX_BYTES`` (size only)."""
     prompt_bytes = len(prompt.encode("utf-8"))
     if prompt_bytes > CRON_PROMPT_MAX_BYTES:
         msg = (
