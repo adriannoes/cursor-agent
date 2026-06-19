@@ -142,6 +142,92 @@ def test_cron_add_invalid_schedule_cites_field_name(cron_cli_env: Path) -> None:
     assert "schedule" in combined.lower()
 
 
+def _add_daily_report(prompt: str = "Generate the daily report.") -> None:
+    """Add a baseline cron job through the CLI for show/error tests."""
+    result = CliRunner().invoke(
+        app,
+        [
+            "cron",
+            "add",
+            "daily-report",
+            "--schedule",
+            "0 9 * * *",
+            "--prompt",
+            prompt,
+            "--runtime",
+            "cloud",
+            "--chat-id",
+            "123456789",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+
+
+def test_cron_show_displays_job_detail(cron_cli_env: Path) -> None:
+    """cron show renders full metadata including the prompt body."""
+    _add_daily_report(prompt="Audit the backlog.")
+
+    result = CliRunner().invoke(app, ["cron", "show", "daily-report"])
+
+    assert result.exit_code == 0, result.stdout
+    assert "id: daily-report" in result.stdout
+    assert "schedule: 0 9 * * *" in result.stdout
+    assert "runtime: cloud" in result.stdout
+    assert "telegram_chat_id: 123456789" in result.stdout
+    assert "prompt: Audit the backlog." in result.stdout
+
+
+def test_cron_show_unknown_id_exits_error(cron_cli_env: Path) -> None:
+    """cron show for a missing id exits non-zero with a clear message."""
+    result = CliRunner().invoke(app, ["cron", "show", "ghost"])
+
+    assert result.exit_code == 1
+    combined = f"{result.stdout}\n{result.stderr}"
+    assert "not found" in combined.lower()
+
+
+def test_cron_add_duplicate_id_exits_error(cron_cli_env: Path) -> None:
+    """A second add with the same id surfaces a duplicate error."""
+    _add_daily_report()
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "cron",
+            "add",
+            "daily-report",
+            "--schedule",
+            "0 9 * * *",
+            "--prompt",
+            "Another prompt.",
+        ],
+    )
+
+    assert result.exit_code == 1
+    combined = f"{result.stdout}\n{result.stderr}"
+    assert "already exists" in combined.lower()
+
+
+def test_cron_remove_unknown_id_exits_error(cron_cli_env: Path) -> None:
+    """Removing a missing id exits non-zero with a clear message."""
+    result = CliRunner().invoke(app, ["cron", "remove", "ghost"])
+
+    assert result.exit_code == 1
+    combined = f"{result.stdout}\n{result.stderr}"
+    assert "not found" in combined.lower()
+
+
+def test_cron_list_corrupt_jobs_yaml_exits_error(cron_cli_env: Path) -> None:
+    """A malformed jobs.yaml makes cron list exit non-zero without a traceback."""
+    (cron_cli_env / "jobs.yaml").write_text("jobs:\n  - id: [unclosed\n", encoding="utf-8")
+
+    result = CliRunner().invoke(app, ["cron", "list"])
+
+    assert result.exit_code == 1
+    combined = f"{result.stdout}\n{result.stderr}"
+    assert "yaml" in combined.lower()
+
+
 def test_cron_add_help_documents_prompt_limit() -> None:
     """CLI help documents the 64 KiB prompt cap for operators."""
     result = CliRunner().invoke(app, ["cron", "add", "--help"])
