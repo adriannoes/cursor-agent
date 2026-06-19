@@ -168,6 +168,25 @@ async def test_add_job_registers_with_scheduler(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_registered_job_uses_explicit_overlap_policy(tmp_path: Path) -> None:
+    """Registered APScheduler jobs set max_instances/coalesce/misfire explicitly."""
+    scheduler, _root, _executor = _build_scheduler(
+        tmp_path,
+        yaml_content=_single_job_yaml(job_id="policy-job"),
+    )
+
+    await scheduler.start()
+    try:
+        aps_job = scheduler._scheduler.get_job("cron:policy-job")
+        assert aps_job is not None
+        assert aps_job.max_instances == 1
+        assert aps_job.coalesce is True
+        assert aps_job.misfire_grace_time == 60
+    finally:
+        await scheduler.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_remove_job_unregisters_from_scheduler(tmp_path: Path) -> None:
     """``remove_job`` drops the job from scheduler state."""
     scheduler, _root, _executor = _build_scheduler(

@@ -35,6 +35,14 @@ ShuttingDownCheck = Callable[[], bool]
 DEFAULT_RELOAD_POLL_INTERVAL_SECONDS: Final[float] = 1.0
 _APSCHEDULER_JOB_PREFIX: Final[str] = "cron:"
 
+# Overlap policy: never run two instances of the same job concurrently, collapse
+# bursts of missed fires into one, and tolerate up to one minimum-interval of
+# delay before treating a fire as missed (aligns with the >=1-minute schedule
+# floor). Explicit values avoid relying on fragile APScheduler defaults.
+CRON_JOB_MAX_INSTANCES: Final[int] = 1
+CRON_JOB_COALESCE: Final[bool] = True
+DEFAULT_CRON_MISFIRE_GRACE_SECONDS: Final[int] = 60
+
 
 @dataclass(frozen=True, slots=True)
 class CronJobNextRun:
@@ -265,6 +273,9 @@ class CronScheduler:
             id=aps_job_id,
             kwargs={"job": job},
             replace_existing=True,
+            max_instances=CRON_JOB_MAX_INSTANCES,
+            coalesce=CRON_JOB_COALESCE,
+            misfire_grace_time=DEFAULT_CRON_MISFIRE_GRACE_SECONDS,
         )
 
     async def _run_job(self, job: CronJob) -> None:
