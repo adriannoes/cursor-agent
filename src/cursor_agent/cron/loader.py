@@ -12,14 +12,37 @@ from pydantic import ValidationError
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.cron.models import (
     CRON_JOBS_FILE_MAX_BYTES,
-    JOBS_FILENAME,
     CronJob,
+    CronJobSummary,
     validate_cron_prompt,
 )
+from cursor_agent.cron.paths import DEFAULT_CRON_ROOT, resolve_cron_jobs_file
 from cursor_agent.errors import ConfigError
 from cursor_agent.utf8_io import read_utf8_file_tail
 
-_DEFAULT_CRON_ROOT = Path.home() / ".cursor-agent" / "cron"
+
+@dataclass(frozen=True, slots=True)
+class CronJobsSummaryCatalog:
+    """Indexed cron job summaries loaded from disk without prompt bodies.
+
+    Example:
+        >>> catalog = CronJobsSummaryCatalog(())
+        >>> catalog.list_summaries()
+        []
+    """
+
+    _summaries: tuple[CronJobSummary, ...]
+
+    def list_summaries(self) -> list[CronJobSummary]:
+        """Return job summaries in file order."""
+        return list(self._summaries)
+
+    def get_summary(self, job_id: str) -> CronJobSummary | None:
+        """Return the case-sensitive summary for ``job_id``, if present."""
+        for summary in self._summaries:
+            if summary.id == job_id:
+                return summary
+        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,20 +69,48 @@ class CronJobsCatalog:
         return None
 
 
+def cron_job_summaries_from_config(
+    config: CursorAgentConfig,
+    *,
+    override_cron_root: Path | None = None,
+) -> CronJobsSummaryCatalog:
+    """Load cron job summaries from config without reading prompt bodies.
+
+    Jobs are read from ``{cron_root}/jobs.yaml``. Missing or empty files yield an
+    empty catalog. Prompt fields in YAML are ignored so oversized prompt bodies do
+    not block metadata listing.
+
+    Example:
+        >>> from cursor_agent.config.loader import load_config
+        >>> catalog = cron_job_summaries_from_config(load_config())
+    """
+    _ = config
+    cron_root = (
+        override_cron_root if override_cron_root is not None else DEFAULT_CRON_ROOT
+    )
+    jobs_path = resolve_cron_jobs_file(cron_root)
+    if jobs_path is None:
+        return CronJobsSummaryCatalog(())
+
+    raw_yaml = _read_bounded_jobs_yaml(jobs_path)
+    if not raw_yaml.strip():
+        return CronJobsSummaryCatalog(())
+
+    parsed = _parse_jobs_yaml(raw_yaml, jobs_path=jobs_path)
+    summaries = _validate_job_summaries(parsed, jobs_path=jobs_path)
+    return CronJobsSummaryCatalog(tuple(summaries))
+
+
 def cron_jobs_from_config(
     config: CursorAgentConfig,
     *,
     override_cron_root: Path | None = None,
-    include_prompt: bool = True,
 ) -> CronJobsCatalog:
-    """Load cron jobs from config with optional test/runtime overrides.
+    """Load fully validated executable cron jobs from config.
 
     Jobs are read from ``{cron_root}/jobs.yaml``. Missing or empty files yield an
     empty catalog. ``override_cron_root`` wins for hermetic tests; otherwise the
     default ``~/.cursor-agent/cron`` directory applies.
-
-    When ``include_prompt`` is ``False``, metadata listing omits prompt bodies and
-    skips prompt size validation — mirroring PRD-009 ``include_content=False``.
 
     Example:
         >>> from cursor_agent.config.loader import load_config
@@ -67,9 +118,9 @@ def cron_jobs_from_config(
     """
     _ = config
     cron_root = (
-        override_cron_root if override_cron_root is not None else _DEFAULT_CRON_ROOT
+        override_cron_root if override_cron_root is not None else DEFAULT_CRON_ROOT
     )
-    jobs_path = _resolve_jobs_file_path(cron_root)
+    jobs_path = resolve_cron_jobs_file(cron_root)
     if jobs_path is None:
         return CronJobsCatalog(())
 
@@ -78,41 +129,8 @@ def cron_jobs_from_config(
         return CronJobsCatalog(())
 
     parsed = _parse_jobs_yaml(raw_yaml, jobs_path=jobs_path)
-    jobs = _validate_jobs(
-        parsed,
-        include_prompt=include_prompt,
-        jobs_path=jobs_path,
-    )
+    jobs = _validate_jobs(parsed, jobs_path=jobs_path)
     return CronJobsCatalog(tuple(jobs))
-
-
-def _resolve_jobs_file_path(cron_root: Path) -> Path | None:
-    """Return ``jobs.yaml`` when present and contained by ``cron_root``."""
-    jobs_path = cron_root / JOBS_FILENAME
-    if not jobs_path.exists():
-        return None
-    if jobs_path.is_symlink():
-        msg = (
-            f"cron jobs file {jobs_path!s} must not be a symlink, "
-            f"expected regular file contained under {cron_root!s}"
-        )
-        raise ConfigError(msg)
-    try:
-        resolved_root = cron_root.resolve(strict=False)
-        resolved_jobs = jobs_path.resolve(strict=True)
-    except OSError as exc:
-        msg = (
-            f"invalid cron jobs path: could not resolve {jobs_path!s} under "
-            f"{cron_root!s}: {exc}"
-        )
-        raise ConfigError(msg) from exc
-    if not resolved_jobs.is_relative_to(resolved_root):
-        msg = (
-            f"cron jobs file {jobs_path!s} escapes cron root {cron_root!s}, "
-            "expected path contained under the configured cron directory"
-        )
-        raise ConfigError(msg)
-    return jobs_path
 
 
 def _read_bounded_jobs_yaml(jobs_path: Path) -> str:
@@ -172,28 +190,72 @@ def _parse_jobs_yaml(raw_yaml: str, *, jobs_path: Path) -> list[dict[str, Any]]:
     return raw_jobs
 
 
+def _validate_job_summaries(
+    raw_jobs: list[dict[str, Any]],
+    *,
+    jobs_path: Path,
+) -> list[CronJobSummary]:
+    """Validate summary mappings without loading prompt bodies."""
+    summaries: list[CronJobSummary] = []
+    seen_ids: dict[str, int] = {}
+
+    for index, raw_job in enumerate(raw_jobs):
+        job_payload = {key: value for key, value in raw_job.items() if key != "prompt"}
+        job_id = job_payload.get("id")
+        prompt_value = raw_job.get("prompt")
+        if not isinstance(prompt_value, str) or not prompt_value.strip():
+            location = (
+                f"job[{index}]" if not isinstance(job_id, str) else f"job {job_id!r}"
+            )
+            msg = (
+                f"invalid cron job in {jobs_path!s} at {location}: field prompt: "
+                f"received {prompt_value!r}, expected non-empty string"
+            )
+            raise ConfigError(msg)
+
+        try:
+            summary = CronJobSummary.model_validate(job_payload)
+        except ValidationError as exc:
+            location = (
+                f"job[{index}]" if not isinstance(job_id, str) else f"job {job_id!r}"
+            )
+            msg = (
+                f"invalid cron job in {jobs_path!s} at {location}: "
+                f"{_format_validation_error(exc)}"
+            )
+            raise ConfigError(msg) from exc
+
+        if summary.id in seen_ids:
+            msg = (
+                f"duplicate cron job id in {jobs_path!s}: received {summary.id!r}, "
+                "expected each job id to be unique (case-sensitive)"
+            )
+            raise ConfigError(msg)
+        seen_ids[summary.id] = index
+        summaries.append(summary)
+
+    return summaries
+
+
 def _validate_jobs(
     raw_jobs: list[dict[str, Any]],
     *,
-    include_prompt: bool,
     jobs_path: Path,
 ) -> list[CronJob]:
-    """Validate job mappings and enforce case-sensitive unique ids."""
+    """Validate executable job mappings and enforce case-sensitive unique ids."""
     jobs: list[CronJob] = []
     seen_ids: dict[str, int] = {}
 
     for index, raw_job in enumerate(raw_jobs):
         job_payload = dict(raw_job)
         job_id = job_payload.get("id")
-        if isinstance(job_id, str) and include_prompt:
+        if isinstance(job_id, str):
             prompt_value = job_payload.get("prompt")
             if isinstance(prompt_value, str):
                 try:
                     validate_cron_prompt(prompt_value, job_id=job_id)
                 except ValueError as exc:
                     raise ConfigError(str(exc)) from exc
-        if not include_prompt:
-            job_payload["prompt"] = ""
 
         try:
             job = CronJob.model_validate(job_payload)

@@ -71,6 +71,54 @@ def test_write_rejects_symlinked_jobs_file(tmp_path: Path) -> None:
         write_cron_jobs_atomic(root, [_job()])  # type: ignore[list-item]
 
 
+def _symlinked_cron_root(tmp_path: Path) -> tuple[Path, Path]:
+    """Return ``(cron_root_symlink, symlink_target)`` for containment regressions."""
+    target = tmp_path / "cron-target"
+    target.mkdir(parents=True, exist_ok=True)
+    cron_root = tmp_path / "cron"
+    cron_root.symlink_to(target)
+    return cron_root, target
+
+
+def _assert_no_cron_artifacts_under(directory: Path) -> None:
+    """Assert lock, temp, and jobs files were not created under ``directory``."""
+    names = {path.name for path in directory.iterdir()}
+    assert "jobs.yaml" not in names
+    assert "jobs.yaml.lock" not in names
+    assert not any(
+        name.startswith(".jobs.yaml.") and name.endswith(".tmp") for name in names
+    )
+
+
+def test_symlinked_cron_root_rejects_add_without_target_side_effects(
+    tmp_path: Path,
+) -> None:
+    """``add_cron_job_atomic`` rejects a symlinked root without writing to the target."""
+    config = _config(tmp_path)
+    cron_root, target = _symlinked_cron_root(tmp_path)
+    with pytest.raises(ConfigError, match="symlink|root|contained"):
+        add_cron_job_atomic(config, cron_root, _job())  # type: ignore[arg-type]
+    _assert_no_cron_artifacts_under(target)
+
+
+def test_symlinked_cron_root_rejects_remove_without_target_side_effects(
+    tmp_path: Path,
+) -> None:
+    """``remove_cron_job_atomic`` rejects a symlinked root without mutating the target."""
+    config = _config(tmp_path)
+    cron_root, target = _symlinked_cron_root(tmp_path)
+    (target / "jobs.yaml").write_text(
+        'jobs:\n  - id: daily-report\n    schedule: "0 9 * * *"\n'
+        '    prompt: "Generate the daily report."\n',
+        encoding="utf-8",
+    )
+    initial_names = {path.name for path in target.iterdir()}
+    with pytest.raises(ConfigError, match="symlink|root|contained"):
+        remove_cron_job_atomic(config, cron_root, "daily-report")
+    assert {path.name for path in target.iterdir()} == initial_names
+    assert not (target / "jobs.yaml.lock").exists()
+
+
 @pytest.mark.asyncio
 async def test_concurrent_adds_do_not_lose_updates(tmp_path: Path) -> None:
     """Two concurrent cron adds serialize via the write lock without lost writes."""

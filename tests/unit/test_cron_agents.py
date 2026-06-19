@@ -25,7 +25,7 @@ from cursor_agent.memory import (
 )
 from cursor_agent.pool import SessionAgentPool
 from cursor_agent.sdk_facade import FakeSdkFacade, RunResult, StreamCallbacks
-from cursor_agent.sessions.models import build_cli_session_key
+from cursor_agent.sessions.models import SessionCreateParams, build_cli_session_key
 from cursor_agent.sessions.store import SessionStore
 
 _USER_FILENAME = "USER.md"
@@ -376,6 +376,87 @@ async def test_run_cron_job_returns_error_when_session_setup_fails(
     assert outcome.session_key == build_cron_session_key(cron_job.id, "run-error")
     assert outcome.session_id == ""
     assert len(facade.cancelled_agents) == 1
+
+
+async def _create_cron_session_row(
+    store: SessionStore,
+    *,
+    job_id: str,
+    run_id: str,
+    agent_id: str,
+    workspace: Path,
+) -> None:
+    """Persist one cron session row for pruning specificity tests."""
+    await store.create(
+        SessionCreateParams(
+            session_key=build_cron_session_key(job_id, run_id),
+            agent_id=agent_id,
+            workspace=str(workspace.resolve()),
+            runtime="local",
+            tool_profile="coding",
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_prune_cron_sessions_only_affects_exact_job_id_prefix(
+    store: SessionStore,
+    tmp_path: Path,
+) -> None:
+    """Pruning one job must not delete sessions for colliding cron job ids."""
+    collision_specs: tuple[tuple[str, str, str], ...] = (
+        ("daily", "run-daily", "agent-daily"),
+        ("daily_%", "run-daily-pct", "agent-daily-pct"),
+        ("daily:report", "run-daily-report", "agent-daily-report"),
+    )
+    for job_id, run_id, agent_id in collision_specs:
+        await _create_cron_session_row(
+            store,
+            job_id=job_id,
+            run_id=run_id,
+            agent_id=agent_id,
+            workspace=tmp_path,
+        )
+
+    pruned_agent_ids = await store.prune_cron_sessions("daily", keep_last=0)
+
+    assert pruned_agent_ids == ["agent-daily"]
+    for job_id, run_id, expected_agent_id in collision_specs[1:]:
+        row = await store.resolve(build_cron_session_key(job_id, run_id))
+        assert row is not None, (
+            f"expected surviving session for job_id={job_id!r}, "
+            f"run_id={run_id!r} after pruning daily"
+        )
+        assert row.agent_id == expected_agent_id
+
+
+@pytest.mark.asyncio
+async def test_prune_cron_sessions_returns_pruned_agent_ids_for_cancellation(
+    store: SessionStore,
+    tmp_path: Path,
+) -> None:
+    """Pruned rows must return agent_id values for SDK cancellation."""
+    await _create_cron_session_row(
+        store,
+        job_id="daily",
+        run_id="run-old",
+        agent_id="agent-old",
+        workspace=tmp_path,
+    )
+    await _create_cron_session_row(
+        store,
+        job_id="daily",
+        run_id="run-new",
+        agent_id="agent-new",
+        workspace=tmp_path,
+    )
+
+    pruned_agent_ids = await store.prune_cron_sessions("daily", keep_last=1)
+
+    assert pruned_agent_ids == ["agent-old"]
+    surviving = await store.resolve(build_cron_session_key("daily", "run-new"))
+    assert surviving is not None
+    assert surviving.agent_id == "agent-new"
 
 
 @pytest.mark.asyncio

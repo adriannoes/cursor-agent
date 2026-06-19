@@ -70,6 +70,37 @@ def test_cron_add_persists_job_with_flags(cron_cli_env: Path) -> None:
     assert _load_jobs(cron_cli_env) == ["daily-report"]
 
 
+def test_cron_list_renders_metadata_without_prompt_body(cron_cli_env: Path) -> None:
+    """cron list renders schedule and delivery metadata without the prompt body."""
+    secret_prompt = "Do not leak this prompt in cron list output."
+    add_result = CliRunner().invoke(
+        app,
+        [
+            "cron",
+            "add",
+            "daily-report",
+            "--schedule",
+            "0 9 * * *",
+            "--prompt",
+            secret_prompt,
+            "--runtime",
+            "cloud",
+            "--chat-id",
+            "123456789",
+        ],
+    )
+    assert add_result.exit_code == 0, add_result.stdout
+
+    result = CliRunner().invoke(app, ["cron", "list"])
+
+    assert result.exit_code == 0
+    assert "daily-report" in result.stdout
+    assert "0 9 * * *" in result.stdout
+    assert "cloud" in result.stdout
+    assert "123456789" in result.stdout
+    assert secret_prompt not in result.stdout
+
+
 def test_cron_list_shows_added_job(cron_cli_env: Path) -> None:
     """cron list renders metadata for a persisted job."""
     add_result = CliRunner().invoke(

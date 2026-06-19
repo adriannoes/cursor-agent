@@ -17,7 +17,12 @@ except ImportError:  # pragma: no cover - non-POSIX platforms
     fcntl = None  # type: ignore[assignment]
 
 from cursor_agent.config.loader import CursorAgentConfig
-from cursor_agent.cron.loader import CronJobsCatalog, cron_jobs_from_config
+from cursor_agent.cron.loader import (
+    CronJobsCatalog,
+    CronJobsSummaryCatalog,
+    cron_job_summaries_from_config,
+    cron_jobs_from_config,
+)
 from cursor_agent.cron.models import (
     JOBS_FILENAME,
     CronJob,
@@ -25,27 +30,37 @@ from cursor_agent.cron.models import (
     CronTelegramDelivery,
     validate_cron_prompt,
 )
+from cursor_agent.cron.paths import (
+    DEFAULT_CRON_ROOT,
+    validate_cron_jobs_file_for_write,
+)
 from cursor_agent.errors import ConfigError
-
-_DEFAULT_CRON_ROOT = Path.home() / ".cursor-agent" / "cron"
 
 
 def default_cron_root() -> Path:
     """Return the operator cron config directory."""
-    return _DEFAULT_CRON_ROOT
+    return DEFAULT_CRON_ROOT
 
 
 def load_cron_jobs_catalog(
     config: CursorAgentConfig,
     cron_root: Path,
-    *,
-    include_prompt: bool = True,
 ) -> CronJobsCatalog:
-    """Load cron jobs from an injectable cron root."""
+    """Load fully validated executable cron jobs from an injectable cron root."""
     return cron_jobs_from_config(
         config,
         override_cron_root=cron_root,
-        include_prompt=include_prompt,
+    )
+
+
+def load_cron_job_summaries_catalog(
+    config: CursorAgentConfig,
+    cron_root: Path,
+) -> CronJobsSummaryCatalog:
+    """Load cron job summaries from an injectable cron root without prompt bodies."""
+    return cron_job_summaries_from_config(
+        config,
+        override_cron_root=cron_root,
     )
 
 
@@ -89,7 +104,7 @@ def _cron_write_lock(cron_root: Path) -> Iterator[None]:
 
     Uses an exclusive POSIX advisory lock on ``jobs.yaml.lock`` so two CLI
     processes cannot interleave and drop each other's update (last-writer-wins).
-    Degrades to a no-op on platforms without ``fcntl``. (review: TOCTOU)
+    Degrades to a no-op on platforms without ``fcntl``.
     """
     cron_root.mkdir(parents=True, exist_ok=True)
     if fcntl is None:  # pragma: no cover - non-POSIX platforms
@@ -110,8 +125,9 @@ def add_cron_job_atomic(
     job: CronJob,
 ) -> None:
     """Append a validated job to ``jobs.yaml`` with an atomic replace write."""
-    with _cron_write_lock(cron_root):
-        catalog = load_cron_jobs_catalog(config, cron_root, include_prompt=True)
+    paths = validate_cron_jobs_file_for_write(cron_root)
+    with _cron_write_lock(paths.canonical_root):
+        catalog = load_cron_jobs_catalog(config, paths.canonical_root)
         existing = catalog.list_jobs()
         if catalog.get_job(job.id) is not None:
             msg = (
@@ -119,7 +135,7 @@ def add_cron_job_atomic(
                 "expected a unique case-sensitive job id"
             )
             raise ConfigError(msg)
-        write_cron_jobs_atomic(cron_root, [*existing, job])
+        write_cron_jobs_atomic(paths.canonical_root, [*existing, job])
 
 
 def remove_cron_job_atomic(
@@ -128,8 +144,9 @@ def remove_cron_job_atomic(
     job_id: str,
 ) -> None:
     """Remove a job by id from ``jobs.yaml`` with an atomic replace write."""
-    with _cron_write_lock(cron_root):
-        catalog = load_cron_jobs_catalog(config, cron_root, include_prompt=True)
+    paths = validate_cron_jobs_file_for_write(cron_root)
+    with _cron_write_lock(paths.canonical_root):
+        catalog = load_cron_jobs_catalog(config, paths.canonical_root)
         existing = catalog.list_jobs()
         if catalog.get_job(job_id) is None:
             msg = (
@@ -138,32 +155,14 @@ def remove_cron_job_atomic(
             )
             raise ConfigError(msg)
         remaining = [job for job in existing if job.id != job_id]
-        write_cron_jobs_atomic(cron_root, remaining)
-
-
-def _reject_unsafe_jobs_path(cron_root: Path, jobs_path: Path) -> None:
-    """Reject a symlinked or escaping ``jobs.yaml`` before an atomic write."""
-    if jobs_path.is_symlink():
-        msg = (
-            f"cron jobs file {jobs_path!s} must not be a symlink, "
-            f"expected a regular file under {cron_root!s}"
-        )
-        raise ConfigError(msg)
-    resolved_root = cron_root.resolve(strict=False)
-    resolved_jobs = jobs_path.resolve(strict=False)
-    if not resolved_jobs.is_relative_to(resolved_root):
-        msg = (
-            f"cron jobs file {jobs_path!s} escapes cron root {cron_root!s}, "
-            "expected path contained under the configured cron directory"
-        )
-        raise ConfigError(msg)
+        write_cron_jobs_atomic(paths.canonical_root, remaining)
 
 
 def write_cron_jobs_atomic(cron_root: Path, jobs: list[CronJob]) -> None:
     """Serialize validated jobs and atomically replace ``jobs.yaml``."""
-    cron_root.mkdir(parents=True, exist_ok=True)
-    jobs_path = cron_root / JOBS_FILENAME
-    _reject_unsafe_jobs_path(cron_root, jobs_path)
+    paths = validate_cron_jobs_file_for_write(cron_root)
+    paths.canonical_root.mkdir(parents=True, exist_ok=True)
+    jobs_path = paths.jobs_file
     payload = {"jobs": [_job_to_yaml_mapping(job) for job in jobs]}
     serialized = yaml.safe_dump(
         payload,
@@ -175,7 +174,7 @@ def write_cron_jobs_atomic(cron_root: Path, jobs: list[CronJob]) -> None:
     fd, temp_path_str = tempfile.mkstemp(
         prefix=f".{JOBS_FILENAME}.",
         suffix=".tmp",
-        dir=cron_root,
+        dir=paths.canonical_root,
     )
     temp_path = Path(temp_path_str)
     try:
