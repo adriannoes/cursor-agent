@@ -31,12 +31,7 @@ class CronRunStatus(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class CronJobRunOutcome:
-    """Structured result of ``run_cron_job`` for delivery and logging layers.
-
-    Example:
-        >>> outcome.status
-        <CronRunStatus.FINISHED: 'finished'>
-    """
+    """Structured result of ``run_cron_job`` for delivery and logging layers."""
 
     job_id: str
     run_id: str
@@ -77,11 +72,6 @@ def build_cron_session_metadata(job_id: str, run_id: str) -> dict[str, object]:
     }
 
 
-def _resolve_workspace(config: CursorAgentConfig) -> str:
-    """Return the absolute workspace path used for cron SDK agents."""
-    return str(Path(config.runtime.local.cwd).resolve())
-
-
 async def create_cron_run_session(
     job: CronJob,
     *,
@@ -93,7 +83,7 @@ async def create_cron_run_session(
     """Create a dedicated SDK agent and session row for one cron execution."""
     effective_run_id = run_id if run_id is not None else uuid.uuid4().hex
     session_key = build_cron_session_key(job.id, effective_run_id)
-    workspace = _resolve_workspace(config)
+    workspace = str(Path(config.runtime.local.cwd).resolve())
     agent_id = await facade.create_agent(
         workspace=workspace,
         model=config.model,
@@ -147,6 +137,7 @@ async def run_cron_job(
     session_key = row.session_key
 
     try:
+        # Per-run cron sessions use the job runtime; skip pool resume guard (PRD-010 FR-4).
         result = await pool.send(
             session_key,
             job.prompt,

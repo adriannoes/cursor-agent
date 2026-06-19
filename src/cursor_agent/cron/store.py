@@ -69,7 +69,7 @@ def build_cron_job(
 
     try:
         return CronJob.model_validate(payload)
-    except Exception as exc:
+    except (ValidationError, ValueError) as exc:
         msg = _format_job_validation_error(job_id=job_id, exc=exc)
         raise ConfigError(msg) from exc
 

@@ -39,33 +39,6 @@ class CronDeliveryOutcome:
     error_class: str | None = None
 
 
-def _configured_telegram_chat_id(job: CronJob) -> str | None:
-    """Return the configured Telegram chat id, if any."""
-    if job.delivery is None or job.delivery.telegram is None:
-        return None
-    return job.delivery.telegram.chat_id
-
-
-def _should_attempt_delivery(
-    job: CronJob,
-    outcome: CronJobRunOutcome,
-    *,
-    chunk_sender: CronTelegramChunkSender | None,
-) -> str | None:
-    """Return chat id when delivery should run, else ``None`` to skip."""
-    chat_id = _configured_telegram_chat_id(job)
-    if chat_id is None:
-        return None
-    if outcome.status is not CronRunStatus.FINISHED:
-        return None
-    result_text = outcome.result_text
-    if result_text is None or not result_text.strip():
-        return None
-    if chunk_sender is None:
-        return None
-    return chat_id
-
-
 def build_cron_telegram_chunk_sender(
     adapters: Sequence[PlatformAdapter],
 ) -> CronTelegramChunkSender | None:
@@ -92,22 +65,23 @@ async def deliver_cron_result(
     Uses ``prepare_telegram_assistant_reply_chunks()`` so raw Markdown is never
     sent to the Telegram API. Delivery failures are logged with job id and
     exception class only; they do not mutate ``outcome``.
-
-    Example:
-        >>> # await deliver_cron_result(job, outcome, chunk_sender=sender)
     """
     effective_logger = logger or _MODULE_LOGGER
-    chat_id = _should_attempt_delivery(
-        job,
-        outcome,
-        chunk_sender=chunk_sender,
-    )
-    if chat_id is None:
+    if (
+        job.delivery is None
+        or job.delivery.telegram is None
+        or outcome.status is not CronRunStatus.FINISHED
+        or chunk_sender is None
+    ):
         return CronDeliveryOutcome(attempted=False, delivered=False)
 
-    assert outcome.result_text is not None
+    result_text = outcome.result_text
+    if result_text is None or not result_text.strip():
+        return CronDeliveryOutcome(attempted=False, delivered=False)
+
+    chat_id = job.delivery.telegram.chat_id
     chunks = prepare_telegram_assistant_reply_chunks(
-        outcome.result_text,
+        result_text,
         logger=effective_logger,
     )
     if not chunks:
@@ -115,7 +89,7 @@ async def deliver_cron_result(
 
     try:
         for chunk in chunks:
-            await chunk_sender.send_html_chunk(chat_id, chunk)  # type: ignore[union-attr]
+            await chunk_sender.send_html_chunk(chat_id, chunk)
     except Exception as exc:
         effective_logger.warning(
             "cron_telegram_delivery_failed job_id=%s run_id=%s exception_class=%s",
