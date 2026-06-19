@@ -1,4 +1,4 @@
-"""Gateway and cron coexistence tests (PRD-010 FR-9, task 6.1)."""
+"""Gateway and cron coexistence tests (PRD-010 FR-9)."""
 
 from __future__ import annotations
 

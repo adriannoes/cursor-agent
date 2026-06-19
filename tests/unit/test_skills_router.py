@@ -71,7 +71,7 @@ def _resolver_for(*entries: _FakeSkillEntry) -> SkillResolver:
 
 
 def _router_with_skills(skill_resolver: SkillResolver) -> CommandRouter:
-    """Create a router with an injectable skill resolver (Task 2.2 API)."""
+    """Create a router with an injectable skill resolver."""
     return CommandRouter(skill_resolver=skill_resolver)
 
 
@@ -151,8 +151,8 @@ def test_unknown_slash_with_args_falls_through_as_free_text() -> None:
     assert router.resolve("/unknown extra args") is None
 
 
-def test_skill_match_does_not_raise_runtime_error_stub() -> None:
-    """Regression: real skill hits must not trigger the PRD-004 RuntimeError stub."""
+def test_skill_match_does_not_raise_runtime_error() -> None:
+    """Regression: resolving a real skill must return SkillMatch, not raise."""
     router = _router_with_skills(_resolver_for(_canvas_skill()))
 
     result = router.resolve("/canvas")

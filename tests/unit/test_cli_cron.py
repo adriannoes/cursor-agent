@@ -1,4 +1,4 @@
-"""Unit tests for CLI cron subcommands (PRD-010, Task 4.1)."""
+"""Unit tests for CLI cron subcommands (PRD-010)."""
 
 from __future__ import annotations
 

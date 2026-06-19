@@ -23,7 +23,7 @@ from tests.unit.cli_repl_helpers import (
 
 
 def test_build_repl_command_router_registers_core_slash_commands() -> None:
-    """Wave 3: /new, /resume, and /quit dispatch through CommandRouter."""
+    """/new, /resume, and /quit dispatch through CommandRouter."""
     router = build_repl_command_router()
     for command in ("new", "resume", "quit"):
         resolved = router.resolve(f"/{command}")

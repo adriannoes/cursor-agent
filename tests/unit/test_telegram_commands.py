@@ -1,4 +1,4 @@
-"""Unit tests for TelegramAdapter slash commands and first-contact UX (PRD-007 Wave 5)."""
+"""Unit tests for TelegramAdapter slash commands and first-contact UX (PRD-007)."""
 
 from __future__ import annotations
 
@@ -206,7 +206,7 @@ async def _seed_chat_session(
     )
 
 
-# --- /new (sub-tasks 4.1, 4.2) ---
+# --- /new ---
 
 
 @pytest.mark.asyncio
@@ -399,7 +399,7 @@ async def test_telegram_new_does_not_affect_other_chat_session_key(
     await adapter.stop()
 
 
-# --- /stop (sub-tasks 4.3, 4.4) ---
+# --- /stop ---
 
 
 @pytest.mark.asyncio
@@ -475,7 +475,7 @@ async def test_telegram_stop_does_not_cancel_other_chat_session(
     _ = other_agent
 
 
-# --- /help (sub-tasks 4.5, 4.6) ---
+# --- /help ---
 
 
 @pytest.mark.asyncio
@@ -539,7 +539,7 @@ async def test_telegram_help_omits_unsupported_cli_commands(tmp_path: object) ->
 async def test_telegram_memory_show_is_not_a_supported_command(
     tmp_path: object,
 ) -> None:
-    """/memory show must not register as a Telegram slash command in PRD-008."""
+    """/memory show must not register as a Telegram slash command."""
     assert _parse_telegram_command("/memory show") is None
     assert _parse_telegram_command("/memory") is None
 
@@ -571,7 +571,7 @@ def test_telegram_memory_not_in_supported_command_scope() -> None:
 
 
 def test_telegram_skill_canvas_is_not_a_supported_command() -> None:
-    """PRD-009: skill invocations like /canvas are CLI-only — not Telegram commands."""
+    """Skill invocations like /canvas are CLI-only — not Telegram commands."""
     assert _parse_telegram_command("/canvas") is None
     assert _parse_telegram_command("/canvas draft layout") is None
     assert _parse_telegram_command("/skills") is None
@@ -589,7 +589,7 @@ def test_telegram_skill_not_in_supported_command_scope() -> None:
 async def test_telegram_skill_canvas_with_session_stays_literal_free_text(
     tmp_path: object,
 ) -> None:
-    """PRD-009: /canvas must not resolve as a skill on Telegram — CLI-only."""
+    """/canvas must not resolve as a skill on Telegram — CLI-only."""
     adapter, fake_bot, fake_dispatcher, handles = _make_command_adapter(tmp_path)
     await _seed_chat_session(handles)
     received: list[InboundMessage] = []
@@ -646,7 +646,7 @@ async def test_telegram_start_with_existing_session_sends_onboarding_hint(
     await adapter.stop()
 
 
-# --- First-contact and allowlist (sub-tasks 4.7, 4.8) ---
+# --- First-contact and allowlist ---
 
 
 @pytest.mark.asyncio

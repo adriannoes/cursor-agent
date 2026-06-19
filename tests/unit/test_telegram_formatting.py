@@ -187,7 +187,7 @@ def test_render_fenced_code_block() -> None:
 
 
 def test_render_fenced_shell_block_uses_bold_label_and_inline_code() -> None:
-    """Shell fences render like Telegram format sweep variant 7 (no <pre> pill UI)."""
+    """Shell fences render as bold label + inline code (no <pre> pill UI)."""
     source = "```shell\necho ok\n```"
     rendered = render_cursor_markdown_for_telegram(source)
     assert rendered == "<b>Shell:</b> <code>echo ok</code>"
