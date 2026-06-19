@@ -26,8 +26,13 @@ def test_profile_messaging_passes_cli_override_to_load_config(
         captured["cli_overrides"] = dict(cli_overrides) if cli_overrides else None
         return load_config(config_path=config_path, cli_overrides=cli_overrides)
 
-    async def stub_run_default(_config: CursorAgentConfig) -> RunStatus | None:
+    async def stub_run_default(
+        _config: CursorAgentConfig,
+        *,
+        no_banner: bool = False,
+    ) -> RunStatus | None:
         captured["invoked"] = True
+        _ = no_banner
         return None
 
     monkeypatch.setattr("cursor_agent.cli.app.load_config", stub_load_config)
@@ -52,7 +57,12 @@ def test_profile_coding_passes_cli_override_to_load_config(
         captured["cli_overrides"] = dict(cli_overrides) if cli_overrides else None
         return load_config(config_path=config_path, cli_overrides=cli_overrides)
 
-    async def stub_run_default(_config: CursorAgentConfig) -> RunStatus | None:
+    async def stub_run_default(
+        _config: CursorAgentConfig,
+        *,
+        no_banner: bool = False,
+    ) -> RunStatus | None:
+        _ = no_banner
         return None
 
     monkeypatch.setattr("cursor_agent.cli.app.load_config", stub_load_config)
@@ -73,8 +83,13 @@ def test_profile_invalid_fails_before_startup(
         called["load_config"] = True
         raise AssertionError("load_config must not run for invalid --profile")
 
-    async def stub_run_default(_config: CursorAgentConfig) -> RunStatus | None:
+    async def stub_run_default(
+        _config: CursorAgentConfig,
+        *,
+        no_banner: bool = False,
+    ) -> RunStatus | None:
         called["run_default"] = True
+        _ = no_banner
         return None
 
     monkeypatch.setattr("cursor_agent.cli.app.load_config", stub_load_config)
@@ -100,7 +115,12 @@ def test_default_invocation_omits_tool_profile_cli_override(
         captured["cli_overrides"] = cli_overrides
         return load_config(config_path=config_path, cli_overrides=cli_overrides)
 
-    async def stub_run_default(_config: CursorAgentConfig) -> RunStatus | None:
+    async def stub_run_default(
+        _config: CursorAgentConfig,
+        *,
+        no_banner: bool = False,
+    ) -> RunStatus | None:
+        _ = no_banner
         return None
 
     monkeypatch.setattr("cursor_agent.cli.app.load_config", stub_load_config)

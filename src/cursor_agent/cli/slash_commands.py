@@ -24,6 +24,7 @@ from cursor_agent.cli.rich_display import (
 )
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.errors import ConfigError, CursorAgentError
+from cursor_agent.product_copy import FIRST_COMMANDS_HINT
 from cursor_agent.memory import (
     MEMORY_FILENAME,
     USER_FILENAME,
@@ -40,8 +41,10 @@ from cursor_agent.skills.discovery import (
     skill_discovery_from_config,
 )
 
-_HELP_TEXT = """\
+_HELP_TEXT = f"""\
 Slash commands:
+
+{FIRST_COMMANDS_HINT}
 
 P0 — session control:
   /new            Start a new session
