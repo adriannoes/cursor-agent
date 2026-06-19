@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from dataclasses import dataclass
@@ -146,6 +147,10 @@ async def run_cron_job(
     Creates ``cron:{job_id}:{run_id}``, sends the job prompt via
     ``SessionAgentPool.send()``, and returns a channel-neutral outcome for the
     delivery layer. Prompt bodies and assistant output are never logged here.
+
+    If the run task is cancelled (for example a gateway shutdown drain timeout),
+    the per-run SDK agent is cancelled before the cancellation propagates so it
+    does not keep running after the gateway stops. (review: Should Fix)
     """
     effective_run_id = run_id if run_id is not None else uuid.uuid4().hex
     try:
@@ -171,8 +176,30 @@ async def run_cron_job(
             status=CronRunStatus.ERROR,
             error_message=str(exc),
         )
-    session_key = row.session_key
+    try:
+        return await _send_cron_prompt(
+            job,
+            row=row,
+            pool=pool,
+            blocking=blocking,
+            run_id=effective_run_id,
+        )
+    except asyncio.CancelledError:
+        await _cancel_agent_quietly(facade, row.agent_id)
+        raise
 
+
+async def _send_cron_prompt(
+    job: CronJob,
+    *,
+    row: SessionRecord,
+    pool: SessionAgentPool,
+    blocking: bool,
+    run_id: str,
+) -> CronJobRunOutcome:
+    """Send the job prompt through the pool and map the result to an outcome."""
+    session_key = row.session_key
+    effective_run_id = run_id
     try:
         # Per-run cron sessions use the job runtime; skip pool resume guard (PRD-010 FR-4).
         result = await pool.send(
