@@ -43,6 +43,10 @@ CRON_JOB_MAX_INSTANCES: Final[int] = 1
 CRON_JOB_COALESCE: Final[bool] = True
 DEFAULT_CRON_MISFIRE_GRACE_SECONDS: Final[int] = 60
 
+# Cap concurrent job executions so a burst of simultaneous fires cannot exhaust
+# the shared gateway pool or SDK resources. Tunable per scheduler instance.
+DEFAULT_MAX_CONCURRENT_CRON_JOBS: Final[int] = 5
+
 
 @dataclass(frozen=True, slots=True)
 class CronJobNextRun:
@@ -74,14 +78,23 @@ class CronScheduler:
         loader: CronJobsLoader | None = None,
         reload_poll_interval_seconds: float = DEFAULT_RELOAD_POLL_INTERVAL_SECONDS,
         reload_poll_hook: ReloadPollHook | None = None,
+        max_concurrent_jobs: int = DEFAULT_MAX_CONCURRENT_CRON_JOBS,
+        job_run_timeout_seconds: float | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
+        if max_concurrent_jobs < 1:
+            raise ValueError(
+                f"invalid max_concurrent_jobs: received {max_concurrent_jobs!r}, "
+                "expected a positive integer"
+            )
         self._config = config
         self._override_cron_root = override_cron_root
         self._loader = loader if loader is not None else cron_jobs_from_config
         self._executor = executor
         self._reload_poll_interval_seconds = reload_poll_interval_seconds
         self._reload_poll_hook = reload_poll_hook
+        self._job_run_timeout_seconds = job_run_timeout_seconds
+        self._job_concurrency = asyncio.Semaphore(max_concurrent_jobs)
         self._logger = logger if logger is not None else _MODULE_LOGGER
 
         self._scheduler = AsyncIOScheduler(timezone=timezone.utc)
@@ -295,10 +308,31 @@ class CronScheduler:
         if current_task is not None:
             self._active_job_tasks.add(current_task)
         try:
-            await self._executor(job)
+            async with self._job_concurrency:
+                await self._execute_with_optional_timeout(job)
         finally:
             if current_task is not None:
                 self._active_job_tasks.discard(current_task)
+
+    async def _execute_with_optional_timeout(self, job: CronJob) -> None:
+        """Run the executor, enforcing a per-job timeout when configured."""
+        if self._executor is None:
+            return
+        if self._job_run_timeout_seconds is None:
+            await self._executor(job)
+            return
+        try:
+            await asyncio.wait_for(
+                self._executor(job),
+                timeout=self._job_run_timeout_seconds,
+            )
+        except TimeoutError:
+            # Metadata only: never log prompt or assistant body (PRD-009 boundary).
+            self._logger.warning(
+                "cron job exceeded run timeout: job_id=%s timeout_seconds=%.3f",
+                job.id,
+                self._job_run_timeout_seconds,
+            )
 
     def _should_skip_job(self) -> bool:
         if self._shutting_down:
