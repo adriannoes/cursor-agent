@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from collections.abc import AsyncIterator, Mapping
 from pathlib import Path
@@ -11,11 +12,18 @@ from typing import Annotated
 import typer
 
 from cursor_agent.cli.cron_commands import cron_app
+from cursor_agent.cli.error_display import format_startup_error
 from cursor_agent.cli.exit_codes import exit_code_for_error, exit_code_for_status
+from cursor_agent.cli.first_run_marker import (
+    default_marker_home,
+    is_first_run,
+    mark_complete,
+)
 from cursor_agent.cli.repl_session import run_repl
 from cursor_agent.cli.rich_display import RichDisplay
 from cursor_agent.cli.startup import create_store, repl_runtime, session_key_for
 from cursor_agent.cli.stream_renderer import build_display_stream_callbacks
+from cursor_agent.cli.welcome import render_welcome
 from cursor_agent.config.loader import CursorAgentConfig, ToolProfile, load_config
 from cursor_agent.errors import CursorAgentError
 from cursor_agent.gateway.runner import run_gateway
@@ -47,10 +55,40 @@ def _echo_delta(text: str) -> None:  # pragma: no cover
     typer.echo(text, nl=False)
 
 
+def _stdout_is_tty() -> bool:
+    """Return whether stdout is an interactive terminal."""
+    return sys.stdout.isatty()
+
+
+def _is_ci_environment() -> bool:
+    """Return whether CI suppression is active via the ``CI`` environment variable."""
+    return os.environ.get("CI") is not None
+
+
 async def run_default(
     config: CursorAgentConfig,
+    *,
+    no_banner: bool = False,
+    marker_home: Path | None = None,
+    is_tty: bool | None = None,
+    is_ci: bool | None = None,
 ) -> RunStatus | None:  # pragma: no cover
     """Open REPL runtime and run the default interactive session."""
+    home = default_marker_home() if marker_home is None else marker_home
+    tty = _stdout_is_tty() if is_tty is None else is_tty
+    ci = _is_ci_environment() if is_ci is None else is_ci
+    first_run = is_first_run(marker_home=home)
+
+    welcome_written = render_welcome(
+        typer.echo,
+        first_run=first_run,
+        is_tty=tty,
+        no_banner=no_banner,
+        is_ci=ci,
+    )
+    if first_run and welcome_written:
+        mark_complete(marker_home=home, is_ci=ci)
+
     async with repl_runtime(config) as (pool, session_key, store, facade):
         display = RichDisplay(
             stream_writer=_echo_delta,
@@ -140,15 +178,22 @@ def cli_entry(
             help="Tool profile override (coding or messaging).",
         ),
     ] = None,
+    no_banner: Annotated[
+        bool,
+        typer.Option(
+            "--no-banner",
+            help="Suppress the interactive welcome banner.",
+        ),
+    ] = False,
 ) -> None:
     """Interactive Cursor agent CLI."""
     if ctx.invoked_subcommand is not None:
         return
     try:
         config = load_config(cli_overrides=_cli_overrides_for_profile(profile))
-        status = asyncio.run(run_default(config))
+        status = asyncio.run(run_default(config, no_banner=no_banner))
     except CursorAgentError as exc:
-        # Startup/bootstrap failures (config, auth, bridge, network) -> exit 1 (FR-10).
+        typer.echo(format_startup_error(exc))
         raise typer.Exit(exit_code_for_error(exc)) from exc
     raise typer.Exit(exit_code_for_status(status))
 

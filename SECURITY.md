@@ -62,7 +62,8 @@ hooks/messaging/                          # repo source of truth
 ├── pre-tool-deny-write.sh
 ├── shell-gate.sh
 ├── mcp-deny.sh
-└── read-sensitive-deny.sh
+├── read-sensitive-deny.sh
+└── sensitive-paths.sh                    # shared helper sourced by shell/read hooks
 
 ~/.cursor-agent/hooks/messaging/          # staged install copy
 
@@ -72,7 +73,8 @@ hooks/messaging/                          # repo source of truth
     ├── pre-tool-deny-write.sh
     ├── shell-gate.sh
     ├── mcp-deny.sh
-    └── read-sensitive-deny.sh
+    ├── read-sensitive-deny.sh
+    └── sensitive-paths.sh
 ```
 
 Messaging create/resume also pass `mcp_servers: {}` and `sandbox_options.enabled: true` via the SDK facade (defense in depth alongside hooks).
@@ -107,7 +109,8 @@ Minimum gate uses **hook-level probes** with representative JSON stdin (exit cod
 
 ```bash
 uv run pytest tests/unit/test_cli_profile.py tests/unit/test_messaging_profile.py \
-  tests/unit/test_hooks_deploy.py tests/unit/test_cli_bootstrap.py tests/unit/test_pool.py -v
+  tests/unit/test_messaging_hooks_deploy.py tests/unit/test_hook_workspace_deploy.py \
+  tests/unit/test_cli_bootstrap.py tests/unit/test_pool.py -v
 ```
 
 ---

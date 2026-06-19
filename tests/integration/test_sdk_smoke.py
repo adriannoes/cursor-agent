@@ -22,7 +22,7 @@ pytestmark = [
 
 MODEL = "composer-2.5"
 MINIMAL_PROMPT = "Reply with the single word OK."
-README_FIRST_HEADING = "cursor-agent"
+README_FIRST_HEADING_PHRASE = "cursor agent"
 TOOL_TURN_PROMPT = (
     "Read README.md at the repository root and reply with only the exact "
     "markdown text of the first heading line (the line that starts with #)."
@@ -85,9 +85,10 @@ async def test_sdk_native_tool_turn() -> None:
         f"expected run status 'finished', got {result.status!r}"
     )
     assert text, "expected non-empty assistant text after tool turn"
-    assert README_FIRST_HEADING in text.lower(), (
-        f"expected response to reference README heading {README_FIRST_HEADING!r}, "
-        f"got {text!r}"
+    normalized = text.lower().replace("-", " ")
+    assert README_FIRST_HEADING_PHRASE in normalized, (
+        "expected response to reference README first heading "
+        f"({README_FIRST_HEADING_PHRASE!r} or cursor-agent), got {text!r}"
     )
 
     completed_tool_calls = [

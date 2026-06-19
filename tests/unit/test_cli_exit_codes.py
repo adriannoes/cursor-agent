@@ -74,8 +74,13 @@ def test_default_invoke_exits_2_on_run_error(
 ) -> None:
     """Default REPL ending after a RunStatus.ERROR turn exits 2 (FR-10)."""
 
-    async def fake_run_default(config: object) -> RunStatus:
+    async def fake_run_default(
+        config: object,
+        *,
+        no_banner: bool = False,
+    ) -> RunStatus:
         _ = config
+        _ = no_banner
         return RunStatus.ERROR
 
     monkeypatch.setattr("cursor_agent.cli.app.run_default", fake_run_default)
