@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,9 +32,18 @@ def _cron_root(tmp_path: Path) -> Path:
 
 
 def _write_jobs_yaml(cron_root: Path, content: str) -> Path:
-    """Write ``jobs.yaml`` under an injectable cron root."""
+    """Write ``jobs.yaml`` under an injectable cron root.
+
+    Rewrites force a strictly newer mtime than the previous file so the
+    scheduler's mtime-based reload is deterministic on filesystems with coarse
+    mtime granularity (observed flaky on CI when two writes shared one tick).
+    """
     jobs_path = cron_root / JOBS_FILENAME
+    previous_mtime = jobs_path.stat().st_mtime if jobs_path.exists() else None
     jobs_path.write_text(content, encoding="utf-8")
+    if previous_mtime is not None:
+        bumped = max(jobs_path.stat().st_mtime, previous_mtime) + 1
+        os.utime(jobs_path, (bumped, bumped))
     return jobs_path
 
 
