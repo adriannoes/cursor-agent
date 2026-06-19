@@ -11,11 +11,12 @@ import typer
 from cursor_agent.cli.exit_codes import exit_code_for_error
 from cursor_agent.cli.rich_display import format_cron_jobs_table
 from cursor_agent.config.loader import CursorAgentConfig, load_config
-from cursor_agent.cron.models import CronJob, cron_trigger_for_schedule
+from cursor_agent.cron.models import CronJob, CronJobSummary, cron_trigger_for_schedule
 from cursor_agent.cron.store import (
     add_cron_job_atomic,
     build_cron_job,
     default_cron_root,
+    load_cron_job_summaries_catalog,
     load_cron_jobs_catalog,
     remove_cron_job_atomic,
 )
@@ -56,7 +57,7 @@ def _format_next_run(next_run: datetime | None) -> str:
     return next_run.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
-def _telegram_chat_id(job: CronJob) -> str:
+def _telegram_chat_id(job: CronJob | CronJobSummary) -> str:
     """Return configured Telegram chat id or a dash placeholder."""
     if job.delivery is None or job.delivery.telegram is None:
         return "-"
@@ -69,28 +70,24 @@ def cron_list() -> None:
     try:
         config = load_config()
         cron_root = resolve_cron_root(config)
-        catalog = load_cron_jobs_catalog(
-            config,
-            cron_root,
-            include_prompt=False,
-        )
-        jobs = catalog.list_jobs()
+        catalog = load_cron_job_summaries_catalog(config, cron_root)
+        summaries = catalog.list_summaries()
     except CursorAgentError as exc:
         _exit_on_cursor_agent_error(exc)
 
-    if not jobs:
+    if not summaries:
         typer.echo(_EMPTY_CRON_JOBS_MESSAGE)
         return
 
     rows = [
         {
-            "id": job.id,
-            "schedule": job.schedule,
-            "next_run": _format_next_run(_next_run_for_schedule(job.schedule)),
-            "runtime": job.runtime,
-            "telegram_chat_id": _telegram_chat_id(job),
+            "id": summary.id,
+            "schedule": summary.schedule,
+            "next_run": _format_next_run(_next_run_for_schedule(summary.schedule)),
+            "runtime": summary.runtime,
+            "telegram_chat_id": _telegram_chat_id(summary),
         }
-        for job in jobs
+        for summary in summaries
     ]
     typer.echo(format_cron_jobs_table(rows))
 
@@ -103,7 +100,7 @@ def cron_show(
     try:
         config = load_config()
         cron_root = resolve_cron_root(config)
-        catalog = load_cron_jobs_catalog(config, cron_root, include_prompt=True)
+        catalog = load_cron_jobs_catalog(config, cron_root)
         job = catalog.get_job(job_id)
         if job is None:
             raise ConfigError(

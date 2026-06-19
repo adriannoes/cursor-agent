@@ -7,10 +7,15 @@ from pathlib import Path
 import pytest
 
 from cursor_agent.config.loader import CursorAgentConfig, load_config
+from pydantic import ValidationError
+
 from cursor_agent.cron import (
     CRON_PROMPT_MAX_BYTES,
     CronJob,
+    CronJobSummary,
     CronJobsCatalog,
+    CronJobsSummaryCatalog,
+    cron_job_summaries_from_config,
     cron_jobs_from_config,
 )
 from cursor_agent.errors import ConfigError
@@ -73,8 +78,6 @@ def _single_job_yaml(
 def _catalog_from_yaml(
     tmp_path: Path,
     yaml_content: str,
-    *,
-    include_prompt: bool = True,
 ) -> CronJobsCatalog:
     """Load cron jobs from injectable ``tmp_path/cron`` fixture."""
     cron_root = _cron_root(tmp_path)
@@ -82,7 +85,6 @@ def _catalog_from_yaml(
     return cron_jobs_from_config(
         _load_cron_config(tmp_path),
         override_cron_root=cron_root,
-        include_prompt=include_prompt,
     )
 
 
@@ -259,10 +261,58 @@ def test_jobs_yaml_symlink_outside_root_is_rejected(tmp_path: Path) -> None:
         )
 
 
-def test_metadata_listing_omits_prompt_when_include_prompt_false(
+def _symlinked_cron_root(tmp_path: Path) -> tuple[Path, Path]:
+    """Return ``(cron_root_symlink, symlink_target)`` for containment regressions."""
+    target = tmp_path / "cron-target"
+    target.mkdir(parents=True, exist_ok=True)
+    cron_root = tmp_path / "cron"
+    cron_root.symlink_to(target)
+    return cron_root, target
+
+
+def test_symlinked_cron_root_is_rejected_on_load(tmp_path: Path) -> None:
+    """A symlinked ``cron_root`` is rejected before reading ``jobs.yaml``."""
+    cron_root, target = _symlinked_cron_root(tmp_path)
+    (target / "jobs.yaml").write_text(
+        _single_job_yaml(job_id="via-symlink-root"),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="symlink|root|contained"):
+        cron_jobs_from_config(
+            _load_cron_config(tmp_path),
+            override_cron_root=cron_root,
+        )
+
+
+def test_cron_job_rejects_empty_prompt() -> None:
+    """Executable ``CronJob`` instances must have a non-empty prompt after validation."""
+    with pytest.raises(ValidationError, match="prompt"):
+        CronJob.model_validate(
+            {
+                "id": "daily-report",
+                "schedule": "0 9 * * *",
+                "prompt": "",
+            }
+        )
+
+
+def _summaries_from_yaml(
+    tmp_path: Path,
+    yaml_content: str,
+) -> CronJobsSummaryCatalog:
+    """Load cron job summaries from injectable ``tmp_path/cron`` fixture."""
+    cron_root = _cron_root(tmp_path)
+    _write_jobs_yaml(cron_root, yaml_content)
+    return cron_job_summaries_from_config(
+        _load_cron_config(tmp_path),
+        override_cron_root=cron_root,
+    )
+
+
+def test_metadata_listing_returns_summaries_without_prompt_bodies(
     tmp_path: Path,
 ) -> None:
-    """``cron list`` can load metadata without validating oversized prompt bodies."""
+    """Summary listing omits prompt bodies and skips oversized prompt validation."""
     oversized_prompt = "p" * (CRON_PROMPT_MAX_BYTES + 1)
     yaml_content = (
         "jobs:\n"
@@ -274,16 +324,27 @@ def test_metadata_listing_omits_prompt_when_include_prompt_false(
         "      telegram:\n"
         '        chat_id: "999"\n'
     )
-    catalog = _catalog_from_yaml(tmp_path, yaml_content, include_prompt=False)
-    jobs = catalog.list_jobs()
+    catalog = _summaries_from_yaml(tmp_path, yaml_content)
+    summaries = catalog.list_summaries()
 
-    assert len(jobs) == 1
-    job = jobs[0]
-    assert isinstance(job, CronJob)
-    assert job.id == "metadata-only"
-    assert job.schedule == "0 9 * * *"
-    assert job.runtime == "cloud"
-    assert job.delivery is not None
-    assert job.delivery.telegram is not None
-    assert job.delivery.telegram.chat_id == "999"
-    assert job.prompt == ""
+    assert len(summaries) == 1
+    summary = summaries[0]
+    assert isinstance(summary, CronJobSummary)
+    assert summary.id == "metadata-only"
+    assert summary.schedule == "0 9 * * *"
+    assert summary.runtime == "cloud"
+    assert summary.delivery is not None
+    assert summary.delivery.telegram is not None
+    assert summary.delivery.telegram.chat_id == "999"
+    assert not hasattr(summary, "prompt")
+    assert catalog.get_summary("metadata-only") == summary
+
+
+def test_metadata_listing_requires_prompt_field_without_loading_body(
+    tmp_path: Path,
+) -> None:
+    """Summary listing validates executable shape without retaining prompt bodies."""
+    yaml_content = 'jobs:\n  - id: missing-prompt\n    schedule: "0 9 * * *"\n'
+
+    with pytest.raises(ConfigError, match="prompt"):
+        _summaries_from_yaml(tmp_path, yaml_content)
