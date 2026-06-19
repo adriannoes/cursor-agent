@@ -70,6 +70,37 @@ def test_cron_add_persists_job_with_flags(cron_cli_env: Path) -> None:
     assert _load_jobs(cron_cli_env) == ["daily-report"]
 
 
+def test_cron_list_renders_metadata_without_prompt_body(cron_cli_env: Path) -> None:
+    """cron list renders schedule and delivery metadata without the prompt body."""
+    secret_prompt = "Do not leak this prompt in cron list output."
+    add_result = CliRunner().invoke(
+        app,
+        [
+            "cron",
+            "add",
+            "daily-report",
+            "--schedule",
+            "0 9 * * *",
+            "--prompt",
+            secret_prompt,
+            "--runtime",
+            "cloud",
+            "--chat-id",
+            "123456789",
+        ],
+    )
+    assert add_result.exit_code == 0, add_result.stdout
+
+    result = CliRunner().invoke(app, ["cron", "list"])
+
+    assert result.exit_code == 0
+    assert "daily-report" in result.stdout
+    assert "0 9 * * *" in result.stdout
+    assert "cloud" in result.stdout
+    assert "123456789" in result.stdout
+    assert secret_prompt not in result.stdout
+
+
 def test_cron_list_shows_added_job(cron_cli_env: Path) -> None:
     """cron list renders metadata for a persisted job."""
     add_result = CliRunner().invoke(
@@ -215,6 +246,45 @@ def test_cron_remove_unknown_id_exits_error(cron_cli_env: Path) -> None:
     assert result.exit_code == 1
     combined = f"{result.stdout}\n{result.stderr}"
     assert "not found" in combined.lower()
+
+
+def test_cron_list_skips_invalid_job_with_warning(cron_cli_env: Path) -> None:
+    """cron list warns and skips invalid jobs while listing healthy entries."""
+    cron_cli_env.mkdir(parents=True, exist_ok=True)
+    (cron_cli_env / "jobs.yaml").write_text(
+        "jobs:\n"
+        "  - id: healthy\n"
+        '    schedule: "0 9 * * *"\n'
+        '    prompt: "ok"\n'
+        "  - id: broken\n"
+        '    schedule: "bad"\n'
+        '    prompt: "ignored"\n',
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(app, ["cron", "list"])
+
+    assert result.exit_code == 0
+    assert "healthy" in result.stdout
+    assert "broken" not in result.stdout
+    combined = f"{result.stdout}\n{result.stderr}"
+    assert "warning:" in combined.lower()
+    assert "broken" in combined.lower()
+
+
+def test_cron_list_strict_fails_on_invalid_job(cron_cli_env: Path) -> None:
+    """cron list --strict exits non-zero when any job entry is invalid."""
+    cron_cli_env.mkdir(parents=True, exist_ok=True)
+    (cron_cli_env / "jobs.yaml").write_text(
+        'jobs:\n  - id: broken\n    schedule: "bad"\n    prompt: "x"\n',
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(app, ["cron", "list", "--strict"])
+
+    assert result.exit_code == 1
+    combined = f"{result.stdout}\n{result.stderr}"
+    assert "broken" in combined.lower()
 
 
 def test_cron_list_corrupt_jobs_yaml_exits_error(cron_cli_env: Path) -> None:

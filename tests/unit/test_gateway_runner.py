@@ -247,6 +247,52 @@ async def test_gateway_runtime_starts_and_stops_cron_scheduler(
     assert lifecycle == ["cron_init", "cron_start", "cron_shutdown"]
 
 
+async def test_gateway_runtime_wires_cron_timeout_handler(
+    tmp_path: Path,
+) -> None:
+    """Gateway startup passes a timeout handler to CronScheduler for observability."""
+    config = gateway_config()
+    adapter = FakePlatformAdapter()
+    facade = FakeSdkFacade()
+    db_path = tmp_path / "sessions.db"
+    captured: dict[str, object] = {}
+
+    class CapturingCronScheduler:
+        """Captures cron scheduler kwargs passed by gateway startup."""
+
+        def __init__(self, *_args: object, **kwargs: object) -> None:
+            captured["on_run_timeout"] = kwargs.get("on_run_timeout")
+
+        def set_shutting_down_check(self, _check: object) -> None:
+            return None
+
+        def pause_scheduling(self) -> None:
+            return None
+
+        async def start(self) -> None:
+            return None
+
+        async def shutdown(self, *, timeout: float | None = None) -> None:
+            _ = timeout
+            return None
+
+    with (
+        patch("cursor_agent.gateway.runner.bootstrap_messaging_hooks"),
+        patch(
+            "cursor_agent.gateway.runner.CronScheduler",
+            CapturingCronScheduler,
+        ),
+    ):
+        async with gateway_runtime(
+            gateway_config=config,
+            adapters=[adapter],
+            facade=facade,
+            store_path=db_path,
+            register_signals=False,
+        ):
+            assert callable(captured.get("on_run_timeout"))
+
+
 async def test_gateway_runtime_cron_executor_calls_run_cron_job(
     tmp_path: Path,
 ) -> None:

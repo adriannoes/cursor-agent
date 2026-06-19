@@ -22,7 +22,7 @@ _MODULE_LOGGER = logging.getLogger(__name__)
 _CRON_SESSION_PREFIX = "cron:"
 
 # Per-job cron session rows are never resumed; keep a bounded history per job so
-# the sessions table does not grow without limit. (review: unbounded accumulation)
+# the sessions table does not grow without limit (PRD-010 FR-3).
 CRON_SESSION_RETENTION_PER_JOB = 20
 
 
@@ -32,6 +32,7 @@ class CronRunStatus(str, Enum):
     FINISHED = "finished"
     BUSY = "busy"
     ERROR = "error"
+    TIMEOUT = "timeout"
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,7 +102,7 @@ async def create_cron_run_session(
 
     If persisting the session row fails after the SDK agent is created, the
     agent is cancelled before re-raising so it does not leak without a backing
-    session record (review: orphaned SDK agent on store.create failure).
+    session record.
     """
     effective_run_id = run_id if run_id is not None else uuid.uuid4().hex
     session_key = build_cron_session_key(job.id, effective_run_id)
@@ -155,10 +156,9 @@ async def run_cron_job(
 
     After the run, cron session rows for the job beyond the most recent
     ``keep_sessions`` are pruned and their SDK agents cancelled, bounding
-    accumulation. If the run task is cancelled (for example a gateway shutdown
-    drain timeout), the per-run SDK agent is cancelled before the cancellation
+    accumulation. If the run task is cancelled (ADR-021 gateway shutdown drain
+    timeout), the per-run SDK agent is cancelled before the cancellation
     propagates so it does not keep running after the gateway stops.
-    (review: Should Fix)
     """
     effective_run_id = run_id if run_id is not None else uuid.uuid4().hex
     try:

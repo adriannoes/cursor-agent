@@ -124,13 +124,13 @@ Open a private chat with your bot and run this flow:
 
 Cron jobs run inside the long-running gateway process. They use `~/.cursor-agent/cron/jobs.yaml`, reload when the file mtime changes, and never share a Telegram or CLI session key. Each run uses a fresh `cron:{job_id}:{run_id}` session row.
 
-Cron schedules use UTC by default and must not fire more often than once per minute for the same job. The `prompt` field is capped at 64 KiB. Oversized prompts are rejected before writes, and invalid gateway reloads keep the last known-good job cache.
+Cron schedules use UTC by default and must not fire more often than once per minute for the same job. The `prompt` field is capped at 64 KiB. Oversized prompts are rejected before writes, and invalid gateway reloads keep the last known-good job cache. After a reload parse failure, touch `jobs.yaml` (or save a fix that changes mtime) so the scheduler picks up the corrected file.
 
 ```bash
 uv run cursor-agent cron list
 ```
 
-This command lists configured jobs with schedule, next run, runtime, and Telegram chat ID metadata.
+This command lists configured jobs with schedule, next run, runtime, and Telegram chat ID metadata. It is metadata-only and skips invalid per-job entries with warnings; use `cron show <job_id>` for the full prompt body, or `cron list --strict` to fail on any invalid entry.
 
 ```bash
 uv run cursor-agent cron add telegram-demo-report --schedule "*/1 * * * *" --prompt "Create a concise status update with a Markdown table, one link to https://example.com, and a short fenced code block." --runtime cloud --chat-id "123456789"

@@ -66,6 +66,21 @@ def _metadata_from_json(raw: str | None) -> dict[str, object]:
     return dict(parsed)
 
 
+def _literal_prefix_upper_bound(prefix: str) -> str:
+    """Return the exclusive upper bound for a literal ``session_key`` prefix range."""
+    if not prefix:
+        raise ValueError(
+            f"invalid prefix: received {prefix!r}, expected non-empty string"
+        )
+    last_codepoint = ord(prefix[-1])
+    if last_codepoint >= 0x10FFFF:
+        raise ValueError(
+            f"invalid prefix: received {prefix!r}, "
+            "expected prefix whose last codepoint is below U+10FFFF"
+        )
+    return prefix[:-1] + chr(last_codepoint + 1)
+
+
 def _row_to_session_record(row: aiosqlite.Row) -> SessionRecord:
     """Map a SQLite row to SessionRecord."""
     return SessionRecord(
@@ -192,7 +207,7 @@ class SessionStore:
         Cron sessions use the per-run key ``cron:{job_id}:{run_id}`` and are never
         resumed, so without pruning they accumulate without bound. Returns the
         ``agent_id`` of every pruned row so the caller can cancel the matching
-        SDK agents. (review: unbounded session/agent accumulation)
+        SDK agents.
 
         Defined before ``list`` so the return annotation resolves to builtin
         ``list`` rather than this class's ``list`` method.
@@ -206,19 +221,19 @@ class SessionStore:
                 "expected non-negative integer"
             )
         prefix = f"cron:{job_id}:"
+        prefix_upper = _literal_prefix_upper_bound(prefix)
         pruned_agent_ids: list[str] = []
         async with aiosqlite.connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "SELECT id, session_key, agent_id FROM sessions "
-                "WHERE session_key LIKE 'cron:%' "
-                "ORDER BY created_at DESC, id DESC"
+                "WHERE session_key >= ? AND session_key < ? "
+                "AND instr(substr(session_key, length(?) + 1), ':') = 0 "
+                "ORDER BY created_at DESC, id DESC",
+                (prefix, prefix_upper, prefix),
             )
-            rows = await cursor.fetchall()
-            matching = [
-                row for row in rows if str(row["session_key"]).startswith(prefix)
-            ]
-            for row in matching[keep_last:]:
+            rows = list(await cursor.fetchall())
+            for row in rows[keep_last:]:
                 await db.execute("DELETE FROM sessions WHERE id = ?", (str(row["id"]),))
                 pruned_agent_ids.append(str(row["agent_id"]))
             if pruned_agent_ids:

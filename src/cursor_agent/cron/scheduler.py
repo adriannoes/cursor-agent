@@ -15,11 +15,9 @@ from apscheduler.triggers.cron import CronTrigger  # type: ignore[import-untyped
 
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.cron.loader import CronJobsCatalog, cron_jobs_from_config
-from cursor_agent.cron.models import (
-    JOBS_FILENAME,
-    CronJob,
-    cron_trigger_for_schedule,
-)
+from cursor_agent.cron.models import CronJob, cron_trigger_for_schedule
+from cursor_agent.cron.paths import DEFAULT_CRON_ROOT, resolve_cron_jobs_file
+from cursor_agent.cron.runs import CronActiveRunTracker, CronRunTimeoutHandler
 from cursor_agent.errors import ConfigError
 
 
@@ -80,22 +78,23 @@ class CronScheduler:
         reload_poll_hook: ReloadPollHook | None = None,
         max_concurrent_jobs: int = DEFAULT_MAX_CONCURRENT_CRON_JOBS,
         job_run_timeout_seconds: float | None = None,
+        on_run_timeout: CronRunTimeoutHandler | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
-        if max_concurrent_jobs < 1:
-            raise ValueError(
-                f"invalid max_concurrent_jobs: received {max_concurrent_jobs!r}, "
-                "expected a positive integer"
-            )
         self._config = config
         self._override_cron_root = override_cron_root
         self._loader = loader if loader is not None else cron_jobs_from_config
         self._executor = executor
         self._reload_poll_interval_seconds = reload_poll_interval_seconds
         self._reload_poll_hook = reload_poll_hook
-        self._job_run_timeout_seconds = job_run_timeout_seconds
-        self._job_concurrency = asyncio.Semaphore(max_concurrent_jobs)
         self._logger = logger if logger is not None else _MODULE_LOGGER
+        self._active_run_tracker = CronActiveRunTracker(
+            max_concurrent_jobs=max_concurrent_jobs,
+            executor=executor,
+            job_run_timeout_seconds=job_run_timeout_seconds,
+            on_run_timeout=on_run_timeout,
+            logger=self._logger,
+        )
 
         self._scheduler = AsyncIOScheduler(timezone=timezone.utc)
         self._jobs: dict[str, CronJob] = {}
@@ -107,7 +106,11 @@ class CronScheduler:
         self._shutting_down = False
         self._shutdown_complete = False
         self._shutting_down_check: ShuttingDownCheck | None = None
-        self._active_job_tasks: set[asyncio.Task[None]] = set()
+
+    @property
+    def active_run_tracker(self) -> CronActiveRunTracker:
+        """Expose active-run tracking for graceful shutdown and focused tests."""
+        return self._active_run_tracker
 
     async def start(self) -> None:
         """Start APScheduler, load jobs from disk, and begin mtime watching."""
@@ -116,7 +119,7 @@ class CronScheduler:
 
         # Load and register jobs before starting APScheduler. An invalid
         # jobs.yaml then fails fast without leaving a running scheduler behind
-        # (APScheduler buffers jobs added before start). (review: start() cleanup)
+        # (APScheduler buffers jobs added before start).
         await self.load_jobs()
 
         if not self._scheduler.running:
@@ -153,7 +156,7 @@ class CronScheduler:
 
         self.pause_scheduling()
         await self._stop_mtime_watcher()
-        await self._await_or_cancel_active_jobs(
+        await self._active_run_tracker.drain_or_cancel(
             timeout if timeout is not None else DEFAULT_CRON_SHUTDOWN_TIMEOUT_SECONDS,
         )
 
@@ -172,7 +175,6 @@ class CronScheduler:
             self._loader,
             self._config,
             override_cron_root=self._override_cron_root,
-            include_prompt=True,
         )
         jobs_path = self._jobs_file_path()
         if jobs_path is not None and jobs_path.exists():
@@ -182,7 +184,13 @@ class CronScheduler:
         self._replace_jobs(catalog.list_jobs())
 
     async def reload_if_changed(self) -> bool:
-        """Reload jobs when ``jobs.yaml`` mtime changed; return whether reload ran."""
+        """Reload jobs when ``jobs.yaml`` mtime changed; return whether reload ran.
+
+        On ``ConfigError`` during reload, the last known-good cache is kept and
+        ``_jobs_mtime`` is advanced to the file's current mtime so the same broken
+        file is not re-parsed every poll. Touch ``jobs.yaml`` after fixing content
+        so the next edit produces a newer mtime and triggers reload again.
+        """
         jobs_path = self._jobs_file_path()
         if jobs_path is None or not jobs_path.exists():
             current_mtime: float | None = None
@@ -197,7 +205,6 @@ class CronScheduler:
                 self._loader,
                 self._config,
                 override_cron_root=self._override_cron_root,
-                include_prompt=True,
             )
         except ConfigError as exc:
             self._logger.warning(
@@ -304,35 +311,7 @@ class CronScheduler:
         if self._executor is None:
             return
 
-        current_task = asyncio.current_task()
-        if current_task is not None:
-            self._active_job_tasks.add(current_task)
-        try:
-            async with self._job_concurrency:
-                await self._execute_with_optional_timeout(job)
-        finally:
-            if current_task is not None:
-                self._active_job_tasks.discard(current_task)
-
-    async def _execute_with_optional_timeout(self, job: CronJob) -> None:
-        """Run the executor, enforcing a per-job timeout when configured."""
-        if self._executor is None:
-            return
-        if self._job_run_timeout_seconds is None:
-            await self._executor(job)
-            return
-        try:
-            await asyncio.wait_for(
-                self._executor(job),
-                timeout=self._job_run_timeout_seconds,
-            )
-        except TimeoutError:
-            # Metadata only: never log prompt or assistant body (PRD-009 boundary).
-            self._logger.warning(
-                "cron job exceeded run timeout: job_id=%s timeout_seconds=%.3f",
-                job.id,
-                self._job_run_timeout_seconds,
-            )
+        await self._active_run_tracker.run(job)
 
     def _should_skip_job(self) -> bool:
         if self._shutting_down:
@@ -352,28 +331,6 @@ class CronScheduler:
             pass
         self._watcher_task = None
 
-    async def _await_or_cancel_active_jobs(self, timeout: float) -> None:
-        pending = list(self._active_job_tasks)
-        if not pending:
-            return
-
-        _done, still_pending = await asyncio.wait(
-            pending,
-            timeout=timeout,
-            return_when=asyncio.ALL_COMPLETED,
-        )
-        if not still_pending:
-            return
-
-        self._logger.warning(
-            "cron scheduler shutdown: %d job task(s) did not finish within %.3fs",
-            len(still_pending),
-            timeout,
-        )
-        for task in still_pending:
-            task.cancel()
-        await asyncio.gather(*still_pending, return_exceptions=True)
-
     def _next_run_for_job(self, job: CronJob) -> datetime | None:
         aps_job = self._scheduler.get_job(_apscheduler_job_id(job.id))
         if aps_job is not None and self._scheduler.running:
@@ -388,11 +345,12 @@ class CronScheduler:
         return None
 
     def _jobs_file_path(self) -> Path | None:
-        if self._override_cron_root is None:
-            cron_root = Path.home() / ".cursor-agent" / "cron"
-        else:
-            cron_root = self._override_cron_root
-        return cron_root / JOBS_FILENAME
+        cron_root = (
+            self._override_cron_root
+            if self._override_cron_root is not None
+            else DEFAULT_CRON_ROOT
+        )
+        return resolve_cron_jobs_file(cron_root)
 
 
 def _apscheduler_job_id(job_id: str) -> str:

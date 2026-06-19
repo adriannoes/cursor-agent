@@ -48,12 +48,11 @@ class GatewayShutdownCoordinator:
             if ctx.cron_scheduler is not None:
                 ctx.cron_scheduler.pause_scheduling()
 
-            # Drain in-flight cron jobs (including Telegram delivery) before
-            # stopping adapters, otherwise a job finishing after stop_adapters
-            # would silently fail delivery against a stopped adapter. Cron jobs
-            # that exceed the drain timeout are cancelled by the scheduler, and
-            # the executor cancels their SDK agent on cancellation.
-            # (review: Must Fix shutdown ordering)
+            # ADR-021: drain in-flight cron jobs (including Telegram delivery)
+            # before stopping adapters, otherwise a job finishing after
+            # stop_adapters would silently fail delivery against a stopped
+            # adapter. Jobs exceeding the drain timeout are cancelled by the
+            # scheduler; the executor cancels their SDK agent on cancellation.
             await self._shutdown_cron_scheduler(ctx)
 
             await stop_adapters(ctx.adapters)

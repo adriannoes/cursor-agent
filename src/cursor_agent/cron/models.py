@@ -32,24 +32,13 @@ class CronJobDelivery(BaseModel):
     telegram: CronTelegramDelivery | None = None
 
 
-class CronJob(BaseModel):
-    """Validated cron job entry from ``jobs.yaml``.
-
-    Example:
-        >>> CronJob.model_validate(
-        ...     {
-        ...         "id": "daily-report",
-        ...         "schedule": "0 9 * * *",
-        ...         "prompt": "Summarize open tasks.",
-        ...     }
-        ... )
-    """
+class CronJobMetadataBase(BaseModel):
+    """Shared cron job metadata fields and validators for list and execute views."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     id: str = Field(min_length=1)
     schedule: str = Field(min_length=1)
-    prompt: str
     runtime: CronRuntime = "local"
     delivery: CronJobDelivery | None = None
 
@@ -73,14 +62,40 @@ class CronJob(BaseModel):
     def _validate_schedule(cls, value: str) -> str:
         return validate_cron_schedule(value)
 
+
+class CronJob(CronJobMetadataBase):
+    """Validated cron job entry from ``jobs.yaml``.
+
+    Example:
+        >>> CronJob.model_validate(
+        ...     {
+        ...         "id": "daily-report",
+        ...         "schedule": "0 9 * * *",
+        ...         "prompt": "Summarize open tasks.",
+        ...     }
+        ... )
+    """
+
+    prompt: str
+
     @field_validator("prompt")
     @classmethod
     def _validate_prompt(cls, value: str, info: ValidationInfo) -> str:
-        # Model-level enforcement is size-only so metadata-only listing can use
-        # an empty prompt placeholder; blank-prompt rejection happens in the
-        # loader/CLI boundaries via validate_cron_prompt.
         job_id = info.data.get("id", "unknown")
-        return _validate_cron_prompt_size(value, job_id=str(job_id))
+        return validate_cron_prompt(value, job_id=str(job_id))
+
+
+class CronJobSummary(CronJobMetadataBase):
+    """Metadata-only cron job entry for list views (no prompt body).
+
+    Example:
+        >>> CronJobSummary.model_validate(
+        ...     {
+        ...         "id": "daily-report",
+        ...         "schedule": "0 9 * * *",
+        ...     }
+        ... )
+    """
 
 
 def validate_cron_schedule(schedule: str) -> str:
