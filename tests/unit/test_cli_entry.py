@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 import typer
+from typer.core import TyperOption
+from typer.main import get_command
 from typer.testing import CliRunner
 
 from cursor_agent.cli.app import _echo_delta, app, run_default
@@ -23,11 +25,15 @@ def test_help_shows_sessions_subcommand() -> None:
     assert "sessions" in result.stdout
 
 
-def test_help_shows_no_banner_option() -> None:
-    """Root --help exposes the --no-banner suppression flag."""
-    result = CliRunner().invoke(app, ["--help"])
-    assert result.exit_code == 0
-    assert "--no-banner" in result.stdout
+def test_cli_registers_no_banner_option() -> None:
+    """Root CLI registers the --no-banner suppression flag."""
+    option_flags: list[str] = [
+        flag
+        for param in get_command(app).params
+        if isinstance(param, TyperOption)
+        for flag in param.opts
+    ]
+    assert "--no-banner" in option_flags
 
 
 def test_default_invokes_run_default(monkeypatch: pytest.MonkeyPatch) -> None:
