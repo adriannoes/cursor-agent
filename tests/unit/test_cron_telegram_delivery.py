@@ -200,6 +200,37 @@ async def test_deliver_cron_result_telegram_bad_request_leaves_run_successful(
 
 
 @pytest.mark.asyncio
+async def test_deliver_cron_result_reports_partial_chunk_count_on_failure(
+    telegram_cron_job: CronJob,
+) -> None:
+    """A failure mid-stream reports the count of chunks actually delivered."""
+    result_text = _build_long_two_column_markdown_table(row_count=80)
+    outcome = CronJobRunOutcome(
+        job_id=telegram_cron_job.id,
+        run_id="run-partial",
+        session_id="session-partial",
+        session_key="cron:daily-report:run-partial",
+        status=CronRunStatus.FINISHED,
+        result_text=result_text,
+    )
+    # Fail on the second chunk so exactly one chunk is delivered beforehand.
+    sender = FakeCronTelegramChunkSender(
+        fail_on_call=1,
+        failure_exception=TelegramBadRequest("can't parse entities"),
+    )
+
+    delivery_outcome = await deliver_cron_result(
+        telegram_cron_job,
+        outcome,
+        chunk_sender=sender,
+    )
+
+    assert delivery_outcome.delivered is False
+    assert delivery_outcome.chunk_count == 1
+    assert delivery_outcome.error_class == "TelegramBadRequest"
+
+
+@pytest.mark.asyncio
 async def test_deliver_cron_result_logs_omit_prompt_and_result_body(
     telegram_cron_job: CronJob,
     caplog: pytest.LogCaptureFixture,
