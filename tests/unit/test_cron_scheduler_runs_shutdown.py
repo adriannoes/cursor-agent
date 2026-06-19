@@ -104,6 +104,38 @@ async def test_shutdown_stops_mtime_watcher(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_job_run_timeout_invokes_on_run_timeout_handler(
+    tmp_path: Path,
+) -> None:
+    """Per-job timeout invokes the configured timeout handler for observability."""
+    started = asyncio.Event()
+    timed_out_job_ids: list[str] = []
+
+    async def slow_executor(job: CronJob) -> None:
+        started.set()
+        await asyncio.sleep(5)
+
+    async def on_run_timeout(job: CronJob) -> None:
+        timed_out_job_ids.append(job.id)
+
+    scheduler = CronScheduler(
+        load_cron_config(tmp_path),
+        executor=slow_executor,
+        override_cron_root=make_cron_root(tmp_path),
+        job_run_timeout_seconds=0.02,
+        on_run_timeout=on_run_timeout,
+    )
+    job = CronJob.model_validate(
+        {"id": "slow-timeout", "schedule": "0 9 * * *", "prompt": "secret"}
+    )
+
+    await asyncio.wait_for(scheduler._run_job(job), timeout=1.0)
+
+    assert started.is_set()
+    assert timed_out_job_ids == ["slow-timeout"]
+
+
+@pytest.mark.asyncio
 async def test_job_run_timeout_logs_safe_warning(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -16,8 +17,14 @@ from cursor_agent.cron.delivery import (
     build_cron_telegram_chunk_sender,
     deliver_cron_result,
 )
-from cursor_agent.cron.executor import run_cron_job
+from cursor_agent.cron.executor import (
+    CronJobRunOutcome,
+    CronRunStatus,
+    build_cron_session_key,
+    run_cron_job,
+)
 from cursor_agent.cron.models import CronJob
+from cursor_agent.cron.runs import CronRunTimeoutHandler
 from cursor_agent.cron.scheduler import CronScheduler
 from cursor_agent.errors import ConfigError
 from cursor_agent.gateway.config import (
@@ -81,7 +88,7 @@ def _validate_platform_adapters(
         )
 
 
-def _build_gateway_cron_executor(
+def _build_gateway_cron_wiring(
     *,
     pool: SessionAgentPool,
     store: SessionStore,
@@ -89,8 +96,8 @@ def _build_gateway_cron_executor(
     config: CursorAgentConfig,
     adapters: Sequence[PlatformAdapter],
     logger: logging.Logger | None = None,
-) -> Callable[[CronJob], Awaitable[None]]:
-    """Return a scheduler callback that runs jobs through the shared gateway pool."""
+) -> tuple[Callable[[CronJob], Awaitable[None]], CronRunTimeoutHandler]:
+    """Return gateway cron executor and timeout handler for the scheduler tracker."""
     effective_logger = logger if logger is not None else _MODULE_LOGGER
     chunk_sender = build_cron_telegram_chunk_sender(adapters)
 
@@ -116,7 +123,45 @@ def _build_gateway_cron_executor(
             logger=effective_logger,
         )
 
-    return _execute_cron_job
+    async def _on_cron_run_timeout(job: CronJob) -> None:
+        run_id = uuid.uuid4().hex
+        outcome = CronJobRunOutcome(
+            job_id=job.id,
+            run_id=run_id,
+            session_id="",
+            session_key=build_cron_session_key(job.id, run_id),
+            status=CronRunStatus.TIMEOUT,
+            error_message="cron job exceeded configured run timeout",
+        )
+        effective_logger.warning(
+            "cron_job_outcome job_id=%s run_id=%s status=%s",
+            outcome.job_id,
+            outcome.run_id,
+            outcome.status.value,
+        )
+
+    return _execute_cron_job, _on_cron_run_timeout
+
+
+def _build_gateway_cron_executor(
+    *,
+    pool: SessionAgentPool,
+    store: SessionStore,
+    facade: SdkFacade,
+    config: CursorAgentConfig,
+    adapters: Sequence[PlatformAdapter],
+    logger: logging.Logger | None = None,
+) -> Callable[[CronJob], Awaitable[None]]:
+    """Return a scheduler callback that runs jobs through the shared gateway pool."""
+    executor, _on_timeout = _build_gateway_cron_wiring(
+        pool=pool,
+        store=store,
+        facade=facade,
+        config=config,
+        adapters=adapters,
+        logger=logger,
+    )
+    return executor
 
 
 async def _start_adapters(
@@ -211,16 +256,18 @@ async def gateway_runtime(
         )
         active_cron_scheduler = cron_scheduler
         if active_cron_scheduler is None:
+            cron_executor, on_cron_run_timeout = _build_gateway_cron_wiring(
+                pool=pool,
+                store=store,
+                facade=active_facade,
+                config=cursor_config,
+                adapters=platform_adapters,
+                logger=active_logger,
+            )
             active_cron_scheduler = CronScheduler(
                 cursor_config,
-                executor=_build_gateway_cron_executor(
-                    pool=pool,
-                    store=store,
-                    facade=active_facade,
-                    config=cursor_config,
-                    adapters=platform_adapters,
-                    logger=active_logger,
-                ),
+                executor=cron_executor,
+                on_run_timeout=on_cron_run_timeout,
                 logger=active_logger,
             )
         ctx = GatewayContext(

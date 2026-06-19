@@ -32,10 +32,15 @@ class CronJobsSummaryCatalog:
     """
 
     _summaries: tuple[CronJobSummary, ...]
+    _warnings: tuple[str, ...] = ()
 
     def list_summaries(self) -> list[CronJobSummary]:
         """Return job summaries in file order."""
         return list(self._summaries)
+
+    def load_warnings(self) -> list[str]:
+        """Return per-job validation warnings skipped during soft listing."""
+        return list(self._warnings)
 
     def get_summary(self, job_id: str) -> CronJobSummary | None:
         """Return the case-sensitive summary for ``job_id``, if present."""
@@ -73,12 +78,14 @@ def cron_job_summaries_from_config(
     config: CursorAgentConfig,
     *,
     override_cron_root: Path | None = None,
+    strict: bool = False,
 ) -> CronJobsSummaryCatalog:
     """Load cron job summaries from config without reading prompt bodies.
 
     Jobs are read from ``{cron_root}/jobs.yaml``. Missing or empty files yield an
     empty catalog. Prompt fields in YAML are ignored so oversized prompt bodies do
-    not block metadata listing.
+    not block metadata listing. By default, invalid per-job entries are skipped
+    with warnings so healthy jobs remain visible; set ``strict=True`` to fail fast.
 
     Example:
         >>> from cursor_agent.config.loader import load_config
@@ -97,8 +104,12 @@ def cron_job_summaries_from_config(
         return CronJobsSummaryCatalog(())
 
     parsed = _parse_jobs_yaml(raw_yaml, jobs_path=jobs_path)
-    summaries = _validate_job_summaries(parsed, jobs_path=jobs_path)
-    return CronJobsSummaryCatalog(tuple(summaries))
+    summaries, warnings = _validate_job_summaries(
+        parsed,
+        jobs_path=jobs_path,
+        strict=strict,
+    )
+    return CronJobsSummaryCatalog(tuple(summaries), tuple(warnings))
 
 
 def cron_jobs_from_config(
@@ -194,24 +205,16 @@ def _validate_job_summaries(
     raw_jobs: list[dict[str, Any]],
     *,
     jobs_path: Path,
-) -> list[CronJobSummary]:
+    strict: bool = False,
+) -> tuple[list[CronJobSummary], list[str]]:
     """Validate summary mappings without loading prompt bodies."""
     summaries: list[CronJobSummary] = []
+    warnings: list[str] = []
     seen_ids: dict[str, int] = {}
 
     for index, raw_job in enumerate(raw_jobs):
         job_payload = {key: value for key, value in raw_job.items() if key != "prompt"}
         job_id = job_payload.get("id")
-        prompt_value = raw_job.get("prompt")
-        if not isinstance(prompt_value, str) or not prompt_value.strip():
-            location = (
-                f"job[{index}]" if not isinstance(job_id, str) else f"job {job_id!r}"
-            )
-            msg = (
-                f"invalid cron job in {jobs_path!s} at {location}: field prompt: "
-                f"received {prompt_value!r}, expected non-empty string"
-            )
-            raise ConfigError(msg)
 
         try:
             summary = CronJobSummary.model_validate(job_payload)
@@ -223,7 +226,10 @@ def _validate_job_summaries(
                 f"invalid cron job in {jobs_path!s} at {location}: "
                 f"{_format_validation_error(exc)}"
             )
-            raise ConfigError(msg) from exc
+            if strict:
+                raise ConfigError(msg) from exc
+            warnings.append(msg)
+            continue
 
         if summary.id in seen_ids:
             msg = (
@@ -234,7 +240,7 @@ def _validate_job_summaries(
         seen_ids[summary.id] = index
         summaries.append(summary)
 
-    return summaries
+    return summaries, warnings
 
 
 def _validate_jobs(

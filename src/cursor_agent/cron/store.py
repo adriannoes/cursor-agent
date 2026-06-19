@@ -56,11 +56,14 @@ def load_cron_jobs_catalog(
 def load_cron_job_summaries_catalog(
     config: CursorAgentConfig,
     cron_root: Path,
+    *,
+    strict: bool = False,
 ) -> CronJobsSummaryCatalog:
     """Load cron job summaries from an injectable cron root without prompt bodies."""
     return cron_job_summaries_from_config(
         config,
         override_cron_root=cron_root,
+        strict=strict,
     )
 
 
