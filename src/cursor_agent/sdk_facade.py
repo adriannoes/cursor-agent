@@ -1,7 +1,7 @@
 """Async SDK facade for cursor-agent (PRD-001).
 
-This module hosts ``SdkFacade``, ``AsyncSdkFacade``, and ``FakeSdkFacade``.
-It is the only module under ``src/`` allowed to import the Cursor Python SDK.
+This module hosts ``SdkFacade`` and ``AsyncSdkFacade``. It is an approved
+``cursor_sdk`` import boundary together with ``sdk_error_mapping``.
 
 Stream strategy: drain ``run.messages()`` once, then ``await run.wait()``;
 never call ``run.text()`` after consuming messages (PRD-000 double-consume bug).
@@ -9,460 +9,49 @@ never call ``run.text()`` after consuming messages (PRD-000 double-consume bug).
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
-import random
 import time
 import uuid
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from enum import Enum
-from typing import Any, Protocol, TypeVar
+from typing import Any
 
 from cursor_agent.facade_logging import LogContext, emit_send_end, emit_send_start
-from cursor_agent.tool_profile_policy import resolve_mcp_servers, sandbox_enabled
+from cursor_agent.sdk_error_mapping import map_sdk_exception
+from cursor_agent.sdk_facade_models import RunResult, RunStatus, StreamCallbacks
+from cursor_agent.sdk_facade_protocol import SdkFacade
+from cursor_agent.sdk_fake import FakeSdkFacade
+from cursor_agent.sdk_retry import retry_sdk_call
+from cursor_agent.sdk_streaming import (
+    dispatch_stream_message,
+    extract_assistant_delta,
+    extract_text_from_messages,
+    map_run_result,
+)
+from cursor_agent.tool_profile_policy import (
+    mcp_servers_override_for_profile,
+    passes_mcp_servers_on_resume,
+    sandbox_enabled,
+)
 
-_T = TypeVar("_T")
-_RETRY_MAX_ATTEMPTS = 3
-_RETRY_BACKOFF_CAP_SECONDS = 30.0
 _MODULE_LOGGER = logging.getLogger(__name__)
 
-
-class RunStatus(str, Enum):
-    """Terminal status for a facade run."""
-
-    FINISHED = "finished"
-    ERROR = "error"
-    CANCELLED = "cancelled"
-
-
-@dataclass(frozen=True)
-class RunResult:
-    """Normalized result of a facade send operation."""
-
-    run_id: str
-    status: RunStatus
-    text: str | None
-    usage: dict[str, Any] | None = None
-
-
-@dataclass(frozen=True)
-class StreamCallbacks:
-    """Optional streaming callbacks for assistant text and tool events."""
-
-    on_assistant_text: Callable[[str], Awaitable[None]] | None = None
-    on_tool_start: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None
-    on_tool_end: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None
-
-
-class SdkFacade(Protocol):
-    """Protocol for SDK access; implemented by AsyncSdkFacade and FakeSdkFacade."""
-
-    async def create_agent(
-        self,
-        *,
-        workspace: str,
-        model: str = "composer-2.5",
-        tool_profile: str = "coding",
-        runtime_mode: str = "local",
-    ) -> str:
-        """Create a new agent; returns ``agent_id``."""
-        ...
-
-    async def resume_agent(
-        self,
-        agent_id: str,
-        *,
-        workspace: str,
-        model: str | None = None,
-        tool_profile: str | None = None,
-        runtime_mode: str = "local",
-    ) -> str:
-        """Resume an existing agent; returns internal handle key."""
-        ...
-
-    async def send(
-        self,
-        agent_id: str,
-        message: str,
-        *,
-        callbacks: StreamCallbacks | None = None,
-        log_context: LogContext | None = None,
-    ) -> RunResult:
-        """Send a message; returns ``RunResult``."""
-        ...
-
-    async def cancel(self, agent_id: str) -> None:
-        """Cancel an in-flight run for the agent."""
-        ...
-
-    async def close(self) -> None:
-        """Release bridge and internal state."""
-        ...
-
-    def has_agent(self, agent_id: str) -> bool:
-        """Return True when the facade holds an in-memory agent handle."""
-        ...
-
-
-def _map_run_status(raw_status: object) -> RunStatus:
-    """Map SDK or string statuses onto facade ``RunStatus`` values."""
-    if isinstance(raw_status, RunStatus):
-        return raw_status
-    normalized = str(raw_status).lower()
-    if normalized == RunStatus.FINISHED.value:
-        return RunStatus.FINISHED
-    if normalized == RunStatus.CANCELLED.value:
-        return RunStatus.CANCELLED
-    if normalized in {RunStatus.ERROR.value, "failed"}:
-        return RunStatus.ERROR
-    return RunStatus.ERROR
-
-
-def _map_run_result(wait_result: object, *, text: str | None = None) -> RunResult:
-    """Map an SDK ``run.wait()`` payload onto ``RunResult``."""
-    run_id = getattr(wait_result, "id", None) or getattr(wait_result, "run_id", None)
-    if not run_id:
-        msg = (
-            f"wait_result missing run id: received {wait_result!r}, "
-            "expected attribute 'id' or 'run_id'"
-        )
-        raise ValueError(msg)
-
-    status = _map_run_status(getattr(wait_result, "status", RunStatus.ERROR.value))
-    usage = getattr(wait_result, "usage", None)
-    if usage is None:
-        duration_ms = getattr(wait_result, "duration_ms", None)
-        if duration_ms is not None:
-            usage = {"duration_ms": duration_ms}
-
-    final_text = text
-    if final_text is None:
-        final_text = getattr(wait_result, "result", None)
-
-    return RunResult(
-        run_id=str(run_id),
-        status=status,
-        text=final_text,
-        usage=usage if isinstance(usage, dict) else None,
-    )
-
-
-def _extract_assistant_delta(message: object) -> str | None:
-    """Extract assistant text delta from a single streamed SDK message."""
-    message_body = getattr(message, "message", None)
-    if message_body is None:
-        return None
-    content_blocks = getattr(message_body, "content", None) or []
-    parts: list[str] = []
-    for block in content_blocks:
-        text = getattr(block, "text", None)
-        if isinstance(text, str) and text:
-            parts.append(text)
-    if not parts:
-        return None
-    return "".join(parts)
-
-
-def _extract_text_from_messages(messages: list[object]) -> str:
-    """Concatenate assistant text deltas from drained SDK messages."""
-    parts: list[str] = []
-    for message in messages:
-        delta = _extract_assistant_delta(message)
-        if delta:
-            parts.append(delta)
-    return "".join(parts)
-
-
-async def _invoke_callback(
-    callback: Callable[..., Awaitable[None] | None] | None,
-    *args: object,
-) -> None:
-    """Invoke a stream callback, awaiting when it returns a coroutine."""
-    if callback is None:
-        return
-    result = callback(*args)
-    if asyncio.iscoroutine(result):
-        await result
-
-
-async def _dispatch_stream_message(
-    message: object,
-    callbacks: StreamCallbacks | None,
-) -> str | None:
-    """Dispatch one streamed SDK message to callbacks; return assistant delta."""
-    if callbacks is not None:
-        message_type = getattr(message, "type", None)
-        if message_type == "tool_call":
-            tool_name = str(getattr(message, "name", "unknown"))
-            tool_status = str(getattr(message, "status", ""))
-            tool_args = getattr(message, "args", None) or {}
-            if not isinstance(tool_args, dict):
-                tool_args = {}
-            if tool_status == "running":
-                await _invoke_callback(callbacks.on_tool_start, tool_name, tool_args)
-            elif tool_status in {"completed", "error"}:
-                payload = {
-                    "args": tool_args,
-                    "result": getattr(message, "result", None),
-                }
-                await _invoke_callback(callbacks.on_tool_end, tool_name, payload)
-
-    delta = _extract_assistant_delta(message)
-    if delta and callbacks is not None:
-        await _invoke_callback(callbacks.on_assistant_text, delta)
-    return delta
-
-
-def _resolve_sandbox_options(tool_profile: str) -> Any | None:
-    """Return SDK sandbox options for a tool profile; messaging enables sandbox."""
-    if sandbox_enabled(tool_profile):
-        return SandboxOptions(enabled=True)
-    return None
-
-
-def _is_retryable_error(exc: BaseException) -> bool:
-    """Return True when an exception advertises ADR-024 retry semantics."""
-    return bool(getattr(exc, "is_retryable", False))
-
-
-def _parse_retry_after_seconds(value: object) -> float | None:
-    """Parse retry_after hints from SDK strings or numeric seconds."""
-    if isinstance(value, (int, float)) and value >= 0:
-        return float(value)
-    if isinstance(value, str):
-        try:
-            parsed = float(value)
-        except ValueError:
-            return None
-        if parsed >= 0:
-            return parsed
-    return None
-
-
-def _retry_after_seconds(exc: BaseException, attempt: int) -> float:
-    """Compute delay before the next retry attempt."""
-    retry_after = _parse_retry_after_seconds(getattr(exc, "retry_after", None))
-    if retry_after is not None:
-        return retry_after
-    backoff = min(2**attempt, _RETRY_BACKOFF_CAP_SECONDS)
-    return float(backoff + random.uniform(0, 0.25))
-
-
-async def _retry_sdk_call(operation: Callable[[], Awaitable[_T]]) -> _T:
-    """Retry a pre-run SDK operation up to three times when retryable."""
-    last_error: BaseException | None = None
-    for attempt in range(_RETRY_MAX_ATTEMPTS):
-        try:
-            return await operation()
-        except BaseException as exc:
-            if not _is_retryable_error(exc):
-                raise
-            last_error = exc
-            if attempt == _RETRY_MAX_ATTEMPTS - 1:
-                break
-            await asyncio.sleep(_retry_after_seconds(exc, attempt))
-    assert last_error is not None
-    raise last_error
-
-
-def _map_sdk_exception(exc: BaseException) -> BaseException:
-    """Map SDK and transport exceptions onto cursor-agent errors (ADR-024)."""
-    from cursor_agent.errors import (
-        AuthError,
-        ConfigError,
-        CursorAgentError,
-        InvalidAgentError,
-        NetworkError,
-        SdkInternalError,
-        TimeoutError as AgentTimeoutError,
-    )
-
-    if isinstance(exc, CursorAgentError):
-        return exc
-
-    try:
-        from cursor_sdk.errors import (
-            AgentNotFoundError as SdkAgentNotFoundError,
-            APITimeoutError as SdkAPITimeoutError,
-            AuthenticationError as SdkAuthenticationError,
-            ConfigurationError as SdkConfigurationError,
-            CursorAgentError as SdkCursorAgentError,
-            InternalServerError as SdkInternalServerError,
-            NetworkError as SdkNetworkError,
-            PermissionDeniedError as SdkPermissionDeniedError,
-            RateLimitError as SdkRateLimitError,
-        )
-    except ImportError:
-        SdkCursorAgentError = ()  # type: ignore[assignment,misc]
-
-    if isinstance(exc, SdkCursorAgentError):
-        message = str(exc)
-        retry_after = _parse_retry_after_seconds(getattr(exc, "retry_after", None))
-        is_retryable = bool(getattr(exc, "is_retryable", False))
-
-        if isinstance(exc, (SdkAuthenticationError, SdkPermissionDeniedError)):
-            return AuthError(message)
-        if isinstance(exc, SdkAPITimeoutError):
-            return AgentTimeoutError(message, retry_after=retry_after)
-        if isinstance(exc, SdkAgentNotFoundError):
-            return InvalidAgentError(message)
-        if isinstance(exc, SdkConfigurationError):
-            return ConfigError(message)
-        if isinstance(exc, SdkInternalServerError):
-            return SdkInternalError(message, retry_after=retry_after)
-        if isinstance(exc, (SdkNetworkError, SdkRateLimitError)):
-            return NetworkError(message, retry_after=retry_after)
-        if is_retryable:
-            return NetworkError(message, retry_after=retry_after)
-        return ConfigError(message)
-
-    exc_name = exc.__class__.__name__.lower()
-    message = str(exc)
-    if "auth" in exc_name or "unauthorized" in message.lower():
-        return AuthError(message)
-    if "timeout" in exc_name:
-        return AgentTimeoutError(message)
-    if "network" in exc_name or "connection" in exc_name:
-        return NetworkError(message)
-    if isinstance(exc, TypeError):
-        return ConfigError(f"SDK request serialization failed: {message}")
-    return exc
-
-
-class FakeSdkFacade:
-    """In-memory SdkFacade for unit tests without a real SDK bridge."""
-
-    def __init__(
-        self,
-        *,
-        scripted_replies: dict[str, str] | None = None,
-        scripted_tool_events: list[tuple[str, dict[str, Any]]] | None = None,
-        default_reply: str = "fake reply",
-        send_release: asyncio.Event | None = None,
-    ) -> None:
-        self._scripted_replies = scripted_replies or {}
-        self._scripted_tool_events = scripted_tool_events or []
-        self._default_reply = default_reply
-        self._messages_by_agent: dict[str, list[dict[str, str]]] = {}
-        self._agent_profiles: dict[str, str] = {}
-        # When set, ``send`` blocks until ``send_release`` is set (deterministic busy tests).
-        self._send_release = send_release
-        self.send_in_progress = asyncio.Event()
-        self._logger = _MODULE_LOGGER
-        self._closed = False
-
-    async def create_agent(
-        self,
-        *,
-        workspace: str,
-        model: str = "composer-2.5",
-        tool_profile: str = "coding",
-        runtime_mode: str = "local",
-    ) -> str:
-        """Create a fake agent id and empty message history."""
-        _ = workspace, model, runtime_mode
-        agent_id = f"fake-{uuid.uuid4().hex[:8]}"
-        self._messages_by_agent[agent_id] = []
-        self._agent_profiles[agent_id] = tool_profile
-        return agent_id
-
-    async def resume_agent(
-        self,
-        agent_id: str,
-        *,
-        workspace: str,
-        model: str | None = None,
-        tool_profile: str | None = None,
-        runtime_mode: str = "local",
-    ) -> str:
-        """Resume a fake agent when it already exists."""
-        _ = workspace, model, runtime_mode
-        if agent_id not in self._messages_by_agent:
-            msg = f"invalid fake agent_id: received {agent_id!r}, expected known agent"
-            raise ValueError(msg)
-        if tool_profile is not None:
-            self._agent_profiles[agent_id] = tool_profile
-        return agent_id
-
-    async def send(
-        self,
-        agent_id: str,
-        message: str,
-        *,
-        callbacks: StreamCallbacks | None = None,
-        log_context: LogContext | None = None,
-    ) -> RunResult:
-        """Append the user message and return a scripted assistant reply."""
-        if agent_id not in self._messages_by_agent:
-            msg = f"invalid fake agent_id: received {agent_id!r}, expected known agent"
-            raise ValueError(msg)
-
-        emit_send_start(self._logger, agent_id=agent_id, log_context=log_context)
-        started = time.perf_counter()
-        self.send_in_progress.set()
-        run_id = f"fake-run-{uuid.uuid4().hex[:8]}"
-        try:
-            if self._send_release is not None:
-                await self._send_release.wait()
-            history = self._messages_by_agent[agent_id]
-            history.append({"role": "user", "content": message})
-
-            for tool_name, tool_args in self._scripted_tool_events:
-                await _invoke_callback(
-                    callbacks.on_tool_start if callbacks else None, tool_name, tool_args
-                )
-                await _invoke_callback(
-                    callbacks.on_tool_end if callbacks else None,
-                    tool_name,
-                    {"args": tool_args, "result": "ok"},
-                )
-
-            profile = self._agent_profiles.get(agent_id, "default")
-            reply = self._scripted_replies.get(
-                profile, self._scripted_replies.get("default", self._default_reply)
-            )
-            for char in reply:
-                await _invoke_callback(
-                    callbacks.on_assistant_text if callbacks else None, char
-                )
-
-            history.append({"role": "assistant", "content": reply})
-            result = RunResult(
-                run_id=run_id,
-                status=RunStatus.FINISHED,
-                text=reply,
-                usage=None,
-            )
-            emit_send_end(
-                self._logger,
-                agent_id=agent_id,
-                run_id=run_id,
-                duration_ms=int((time.perf_counter() - started) * 1000),
-                status=RunStatus.FINISHED.value,
-                log_context=log_context,
-            )
-            return result
-        finally:
-            self.send_in_progress.clear()
-
-    async def cancel(self, agent_id: str) -> None:
-        """No-op cancel for fake runs without an active bridge."""
-        _ = agent_id
-
-    def has_agent(self, agent_id: str) -> bool:
-        """Return True when the fake facade tracks the agent in memory."""
-        return agent_id in self._messages_by_agent
-
-    async def close(self) -> None:
-        """Mark the fake facade as closed."""
-        self._closed = True
+# Backward-compatible private aliases for tests and internal callers.
+_map_run_result = map_run_result
+_extract_assistant_delta = extract_assistant_delta
+_extract_text_from_messages = extract_text_from_messages
+_map_sdk_exception = map_sdk_exception
 
 
 # SDK import boundary (see AGENTS.md).
 from cursor_sdk import AsyncClient, LocalAgentOptions, SandboxOptions  # noqa: E402
 from cursor_sdk.types import options_to_json  # noqa: E402
+
+
+def _resolve_sandbox_options(tool_profile: str) -> SandboxOptions | None:
+    """Return SDK sandbox options for a tool profile; messaging enables sandbox."""
+    if sandbox_enabled(tool_profile):
+        return SandboxOptions(enabled=True)
+    return None
 
 
 def _build_local_agent_options(
@@ -547,9 +136,10 @@ class AsyncSdkFacade:
             self._local_setting_sources if runtime_mode == "local" else None
         )
 
+        mcp_override = mcp_servers_override_for_profile(tool_profile)
         create_options: dict[str, Any] | None = None
-        if tool_profile == "messaging":
-            create_options = {"mcp_servers": resolve_mcp_servers(tool_profile)}
+        if mcp_override is not None:
+            create_options = {"mcp_servers": mcp_override}
 
         async def _create() -> str:
             local_options = _build_local_agent_options(
@@ -576,9 +166,9 @@ class AsyncSdkFacade:
             return agent.agent_id
 
         try:
-            return await _retry_sdk_call(_create)
+            return await retry_sdk_call(_create)
         except BaseException as exc:
-            raise _map_sdk_exception(exc) from exc
+            raise map_sdk_exception(exc) from exc
 
     async def resume_agent(
         self,
@@ -604,8 +194,13 @@ class AsyncSdkFacade:
             setting_sources=local_setting_sources,
             tool_profile=profile,
         )
+        resume_payload: dict[str, Any] = {}
+        if passes_mcp_servers_on_resume(profile):
+            mcp_override = mcp_servers_override_for_profile(profile)
+            if mcp_override is not None:
+                resume_payload["mcp_servers"] = mcp_override
         request_options = options_to_json(
-            {"mcp_servers": resolve_mcp_servers(profile)},
+            resume_payload,
             local=local_options,
             model=model,
             api_key=self._api_key,
@@ -619,9 +214,9 @@ class AsyncSdkFacade:
             return agent.agent_id
 
         try:
-            return await _retry_sdk_call(_resume)
+            return await retry_sdk_call(_resume)
         except BaseException as exc:
-            raise _map_sdk_exception(exc) from exc
+            raise map_sdk_exception(exc) from exc
 
     async def send(
         self,
@@ -641,9 +236,9 @@ class AsyncSdkFacade:
             return await agent.send(message)
 
         try:
-            run = await _retry_sdk_call(_send)
+            run = await retry_sdk_call(_send)
         except BaseException as exc:
-            raise _map_sdk_exception(exc) from exc
+            raise map_sdk_exception(exc) from exc
 
         self._active_runs[agent_id] = run
         text_parts: list[str] = []
@@ -653,7 +248,7 @@ class AsyncSdkFacade:
                 if agent_id in self._cancelled_agents:
                     cancelled = True
                     break
-                delta = await _dispatch_stream_message(stream_message, callbacks)
+                delta = await dispatch_stream_message(stream_message, callbacks)
                 if delta:
                     text_parts.append(delta)
 
@@ -669,7 +264,7 @@ class AsyncSdkFacade:
             else:
                 wait_result = await run.wait()
                 streamed_text = "".join(text_parts) or None
-                result = _map_run_result(wait_result, text=streamed_text)
+                result = map_run_result(wait_result, text=streamed_text)
         finally:
             self._active_runs.pop(agent_id, None)
             self._cancelled_agents.discard(agent_id)

@@ -41,6 +41,10 @@ Reference projects may inform **behavior patterns** — reimplement in `cursor_a
 
 User data lives under `~/.cursor-agent/` (`config.yaml`, `sessions.db`, `MEMORY.md`, `USER.md`, `gateway.yaml`, logs).
 
+### Session SQLite baseline (V1)
+
+Local session metadata is stored in SQLite at `~/.cursor-agent/sessions.db` by default (override with `CURSOR_AGENT_SESSIONS_DB`). New databases and legacy pre-version files are upgraded idempotently to **schema version 1** on `SessionStore.initialize()` via `PRAGMA user_version`. Existing rows are preserved across upgrades; future schema changes add migrations in `sessions/store.py` rather than manual SQL edits.
+
 ---
 
 ## Dual persistence session model
@@ -89,7 +93,7 @@ Cron and background jobs always use a **dedicated** `agent_id` — never shared 
 
 ## SDK facade boundary
 
-All `cursor_sdk` imports are confined to `src/cursor_agent/sdk_facade.py`. CLI, gateway, and cron share one **async-first** facade:
+All `cursor_sdk` imports are confined to `src/cursor_agent/sdk_facade.py` and `src/cursor_agent/sdk_error_mapping.py`. CLI, gateway, and cron share one **async-first** facade:
 
 - `AsyncSdkFacade` — real adapter over `AsyncClient.launch_bridge`
 - `FakeSdkFacade` — unit tests without `CURSOR_API_KEY`
@@ -105,10 +109,21 @@ The SDK does not disable native tools (`shell`, `edit`, …). Real control comes
 
 | Profile | Use case | Posture |
 |---------|----------|---------|
-| `coding` | Local development, trusted operator | SDK auto-approve; optional dev hooks |
+| `coding` | Local development, trusted operator | SDK auto-approve; optional dev hooks; project/user MCP preserved |
 | `messaging` | Gateways, bots, untrusted input | Read-only workspace; deny hooks; empty MCP; sandbox network off |
 
 MVP ships only `coding` and `messaging` ([ADR-014](decisions/ADR-014-tool-profiles-mvp.md)). Gateways **must** use `messaging` and refuse to start with `coding`.
+
+### MCP and sandbox by profile (create and resume)
+
+The SDK facade applies profile policy on **both** agent create and resume — not only on first launch.
+
+| Profile | Agent create | Agent resume |
+|---------|--------------|--------------|
+| `coding` | Omits `mcp_servers` so Cursor **project** (`.cursor/mcp.json`) and **user** MCP settings apply | Omits `mcp_servers` so persisted SDK/project MCP settings apply |
+| `messaging` | Passes `mcp_servers: {}` and enables sandbox (network off) | Re-injects `mcp_servers: {}` and sandbox for defense in depth |
+
+Local `coding` runs also pass `setting_sources: ["project", "user"]` so workspace and user-level Cursor settings load. `messaging` still deploys deny hooks to the workspace before the first pool use.
 
 Threat model, hook layout and acceptance probes: [SECURITY.md](../SECURITY.md).
 
