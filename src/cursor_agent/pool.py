@@ -289,6 +289,7 @@ class SessionAgentPool:
         callbacks: StreamCallbacks | None = None,
         blocking: bool = True,
         model_override: str | None = None,
+        skip_runtime_guard: bool = False,
     ) -> RunResult:
         """Send a message with per-key locking, logging context, and store updates."""
         _validate_send_message(message)
@@ -297,7 +298,8 @@ class SessionAgentPool:
             if session_row is not None
             else await self._resolve_or_raise(session_key, session_id)
         )
-        self._assert_runtime_match(row)
+        if not skip_runtime_guard:
+            self._assert_runtime_match(row)
 
         lock = self._lock_for(session_key)
         if blocking:
