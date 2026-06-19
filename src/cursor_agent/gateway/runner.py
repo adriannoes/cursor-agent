@@ -102,6 +102,13 @@ def _build_gateway_cron_executor(
             facade=facade,
             config=config,
         )
+        # Metadata only: never log prompt or assistant body (PRD-009 boundary).
+        effective_logger.info(
+            "cron_job_outcome job_id=%s run_id=%s status=%s",
+            outcome.job_id,
+            outcome.run_id,
+            outcome.status.value,
+        )
         await deliver_cron_result(
             job,
             outcome,
