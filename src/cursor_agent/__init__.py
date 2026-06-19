@@ -1,7 +1,7 @@
-"""Minimal package scaffold for the PRD-000 SDK spike.
+"""cursor-agent — clean-room orchestration for the Cursor Python SDK.
 
-The real orchestration modules start in PRD-001; this package only gives the
-ADR-026 quality gate a typed import target during Phase 0.
+Delegates the agentic loop, tools, and inference to the SDK; adds sessions,
+configuration, CLI UX, concurrency, and security policy (hooks, tool profiles).
 """
 
 from cursor_agent.sdk_facade import (
@@ -14,7 +14,7 @@ from cursor_agent.sdk_facade import (
     StreamCallbacks,
 )
 
-__version__ = "0.0.0"
+__version__ = "1.0.0"
 
 __all__ = [
     "AsyncSdkFacade",
