@@ -217,6 +217,15 @@ def test_prompt_over_64_kib_raises_config_error(tmp_path: Path) -> None:
         )
 
 
+def test_whitespace_only_prompt_raises_config_error(tmp_path: Path) -> None:
+    """Blank or whitespace-only prompts are rejected at validation time."""
+    with pytest.raises(ConfigError, match="prompt"):
+        _catalog_from_yaml(
+            tmp_path,
+            _single_job_yaml(prompt="   "),
+        )
+
+
 def test_malformed_yaml_raises_config_error(tmp_path: Path) -> None:
     """Malformed YAML syntax raises ConfigError."""
     with pytest.raises(ConfigError, match="YAML|yaml"):
