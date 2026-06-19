@@ -60,9 +60,15 @@ def _stdout_is_tty() -> bool:
     return sys.stdout.isatty()
 
 
+_CI_DISABLED_VALUES = frozenset({"", "0", "false", "no", "off"})
+
+
 def _is_ci_environment() -> bool:
-    """Return whether CI suppression is active via the ``CI`` environment variable."""
-    return os.environ.get("CI") is not None
+    """Return whether CI suppression is active via a truthy ``CI`` env value."""
+    raw = os.environ.get("CI")
+    if raw is None:
+        return False
+    return raw.strip().lower() not in _CI_DISABLED_VALUES
 
 
 async def run_default(
@@ -86,10 +92,11 @@ async def run_default(
         no_banner=no_banner,
         is_ci=ci,
     )
-    if first_run and welcome_written:
-        mark_complete(marker_home=home, is_ci=ci)
+    pending_first_run_marker = first_run and welcome_written
 
     async with repl_runtime(config) as (pool, session_key, store, facade):
+        if pending_first_run_marker:
+            mark_complete(marker_home=home, is_ci=ci)
         display = RichDisplay(
             stream_writer=_echo_delta,
             status_writer=typer.echo,

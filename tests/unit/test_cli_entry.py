@@ -7,9 +7,11 @@ from pathlib import Path
 
 import pytest
 import typer
+from typer.core import TyperOption
+from typer.main import get_command
 from typer.testing import CliRunner
 
-from cursor_agent.cli.app import _echo_delta, app, run_default
+from cursor_agent.cli.app import _echo_delta, _is_ci_environment, app, run_default
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.errors import AuthError
 from cursor_agent.product_copy import CURSOR_API_KEY_SETUP_HINT
@@ -23,11 +25,20 @@ def test_help_shows_sessions_subcommand() -> None:
     assert "sessions" in result.stdout
 
 
-def test_help_shows_no_banner_option() -> None:
-    """Root --help exposes the --no-banner suppression flag."""
-    result = CliRunner().invoke(app, ["--help"])
-    assert result.exit_code == 0
-    assert "--no-banner" in result.stdout
+def test_cli_registers_no_banner_option() -> None:
+    """Root CLI registers the --no-banner suppression flag."""
+    # Introspect registered options instead of --help stdout: Rich formatting
+    # varies by terminal width and CI runner environment.
+    no_banner_option = next(
+        (
+            param
+            for param in get_command(app).params
+            if isinstance(param, TyperOption) and "--no-banner" in param.opts
+        ),
+        None,
+    )
+    assert no_banner_option is not None
+    assert no_banner_option.name == "no_banner"
 
 
 def test_default_invokes_run_default(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -296,12 +307,12 @@ async def test_run_default_welcome_output_before_repl_session_line(
 
 
 @pytest.mark.asyncio
-async def test_run_default_marks_first_run_complete_after_banner(
+async def test_run_default_marks_first_run_complete_after_bootstrap(
     monkeypatch: pytest.MonkeyPatch,
     config: CursorAgentConfig,
     tmp_path: Path,
 ) -> None:
-    """Non-suppressed first-run banner persists the first-run marker."""
+    """First-run marker persists only after repl_runtime bootstrap succeeds."""
     mark_calls: list[dict[str, object]] = []
 
     def stub_mark_complete(**kwargs: object) -> bool:
@@ -334,6 +345,67 @@ async def test_run_default_marks_first_run_complete_after_banner(
     assert len(mark_calls) == 1
     assert mark_calls[0]["marker_home"] == tmp_path
     assert mark_calls[0]["is_ci"] is False
+
+
+@pytest.mark.asyncio
+async def test_run_default_skips_marker_when_repl_bootstrap_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """First-run marker is not persisted when repl_runtime bootstrap fails."""
+    mark_called = {"value": False}
+
+    def stub_mark_complete(**_kwargs: object) -> bool:
+        mark_called["value"] = True
+        return True
+
+    monkeypatch.setattr("cursor_agent.cli.app.mark_complete", stub_mark_complete)
+    monkeypatch.setattr(
+        "cursor_agent.cli.app.is_first_run",
+        lambda *, marker_home: True,
+    )
+
+    @asynccontextmanager
+    async def failing_repl_runtime(_cfg: CursorAgentConfig):
+        raise AuthError("missing api key")
+        yield object(), "cli:default:test", object(), object()  # pragma: no cover
+
+    monkeypatch.setattr("cursor_agent.cli.app.repl_runtime", failing_repl_runtime)
+
+    with pytest.raises(AuthError, match="missing api key"):
+        await run_default(
+            config,
+            marker_home=tmp_path,
+            is_tty=True,
+            is_ci=False,
+        )
+
+    assert mark_called["value"] is False
+
+
+@pytest.mark.parametrize(
+    ("ci_value", "expected"),
+    [
+        (None, False),
+        ("", False),
+        ("0", False),
+        ("false", False),
+        ("1", True),
+        ("true", True),
+    ],
+)
+def test_is_ci_environment_uses_truthy_ci_values(
+    monkeypatch: pytest.MonkeyPatch,
+    ci_value: str | None,
+    expected: bool,
+) -> None:
+    """CI suppression follows truthy CI env values per ADR-027 §6."""
+    if ci_value is None:
+        monkeypatch.delenv("CI", raising=False)
+    else:
+        monkeypatch.setenv("CI", ci_value)
+    assert _is_ci_environment() is expected
 
 
 @pytest.mark.asyncio

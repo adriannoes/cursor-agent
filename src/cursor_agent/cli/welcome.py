@@ -66,7 +66,7 @@ def render_welcome(
     """Render the welcome banner to the line writer when policy allows.
 
     Returns whether banner text was written. Suppressed when ``no_banner`` is
-    set, stdout is not a TTY, or ``CI`` is set (ADR-027 §6).
+    set, stdout is not a TTY, or ``CI`` is a truthy env value (ADR-027 §6).
 
     Example:
         >>> lines: list[str] = []

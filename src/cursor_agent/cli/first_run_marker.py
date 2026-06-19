@@ -1,4 +1,8 @@
-"""First-run marker persistence for CLI onboarding (PRD-011, ADR-027 §5)."""
+"""First-run marker persistence for CLI onboarding (PRD-011, ADR-027 §5).
+
+Persisted only after the welcome banner prints and ``repl_runtime`` bootstrap
+succeeds — see ``run_default`` in ``app.py``.
+"""
 
 from __future__ import annotations
 
