@@ -130,3 +130,14 @@ uv run pytest tests/unit/test_cli_profile.py tests/unit/test_messaging_profile.p
 | [internal-docs/engineering/tasks/README.md](internal-docs/engineering/tasks/README.md) | Task plan index |
 | [Cursor Python SDK](https://cursor.com/docs/sdk/python) | Upstream SDK documentation |
 | [Cursor Hooks](https://cursor.com/docs/hooks) | Hook schema reference |
+
+---
+
+## Cursor Cloud specific instructions
+
+Dependency manager is `uv` (already on `PATH` via `~/.bashrc`); the startup update script runs `uv sync --group dev`. Standard lint/type/test commands are documented above under **Local verification** — use those.
+
+- **Live agent loop needs `CURSOR_API_KEY` (secret, not set by default).** The CLI launches the SDK bridge fine without a key, but the first `agent.send` fails with `missing_api_key: Agent.create requires api_key`. The REPL (`uv run cursor-agent`), the Telegram `gateway`, and `cron` job *execution* (not `cron add/list/show`) all need this key. Unit tests, lint, format, and `mypy` need no key; integration tests (`pytest -m integration`) skip without it.
+- **REPL flow gotcha:** in the interactive REPL you must run `/new` to open a session before sending a message, otherwise it prints `No active session. Use /new to start one.` The bridge binary `cursor-sdk-bridge` ships with `cursor-sdk` and is already on `PATH` inside `.venv`.
+- **Local runtime state** lives under `~/.cursor-agent/` (`sessions.db`, `cron/jobs.yaml`), not in the repo. `cron add/list/show` and `sessions list` work fully offline and are the safest way to exercise core functionality without secrets.
+- `TELEGRAM_BOT_TOKEN` is only required for the `gateway` command.
