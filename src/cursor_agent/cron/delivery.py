@@ -87,20 +87,27 @@ async def deliver_cron_result(
     if not chunks:
         return CronDeliveryOutcome(attempted=True, delivered=True, chunk_count=0)
 
+    sent_chunks = 0
     try:
         for chunk in chunks:
             await chunk_sender.send_html_chunk(chat_id, chunk)
+            sent_chunks += 1
     except Exception as exc:
         effective_logger.warning(
-            "cron_telegram_delivery_failed job_id=%s run_id=%s exception_class=%s",
+            "cron_telegram_delivery_failed job_id=%s run_id=%s "
+            "sent_chunks=%s total_chunks=%s exception_class=%s",
             job.id,
             outcome.run_id,
+            sent_chunks,
+            len(chunks),
             exc.__class__.__name__,
         )
+        # Report how many chunks were actually delivered before the failure so a
+        # partial send is not misreported as zero. (review: partial delivery)
         return CronDeliveryOutcome(
             attempted=True,
             delivered=False,
-            chunk_count=0,
+            chunk_count=sent_chunks,
             error_class=exc.__class__.__name__,
         )
 
