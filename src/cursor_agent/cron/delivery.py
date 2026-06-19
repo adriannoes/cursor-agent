@@ -103,7 +103,7 @@ async def deliver_cron_result(
             exc.__class__.__name__,
         )
         # Report how many chunks were actually delivered before the failure so a
-        # partial send is not misreported as zero. (review: partial delivery)
+        # partial send is not misreported as zero.
         return CronDeliveryOutcome(
             attempted=True,
             delivered=False,

@@ -344,6 +344,19 @@ def test_split_telegram_html_fragments_preserves_anchor_tags() -> None:
         _assert_balanced_supported_tags(fragment)
 
 
+def test_split_telegram_html_fragments_preserves_long_href_url() -> None:
+    """Very long href URLs stay balanced when followed by long link text."""
+    long_url = "https://example.com/" + "segment/" * 400
+    html = f'<a href="{long_url}">docs</a>' + (" trailing text." * 300)
+    fragments = split_telegram_html_fragments(html)
+    assert len(fragments) >= 2
+    for fragment in fragments:
+        _assert_telegram_html_chunk_valid(fragment)
+    combined = "".join(fragments)
+    assert long_url in combined
+    assert "docs" in combined
+
+
 def test_split_telegram_html_fragments_empty_returns_no_chunks() -> None:
     """Empty rendered HTML produces no fragments."""
     assert split_telegram_html_fragments("") == []
