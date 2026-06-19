@@ -4,10 +4,17 @@ from __future__ import annotations
 
 import os
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import yaml
 from pydantic import ValidationError
+
+try:  # POSIX file locking; absent on non-POSIX platforms (best-effort fallback).
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX platforms
+    fcntl = None  # type: ignore[assignment]
 
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.cron.loader import CronJobsCatalog, cron_jobs_from_config
@@ -76,21 +83,43 @@ def build_cron_job(
         raise ConfigError(msg) from exc
 
 
+@contextmanager
+def _cron_write_lock(cron_root: Path) -> Iterator[None]:
+    """Serialize concurrent ``cron add``/``remove`` read-modify-write cycles.
+
+    Uses an exclusive POSIX advisory lock on ``jobs.yaml.lock`` so two CLI
+    processes cannot interleave and drop each other's update (last-writer-wins).
+    Degrades to a no-op on platforms without ``fcntl``. (review: TOCTOU)
+    """
+    cron_root.mkdir(parents=True, exist_ok=True)
+    if fcntl is None:  # pragma: no cover - non-POSIX platforms
+        yield
+        return
+    lock_path = cron_root / f"{JOBS_FILENAME}.lock"
+    with open(lock_path, "w", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 def add_cron_job_atomic(
     config: CursorAgentConfig,
     cron_root: Path,
     job: CronJob,
 ) -> None:
     """Append a validated job to ``jobs.yaml`` with an atomic replace write."""
-    catalog = load_cron_jobs_catalog(config, cron_root, include_prompt=True)
-    existing = catalog.list_jobs()
-    if catalog.get_job(job.id) is not None:
-        msg = (
-            f"cron job id already exists: received {job.id!r}, "
-            "expected a unique case-sensitive job id"
-        )
-        raise ConfigError(msg)
-    write_cron_jobs_atomic(cron_root, [*existing, job])
+    with _cron_write_lock(cron_root):
+        catalog = load_cron_jobs_catalog(config, cron_root, include_prompt=True)
+        existing = catalog.list_jobs()
+        if catalog.get_job(job.id) is not None:
+            msg = (
+                f"cron job id already exists: received {job.id!r}, "
+                "expected a unique case-sensitive job id"
+            )
+            raise ConfigError(msg)
+        write_cron_jobs_atomic(cron_root, [*existing, job])
 
 
 def remove_cron_job_atomic(
@@ -99,22 +128,42 @@ def remove_cron_job_atomic(
     job_id: str,
 ) -> None:
     """Remove a job by id from ``jobs.yaml`` with an atomic replace write."""
-    catalog = load_cron_jobs_catalog(config, cron_root, include_prompt=True)
-    existing = catalog.list_jobs()
-    if catalog.get_job(job_id) is None:
+    with _cron_write_lock(cron_root):
+        catalog = load_cron_jobs_catalog(config, cron_root, include_prompt=True)
+        existing = catalog.list_jobs()
+        if catalog.get_job(job_id) is None:
+            msg = (
+                f"cron job not found: received id {job_id!r}, "
+                "expected an existing case-sensitive job id"
+            )
+            raise ConfigError(msg)
+        remaining = [job for job in existing if job.id != job_id]
+        write_cron_jobs_atomic(cron_root, remaining)
+
+
+def _reject_unsafe_jobs_path(cron_root: Path, jobs_path: Path) -> None:
+    """Reject a symlinked or escaping ``jobs.yaml`` before an atomic write."""
+    if jobs_path.is_symlink():
         msg = (
-            f"cron job not found: received id {job_id!r}, "
-            "expected an existing case-sensitive job id"
+            f"cron jobs file {jobs_path!s} must not be a symlink, "
+            f"expected a regular file under {cron_root!s}"
         )
         raise ConfigError(msg)
-    remaining = [job for job in existing if job.id != job_id]
-    write_cron_jobs_atomic(cron_root, remaining)
+    resolved_root = cron_root.resolve(strict=False)
+    resolved_jobs = jobs_path.resolve(strict=False)
+    if not resolved_jobs.is_relative_to(resolved_root):
+        msg = (
+            f"cron jobs file {jobs_path!s} escapes cron root {cron_root!s}, "
+            "expected path contained under the configured cron directory"
+        )
+        raise ConfigError(msg)
 
 
 def write_cron_jobs_atomic(cron_root: Path, jobs: list[CronJob]) -> None:
     """Serialize validated jobs and atomically replace ``jobs.yaml``."""
     cron_root.mkdir(parents=True, exist_ok=True)
     jobs_path = cron_root / JOBS_FILENAME
+    _reject_unsafe_jobs_path(cron_root, jobs_path)
     payload = {"jobs": [_job_to_yaml_mapping(job) for job in jobs]}
     serialized = yaml.safe_dump(
         payload,
