@@ -20,6 +20,21 @@ DEFAULT_DB_PATH = Path.home() / ".cursor-agent" / "sessions.db"
 _MODULE_LOGGER = logging.getLogger(__name__)
 
 
+def resolve_sessions_db_path() -> Path:
+    """Return the SQLite session store path from env or the default location.
+
+    Honors ``CURSOR_AGENT_SESSIONS_DB`` (spike flat env per ``.env.example``).
+
+    Example:
+        >>> resolve_sessions_db_path()  # doctest: +SKIP
+        PosixPath('/Users/me/.cursor-agent/sessions.db')
+    """
+    override = os.environ.get("CURSOR_AGENT_SESSIONS_DB", "").strip()
+    if override:
+        return Path(override).expanduser()
+    return DEFAULT_DB_PATH
+
+
 def resolve_workspace(config: CursorAgentConfig) -> str:
     """Return absolute workspace path from config runtime cwd."""
     return str(Path(config.runtime.local.cwd).resolve())
@@ -37,7 +52,7 @@ def create_store(
 ) -> SessionStore:
     """Create a SessionStore at ``store_path`` or the default DB path."""
     _ = config
-    return SessionStore(store_path or DEFAULT_DB_PATH)
+    return SessionStore(store_path or resolve_sessions_db_path())
 
 
 def bootstrap_messaging_hooks(
