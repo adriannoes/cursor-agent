@@ -27,13 +27,18 @@ def test_help_shows_sessions_subcommand() -> None:
 
 def test_cli_registers_no_banner_option() -> None:
     """Root CLI registers the --no-banner suppression flag."""
-    option_flags: list[str] = [
-        flag
-        for param in get_command(app).params
-        if isinstance(param, TyperOption)
-        for flag in param.opts
-    ]
-    assert "--no-banner" in option_flags
+    # Introspect registered options instead of --help stdout: Rich formatting
+    # varies by terminal width and CI runner environment.
+    no_banner_option = next(
+        (
+            param
+            for param in get_command(app).params
+            if isinstance(param, TyperOption) and "--no-banner" in param.opts
+        ),
+        None,
+    )
+    assert no_banner_option is not None
+    assert no_banner_option.name == "no_banner"
 
 
 def test_default_invokes_run_default(monkeypatch: pytest.MonkeyPatch) -> None:
