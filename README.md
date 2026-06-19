@@ -12,6 +12,7 @@ Orchestration layer only — the SDK owns the agent loop, tools, and inference. 
 - Persistent sessions (`cursor-agent sessions list`)
 - Long-running messaging gateway, including Telegram (`cursor-agent gateway`)
 - Local Memory v1 from `~/.cursor-agent/USER.md` and `~/.cursor-agent/MEMORY.md`
+- Embedded cron scheduler managed by `cursor-agent cron list|add|remove`
 - `coding` and `messaging` tool profiles for trusted dev vs untrusted input
 
 ## Documentation
@@ -53,6 +54,7 @@ uv run pytest -m "not integration" -v
 uv run cursor-agent                         # interactive REPL (default: coding profile)
 uv run cursor-agent --profile messaging     # validate messaging hooks locally
 uv run cursor-agent sessions list             # list sessions for the workspace key
+uv run cursor-agent cron list                 # list scheduled jobs
 uv run cursor-agent gateway                   # gateway using ~/.cursor-agent/gateway.yaml
 uv run cursor-agent gateway --config /path/to/gateway.yaml
 ```
@@ -72,6 +74,10 @@ Use `/memory show` in the CLI to inspect the exact effective payload, quotas, by
 The gateway runs **cursor-agent** as a long-running bot process with `tool_profile: messaging` — read-only workspace, deny hooks, empty MCP, sandbox network off. See [SECURITY.md](SECURITY.md) and the step-by-step [Telegram Gateway Onboarding](docs/telegram-gateway-onboarding.md).
 
 Example config: [examples/gateway.yaml.example](examples/gateway.yaml.example). Set `TELEGRAM_BOT_TOKEN` in the environment; do not commit real tokens.
+
+## Cron Jobs
+
+Scheduled jobs are configured in `~/.cursor-agent/cron/jobs.yaml` and run inside `cursor-agent gateway`. Use `cursor-agent cron list|add|remove` to manage them without hand-editing YAML. Job prompts are capped at 64 KiB, schedules use UTC by default, and jobs with `delivery.telegram.chat_id` deliver formatted output through the Telegram gateway. See [Telegram Gateway Onboarding](docs/telegram-gateway-onboarding.md#9-optional-scheduled-cron-jobs) for the full setup and demo flow.
 
 ## Development hooks (optional)
 
