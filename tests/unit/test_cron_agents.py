@@ -308,6 +308,76 @@ async def test_combined_prompt_budget_cron_first_send_injects_memory_before_job_
     assert row.metadata.get("memory_injected") is True
 
 
+class CancelRecordingFacade(FakeSdkFacade):
+    """FakeSdkFacade that records which agent ids were cancelled."""
+
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(**kwargs)  # type: ignore[arg-type]
+        self.cancelled_agents: list[str] = []
+
+    async def cancel(self, agent_id: str) -> None:
+        """Record the cancelled agent id and delegate to the parent fake."""
+        self.cancelled_agents.append(agent_id)
+        await super().cancel(agent_id)
+
+
+class _SessionCreateFailingStore(SessionStore):
+    """SessionStore whose ``create`` always fails to simulate a persist error."""
+
+    async def create(self, params: object) -> object:  # type: ignore[override]
+        raise RuntimeError("simulated session store failure")
+
+
+@pytest.mark.asyncio
+async def test_create_cron_run_session_cancels_agent_when_store_create_fails(
+    cron_job: CronJob,
+    config: object,
+    tmp_path: Path,
+) -> None:
+    """A persist failure after create_agent must cancel the orphaned SDK agent."""
+    failing_store = _SessionCreateFailingStore(tmp_path / "sessions.db")
+    await failing_store.initialize()
+    facade = CancelRecordingFacade()
+
+    with pytest.raises(RuntimeError, match="simulated session store failure"):
+        await create_cron_run_session(
+            cron_job,
+            store=failing_store,
+            facade=facade,
+            config=config,  # type: ignore[arg-type]
+            run_id="run-leak",
+        )
+
+    assert len(facade.cancelled_agents) == 1
+
+
+@pytest.mark.asyncio
+async def test_run_cron_job_returns_error_when_session_setup_fails(
+    cron_job: CronJob,
+    config: object,
+    tmp_path: Path,
+) -> None:
+    """run_cron_job reports ERROR (not raise) and cancels the agent on setup failure."""
+    failing_store = _SessionCreateFailingStore(tmp_path / "sessions.db")
+    await failing_store.initialize()
+    facade = CancelRecordingFacade()
+    pool = SessionAgentPool(store=failing_store, facade=facade, config=config)  # type: ignore[arg-type]
+
+    outcome = await run_cron_job(
+        cron_job,
+        pool=pool,
+        store=failing_store,
+        facade=facade,
+        config=config,  # type: ignore[arg-type]
+        run_id="run-error",
+    )
+
+    assert outcome.status is outcome.status.ERROR
+    assert outcome.session_key == build_cron_session_key(cron_job.id, "run-error")
+    assert outcome.session_id == ""
+    assert len(facade.cancelled_agents) == 1
+
+
 @pytest.mark.parametrize(
     ("relative_path",),
     [
