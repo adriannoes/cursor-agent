@@ -17,5 +17,5 @@ def test_gateway_busy_message_is_english_and_reexported_from_platforms() -> None
 
 
 def test_telegram_no_session_hint_is_non_empty_english() -> None:
-    """Telegram first-contact hint is ready for PRD-007 adapter use."""
+    """Telegram first-contact hint is non-empty English copy."""
     assert TELEGRAM_NO_SESSION_HINT == "Send /new to start a conversation."

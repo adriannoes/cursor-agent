@@ -65,7 +65,7 @@ def prepare_telegram_assistant_reply_chunks(
 def render_cursor_markdown_for_telegram(text: str) -> str:
     """Render a conservative Cursor-style Markdown subset to Telegram HTML.
 
-    Supported: bold, inline code, fenced code as ``<b>Lang:</b> <code>`` (variant 7),
+    Supported: bold, inline code, language-tagged fenced code as ``<b>Lang:</b> <code>``,
     headings, http(s) links, plain list lines, and GitHub-flavored Markdown tables.
     All model text is HTML-escaped before entering tags.
 
@@ -110,7 +110,7 @@ def _fence_language_label(language_info: str) -> str | None:
 
 
 def _render_fenced_code_block(language_info: str, code_body: str) -> str:
-    """Render fenced code as bold label + inline code (Telegram sweep variant 7).
+    """Render fenced code as bold label + inline code.
 
     ``<pre>`` blocks collapse into the same Shell pill UI on mobile Telegram
     clients, so language-tagged fences use ``<b>Lang:</b> <code>...`` instead.

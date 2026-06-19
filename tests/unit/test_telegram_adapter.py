@@ -275,7 +275,7 @@ async def _seed_inbound_session(
     )
 
 
-# --- Lifecycle (sub-task 3.1) ---
+# --- Lifecycle ---
 
 
 def test_telegram_adapter_platform_returns_telegram(tmp_path: object) -> None:
@@ -317,7 +317,7 @@ async def test_telegram_adapter_stop_closes_dispatcher_and_bot_session(
     assert fake_bot.session.closed is True
 
 
-# --- Inbound mapping (sub-task 3.3) ---
+# --- Inbound mapping ---
 
 
 @pytest.mark.asyncio
@@ -462,7 +462,7 @@ async def test_telegram_inbound_ignores_topic_messages(tmp_path: object) -> None
     await adapter.stop()
 
 
-# --- Outbound delivery (sub-task 3.5) ---
+# --- Outbound delivery ---
 
 
 @pytest.mark.asyncio
@@ -710,7 +710,7 @@ async def test_telegram_send_message_after_stop_does_not_recreate_bot(
     assert fake_bot.send_message_calls == []
 
 
-# --- Typing indicator (sub-task 3.7) ---
+# --- Typing indicator ---
 
 
 @pytest.mark.asyncio
@@ -821,7 +821,7 @@ async def test_telegram_typing_stops_on_shutdown(tmp_path: object) -> None:
     assert fake_bot.chat_action_calls
 
 
-# --- Log safety (sub-task 3.9) ---
+# --- Log safety ---
 
 
 @pytest.mark.asyncio
@@ -900,7 +900,7 @@ async def test_telegram_exception_logs_include_safe_metadata_only(
     assert session_key in combined or "session_key" in combined
 
 
-# --- Integrated gateway behavior (PRD-007 Wave 6A) ---
+# --- Integrated gateway behavior ---
 
 
 class SideEffectTrackingFacade(FakeSdkFacade):
@@ -1206,7 +1206,7 @@ async def test_telegram_busy_path_delivers_gateway_busy_message(
     assert len(busy_calls) == 1
 
 
-# --- Error paths and edge cases (coverage hardening) ---
+# --- Error paths and edge cases ---
 
 
 @pytest.mark.asyncio
@@ -1506,7 +1506,7 @@ async def test_telegram_send_message_reraises_when_failure_after_first_chunk(
     assert attempts.count(None) == 0
 
 
-# --- Memory presentation boundary guards (PRD-008 Wave 4B) ---
+# --- Memory presentation boundary guards ---
 
 
 _TELEGRAM_ADAPTER_SOURCE = (
