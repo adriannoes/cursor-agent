@@ -1,6 +1,6 @@
-# AGENTS.md — Guide for AI Agents
+# AGENTS.md — Guide for Contributors and AI Agents
 
-> **Primary entry point** for agent sessions in this repository. Read this file before implementing anything.
+> **Primary onboarding doc** for this repository. Humans: pair with [CONTRIBUTING.md](CONTRIBUTING.md). AI agents: read this file before implementing anything.
 
 ---
 
@@ -12,40 +12,6 @@ You may study reference projects (for example [Hermes Agent](https://github.com/
 
 ---
 
-## Repository map
-
-```text
-cursor-agent/
-├── AGENTS.md              ← you are here
-├── README.md              ← human-facing overview
-├── SECURITY.md            ← messaging threat model and acceptance probes
-├── LICENSE                ← MIT
-├── .env.example           ← documented environment variables
-├── pyproject.toml         ← package, tooling, and wheel includes
-│
-├── docs/                  ← official user guides (onboarding, gateway setup)
-├── internal-docs/         ← internal planning (PRDs, ADRs, tasks; gitignored)
-│   ├── prd/               ← product requirements (PRD-000 …)
-│   ├── decisions/         ← architecture decision records
-│   └── engineering/tasks/ ← implementation task plans
-│
-├── src/cursor_agent/      ← production Python package
-│   ├── sdk_facade.py      ← only module that imports cursor_sdk
-│   ├── messaging_hooks.py ← hook install/deploy for messaging profile
-│   ├── pool.py            ← session agent pool
-│   └── cli/               ← Typer CLI entry point
-│
-├── hooks/messaging/       ← versioned hook scripts (also packaged in wheel)
-├── tests/                 ← pytest unit and integration tests
-└── examples/              ← SDK spike scripts (async REPL, tools inventory)
-```
-
-**Note:** Runtime hook deployment writes to `{workspace}/.cursor/hooks.json` and `{workspace}/.cursor/hooks/messaging/` when `tool_profile` is `messaging`. That workspace `.cursor/` tree is generated at runtime — it is not the same as any local-only planning directories you may have on disk.
-
-**Docs split:** `docs/` is the public, user-facing documentation. PRDs, ADRs, strategy, and task plans live in `internal-docs/` (and `.cursor/` workflows); do not put internal planning artifacts under `docs/`.
-
----
-
 ## Tool profiles
 
 | Profile | Use case | Posture |
@@ -53,7 +19,7 @@ cursor-agent/
 | `coding` | Local development, trusted operator | SDK auto-approve; optional dev hooks only |
 | `messaging` | Gateways, bots, untrusted input | Read-only workspace; deny hooks; empty MCP; sandbox network off |
 
-For gateways and bots, **always** use `tool_profile: messaging`. Do not rely on `coding` + auto-approve outside a trusted local session. See [SECURITY.md](SECURITY.md) for the threat model, hook layout, and acceptance probes.
+For gateways and bots, **always** use `tool_profile: messaging`. Do not rely on `coding` + auto-approve outside a trusted local session. With `messaging`, the CLI deploys deny hooks into the active workspace at `{workspace}/.cursor/hooks/messaging/` (manifest at `{workspace}/.cursor/hooks.json`) at runtime — not editor-local config. See [SECURITY.md](SECURITY.md) for the threat model, hook layout, and acceptance probes.
 
 CLI override: `cursor-agent --profile messaging`
 
@@ -61,10 +27,10 @@ CLI override: `cursor-agent --profile messaging`
 
 ## How to work
 
-1. **Read the user request and relevant source** before editing — grep-friendly modules, explicit types, small functions.
+1. **Read the request and relevant source** before editing — grep-friendly modules, explicit types, small focused functions.
 2. **TDD:** for functional changes, write a **failing** pytest test → implement → green.
 3. **Keep SDK isolation:** import `cursor_sdk` only from `src/cursor_agent/sdk_facade.py`.
-4. **Do not commit** unless the user explicitly asks.
+4. **Verify locally** before opening a PR — commands below match CI (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 5. **Do not commit secrets** — use `CURSOR_AGENT__*` env vars or `CURSOR_API_KEY` (see `.env.example`).
 
 ### Local verification (no API key required for unit tests)
@@ -82,7 +48,8 @@ Focused messaging/hook checks:
 
 ```bash
 uv run pytest tests/unit/test_cli_profile.py tests/unit/test_messaging_profile.py \
-  tests/unit/test_hooks_deploy.py tests/unit/test_cli_bootstrap.py tests/unit/test_pool.py -v
+  tests/unit/test_messaging_hooks_deploy.py tests/unit/test_hook_workspace_deploy.py \
+  tests/unit/test_cli_bootstrap.py tests/unit/test_pool.py -v
 ```
 
 ---
@@ -98,8 +65,18 @@ uv run pytest tests/unit/test_cli_profile.py tests/unit/test_messaging_profile.p
 | CLI | `cursor-agent` |
 | Dependency manager | `uv` (per `pyproject.toml`) |
 | Linter / formatter | `ruff` |
+| Type checker | `mypy --strict` on `src/` |
 | Tests | `pytest` in `./tests` |
 | Code and comments | English |
+
+### Code style (contributors)
+
+- **Grep-friendly names** — specific symbols; avoid generic `data`, `handler`, `util`.
+- **Explicit types** on public APIs; no untyped surfaces.
+- **Imports at module top** — no inline imports unless a documented circular-dependency exception.
+- **Small units** — short functions; one responsibility per module.
+- **Comments** explain *why* and provenance, not obvious syntax.
+- **Error messages** include the offending value and expected shape.
 
 ---
 
@@ -116,17 +93,21 @@ uv run pytest tests/unit/test_cli_profile.py tests/unit/test_messaging_profile.p
 
 ## Quick links
 
+For install, API key, and gateway setup without prior context, start at [docs/setup.md](docs/setup.md).
+
 | Document | Description |
 |----------|-------------|
-| [README.md](README.md) | Project overview and prerequisites |
+| [docs/setup.md](docs/setup.md) | Public setup index for humans and AI agents |
+| [docs/architecture.md](docs/architecture.md) | System design — sessions, facade, concurrency |
+| [docs/decisions/README.md](docs/decisions/README.md) | Curated architecture decision records |
+| [README.md](README.md) | Project overview, first-run banner, usage |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Issues, pull requests, verification gate |
 | [SECURITY.md](SECURITY.md) | Messaging threat model and hook acceptance |
 | [docs/cursor-api-key-onboarding.md](docs/cursor-api-key-onboarding.md) | Local `CURSOR_API_KEY` setup |
 | [docs/telegram-gateway-onboarding.md](docs/telegram-gateway-onboarding.md) | Telegram bot and gateway setup |
 | [.env.example](.env.example) | Environment variable reference |
 | [pyproject.toml](pyproject.toml) | Package metadata and quality gates |
 | [hooks/messaging/](hooks/messaging/) | Versioned deny-hook scripts |
-| [internal-docs/README.md](internal-docs/README.md) | Internal hub — PRDs, ADRs, strategy (local/gitignored) |
-| [internal-docs/prd/README.md](internal-docs/prd/README.md) | PRD chain and TDD retro rules |
-| [internal-docs/engineering/tasks/README.md](internal-docs/engineering/tasks/README.md) | Task plan index |
+| [examples/gateway.yaml.example](examples/gateway.yaml.example) | Sample gateway configuration |
 | [Cursor Python SDK](https://cursor.com/docs/sdk/python) | Upstream SDK documentation |
 | [Cursor Hooks](https://cursor.com/docs/hooks) | Hook schema reference |
