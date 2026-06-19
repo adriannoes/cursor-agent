@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 import typer
 
@@ -19,14 +19,14 @@ from cursor_agent.cron.store import (
     load_cron_jobs_catalog,
     remove_cron_job_atomic,
 )
-from cursor_agent.errors import CursorAgentError
+from cursor_agent.errors import ConfigError, CursorAgentError
 
 cron_app = typer.Typer(help="Manage scheduled cron jobs")
 
 _EMPTY_CRON_JOBS_MESSAGE = "No cron jobs configured."
 
 
-def _exit_on_cursor_agent_error(exc: CursorAgentError) -> None:
+def _exit_on_cursor_agent_error(exc: CursorAgentError) -> NoReturn:
     """Print an actionable CLI error and exit with the mapped code."""
     typer.echo(str(exc), err=True)
     raise typer.Exit(exit_code_for_error(exc)) from exc
@@ -93,6 +93,37 @@ def cron_list() -> None:
         for job in jobs
     ]
     typer.echo(format_cron_jobs_table(rows))
+
+
+@cron_app.command("show")
+def cron_show(
+    job_id: Annotated[
+        str, typer.Argument(help="Case-sensitive cron job id to show.")
+    ],
+) -> None:
+    """Show the full configuration for a single cron job."""
+    try:
+        config = load_config()
+        cron_root = resolve_cron_root(config)
+        catalog = load_cron_jobs_catalog(config, cron_root, include_prompt=True)
+        job = catalog.get_job(job_id)
+        if job is None:
+            raise ConfigError(
+                f"cron job not found: received id {job_id!r}, "
+                "expected an existing case-sensitive job id"
+            )
+    except CursorAgentError as exc:
+        _exit_on_cursor_agent_error(exc)
+
+    lines = [
+        f"id: {job.id}",
+        f"schedule: {job.schedule}",
+        f"next_run: {_format_next_run(_next_run_for_schedule(job.schedule))}",
+        f"runtime: {job.runtime}",
+        f"telegram_chat_id: {_telegram_chat_id(job)}",
+        f"prompt: {job.prompt}",
+    ]
+    typer.echo("\n".join(lines))
 
 
 @cron_app.command("add")
