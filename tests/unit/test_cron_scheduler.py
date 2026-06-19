@@ -201,9 +201,7 @@ async def test_per_job_run_timeout_returns_without_hanging(tmp_path: Path) -> No
         override_cron_root=_cron_root(tmp_path),
         job_run_timeout_seconds=0.02,
     )
-    job = CronJob.model_validate(
-        {"id": "slow", "schedule": "0 9 * * *", "prompt": "x"}
-    )
+    job = CronJob.model_validate({"id": "slow", "schedule": "0 9 * * *", "prompt": "x"})
 
     await asyncio.wait_for(scheduler._run_job(job), timeout=1.0)
     assert started.is_set()
