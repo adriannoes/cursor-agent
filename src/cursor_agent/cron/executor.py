@@ -32,6 +32,7 @@ class CronRunStatus(str, Enum):
     FINISHED = "finished"
     BUSY = "busy"
     ERROR = "error"
+    TIMEOUT = "timeout"
 
 
 @dataclass(frozen=True, slots=True)

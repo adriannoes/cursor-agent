@@ -11,6 +11,7 @@ from cursor_agent.cron.models import CronJob
 _MODULE_LOGGER = logging.getLogger(__name__)
 
 CronJobExecutor = Callable[[CronJob], Awaitable[None]]
+CronRunTimeoutHandler = Callable[[CronJob], Awaitable[None]]
 
 
 class CronActiveRunTracker:
@@ -30,6 +31,7 @@ class CronActiveRunTracker:
         max_concurrent_jobs: int,
         executor: CronJobExecutor | None = None,
         job_run_timeout_seconds: float | None = None,
+        on_run_timeout: CronRunTimeoutHandler | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
         if max_concurrent_jobs < 1:
@@ -39,6 +41,7 @@ class CronActiveRunTracker:
             )
         self._executor = executor
         self._job_run_timeout_seconds = job_run_timeout_seconds
+        self._on_run_timeout = on_run_timeout
         self._logger = logger if logger is not None else _MODULE_LOGGER
         self._concurrency_semaphore = asyncio.Semaphore(max_concurrent_jobs)
         self._active_tasks: set[asyncio.Task[None]] = set()
@@ -102,3 +105,5 @@ class CronActiveRunTracker:
                 job.id,
                 self._job_run_timeout_seconds,
             )
+            if self._on_run_timeout is not None:
+                await self._on_run_timeout(job)

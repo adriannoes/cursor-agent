@@ -17,7 +17,7 @@ from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.cron.loader import CronJobsCatalog, cron_jobs_from_config
 from cursor_agent.cron.models import CronJob, cron_trigger_for_schedule
 from cursor_agent.cron.paths import DEFAULT_CRON_ROOT, resolve_cron_jobs_file
-from cursor_agent.cron.runs import CronActiveRunTracker
+from cursor_agent.cron.runs import CronActiveRunTracker, CronRunTimeoutHandler
 from cursor_agent.errors import ConfigError
 
 
@@ -78,6 +78,7 @@ class CronScheduler:
         reload_poll_hook: ReloadPollHook | None = None,
         max_concurrent_jobs: int = DEFAULT_MAX_CONCURRENT_CRON_JOBS,
         job_run_timeout_seconds: float | None = None,
+        on_run_timeout: CronRunTimeoutHandler | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
         self._config = config
@@ -91,6 +92,7 @@ class CronScheduler:
             max_concurrent_jobs=max_concurrent_jobs,
             executor=executor,
             job_run_timeout_seconds=job_run_timeout_seconds,
+            on_run_timeout=on_run_timeout,
             logger=self._logger,
         )
 
@@ -182,7 +184,13 @@ class CronScheduler:
         self._replace_jobs(catalog.list_jobs())
 
     async def reload_if_changed(self) -> bool:
-        """Reload jobs when ``jobs.yaml`` mtime changed; return whether reload ran."""
+        """Reload jobs when ``jobs.yaml`` mtime changed; return whether reload ran.
+
+        On ``ConfigError`` during reload, the last known-good cache is kept and
+        ``_jobs_mtime`` is advanced to the file's current mtime so the same broken
+        file is not re-parsed every poll. Touch ``jobs.yaml`` after fixing content
+        so the next edit produces a newer mtime and triggers reload again.
+        """
         jobs_path = self._jobs_file_path()
         if jobs_path is None or not jobs_path.exists():
             current_mtime: float | None = None

@@ -29,6 +29,7 @@ from cursor_agent.cron.executor import (
     create_cron_run_session,
     run_cron_job,
 )
+from cursor_agent.cron.runs import CronActiveRunTracker
 from cursor_agent.cron.scheduler import CronJobNextRun, CronScheduler
 
 __all__ = [
@@ -37,6 +38,7 @@ __all__ = [
     "JOBS_FILENAME",
     "CronJob",
     "CronJobDelivery",
+    "CronActiveRunTracker",
     "CronDeliveryOutcome",
     "CronJobNextRun",
     "CronJobRunOutcome",

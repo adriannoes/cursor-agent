@@ -32,7 +32,38 @@ class CronJobDelivery(BaseModel):
     telegram: CronTelegramDelivery | None = None
 
 
-class CronJob(BaseModel):
+class CronJobMetadataBase(BaseModel):
+    """Shared cron job metadata fields and validators for list and execute views."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: str = Field(min_length=1)
+    schedule: str = Field(min_length=1)
+    runtime: CronRuntime = "local"
+    delivery: CronJobDelivery | None = None
+
+    @field_validator("id")
+    @classmethod
+    def _validate_id(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            msg = f"invalid job id: received {value!r}, expected non-empty string"
+            raise ValueError(msg)
+        if stripped != value:
+            msg = (
+                f"invalid job id: received {value!r}, expected id without leading "
+                "or trailing whitespace"
+            )
+            raise ValueError(msg)
+        return value
+
+    @field_validator("schedule")
+    @classmethod
+    def _validate_schedule(cls, value: str) -> str:
+        return validate_cron_schedule(value)
+
+
+class CronJob(CronJobMetadataBase):
     """Validated cron job entry from ``jobs.yaml``.
 
     Example:
@@ -45,33 +76,7 @@ class CronJob(BaseModel):
         ... )
     """
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    id: str = Field(min_length=1)
-    schedule: str = Field(min_length=1)
     prompt: str
-    runtime: CronRuntime = "local"
-    delivery: CronJobDelivery | None = None
-
-    @field_validator("id")
-    @classmethod
-    def _validate_id(cls, value: str) -> str:
-        stripped = value.strip()
-        if not stripped:
-            msg = f"invalid job id: received {value!r}, expected non-empty string"
-            raise ValueError(msg)
-        if stripped != value:
-            msg = (
-                f"invalid job id: received {value!r}, expected id without leading "
-                "or trailing whitespace"
-            )
-            raise ValueError(msg)
-        return value
-
-    @field_validator("schedule")
-    @classmethod
-    def _validate_schedule(cls, value: str) -> str:
-        return validate_cron_schedule(value)
 
     @field_validator("prompt")
     @classmethod
@@ -80,7 +85,7 @@ class CronJob(BaseModel):
         return validate_cron_prompt(value, job_id=str(job_id))
 
 
-class CronJobSummary(BaseModel):
+class CronJobSummary(CronJobMetadataBase):
     """Metadata-only cron job entry for list views (no prompt body).
 
     Example:
@@ -91,33 +96,6 @@ class CronJobSummary(BaseModel):
         ...     }
         ... )
     """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    id: str = Field(min_length=1)
-    schedule: str = Field(min_length=1)
-    runtime: CronRuntime = "local"
-    delivery: CronJobDelivery | None = None
-
-    @field_validator("id")
-    @classmethod
-    def _validate_id(cls, value: str) -> str:
-        stripped = value.strip()
-        if not stripped:
-            msg = f"invalid job id: received {value!r}, expected non-empty string"
-            raise ValueError(msg)
-        if stripped != value:
-            msg = (
-                f"invalid job id: received {value!r}, expected id without leading "
-                "or trailing whitespace"
-            )
-            raise ValueError(msg)
-        return value
-
-    @field_validator("schedule")
-    @classmethod
-    def _validate_schedule(cls, value: str) -> str:
-        return validate_cron_schedule(value)
 
 
 def validate_cron_schedule(schedule: str) -> str:

@@ -248,6 +248,45 @@ def test_cron_remove_unknown_id_exits_error(cron_cli_env: Path) -> None:
     assert "not found" in combined.lower()
 
 
+def test_cron_list_skips_invalid_job_with_warning(cron_cli_env: Path) -> None:
+    """cron list warns and skips invalid jobs while listing healthy entries."""
+    cron_cli_env.mkdir(parents=True, exist_ok=True)
+    (cron_cli_env / "jobs.yaml").write_text(
+        "jobs:\n"
+        "  - id: healthy\n"
+        '    schedule: "0 9 * * *"\n'
+        '    prompt: "ok"\n'
+        "  - id: broken\n"
+        '    schedule: "bad"\n'
+        '    prompt: "ignored"\n',
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(app, ["cron", "list"])
+
+    assert result.exit_code == 0
+    assert "healthy" in result.stdout
+    assert "broken" not in result.stdout
+    combined = f"{result.stdout}\n{result.stderr}"
+    assert "warning:" in combined.lower()
+    assert "broken" in combined.lower()
+
+
+def test_cron_list_strict_fails_on_invalid_job(cron_cli_env: Path) -> None:
+    """cron list --strict exits non-zero when any job entry is invalid."""
+    cron_cli_env.mkdir(parents=True, exist_ok=True)
+    (cron_cli_env / "jobs.yaml").write_text(
+        'jobs:\n  - id: broken\n    schedule: "bad"\n    prompt: "x"\n',
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(app, ["cron", "list", "--strict"])
+
+    assert result.exit_code == 1
+    combined = f"{result.stdout}\n{result.stderr}"
+    assert "broken" in combined.lower()
+
+
 def test_cron_list_corrupt_jobs_yaml_exits_error(cron_cli_env: Path) -> None:
     """A malformed jobs.yaml makes cron list exit non-zero without a traceback."""
     (cron_cli_env / "jobs.yaml").write_text(

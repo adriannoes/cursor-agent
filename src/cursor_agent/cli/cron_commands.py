@@ -65,15 +65,30 @@ def _telegram_chat_id(job: CronJob | CronJobSummary) -> str:
 
 
 @cron_app.command("list")
-def cron_list() -> None:
-    """List configured cron jobs with schedule and next-run metadata."""
+def cron_list(
+    strict: Annotated[
+        bool,
+        typer.Option(
+            "--strict",
+            help="Fail when any job entry is invalid instead of skipping it with warnings.",
+        ),
+    ] = False,
+) -> None:
+    """List configured cron jobs with schedule and next-run metadata.
+
+    Metadata-only: prompt bodies are omitted. Use ``cron show`` for full job details.
+    """
     try:
         config = load_config()
         cron_root = resolve_cron_root(config)
-        catalog = load_cron_job_summaries_catalog(config, cron_root)
+        catalog = load_cron_job_summaries_catalog(config, cron_root, strict=strict)
         summaries = catalog.list_summaries()
+        warnings = catalog.load_warnings()
     except CursorAgentError as exc:
         _exit_on_cursor_agent_error(exc)
+
+    for warning in warnings:
+        typer.echo(f"warning: {warning}", err=True)
 
     if not summaries:
         typer.echo(_EMPTY_CRON_JOBS_MESSAGE)

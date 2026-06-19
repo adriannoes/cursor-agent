@@ -340,11 +340,48 @@ def test_metadata_listing_returns_summaries_without_prompt_bodies(
     assert catalog.get_summary("metadata-only") == summary
 
 
-def test_metadata_listing_requires_prompt_field_without_loading_body(
+def test_metadata_listing_skips_invalid_job_and_returns_warning(
     tmp_path: Path,
 ) -> None:
-    """Summary listing validates executable shape without retaining prompt bodies."""
-    yaml_content = 'jobs:\n  - id: missing-prompt\n    schedule: "0 9 * * *"\n'
+    """Summary listing soft-fails invalid jobs so healthy entries remain visible."""
+    yaml_content = (
+        "jobs:\n"
+        "  - id: healthy\n"
+        '    schedule: "0 9 * * *"\n'
+        '    prompt: "ok"\n'
+        "  - id: broken-schedule\n"
+        '    schedule: "bad"\n'
+        '    prompt: "ignored for summary"\n'
+    )
+    catalog = _summaries_from_yaml(tmp_path, yaml_content)
+    summaries = catalog.list_summaries()
+    warnings = catalog.load_warnings()
 
-    with pytest.raises(ConfigError, match="prompt"):
-        _summaries_from_yaml(tmp_path, yaml_content)
+    assert [summary.id for summary in summaries] == ["healthy"]
+    assert len(warnings) == 1
+    assert "broken-schedule" in warnings[0]
+
+
+def test_metadata_listing_omits_prompt_requirement(tmp_path: Path) -> None:
+    """Summary listing does not require a prompt field in jobs.yaml."""
+    yaml_content = 'jobs:\n  - id: missing-prompt\n    schedule: "0 9 * * *"\n'
+    catalog = _summaries_from_yaml(tmp_path, yaml_content)
+
+    summaries = catalog.list_summaries()
+    assert len(summaries) == 1
+    assert summaries[0].id == "missing-prompt"
+    assert catalog.load_warnings() == []
+
+
+def test_metadata_listing_strict_fails_on_invalid_job(tmp_path: Path) -> None:
+    """Strict summary listing raises ConfigError for the first invalid job."""
+    yaml_content = 'jobs:\n  - id: broken-job\n    schedule: "bad"\n'
+    cron_root = _cron_root(tmp_path)
+    _write_jobs_yaml(cron_root, yaml_content)
+
+    with pytest.raises(ConfigError, match="broken-job"):
+        cron_job_summaries_from_config(
+            _load_cron_config(tmp_path),
+            override_cron_root=cron_root,
+            strict=True,
+        )
