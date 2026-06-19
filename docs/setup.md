@@ -2,6 +2,71 @@
 
 Public setup index for humans and AI agents. Use placeholders for secrets (`your-cursor-api-key`, `your-telegram-bot-token`) and keep real tokens in environment variables or gitignored local files only.
 
+## Configuration
+
+Configuration merges multiple sources with explicit precedence ([ADR-007](decisions/ADR-007-config-loader.md)):
+
+```text
+CLI flags > env (including CWD .env) > ~/.cursor-agent/config.yaml > defaults
+```
+
+At startup the CLI loads a gitignored `.env` file from the **current working directory** with `override=False` — values already exported in your shell win over the file. Pydantic settings read `CURSOR_AGENT__*` variables from the environment; `CURSOR_API_KEY` is the SDK exception (no prefix). See [.env.example](../.env.example) for placeholders.
+
+| Variable | Purpose |
+|----------|---------|
+| `CURSOR_API_KEY` | Cursor API key for SDK agent runs (required for live inference) |
+| `CURSOR_AGENT__RUNTIME__LOCAL__CWD` | Default workspace directory for local agents |
+| `CURSOR_AGENT__MEMORY_ROOT` | Directory containing `USER.md` and `MEMORY.md` |
+| `CURSOR_AGENT_SESSIONS_DB` | SQLite session store path |
+| `CURSOR_AGENT__MODEL` | Model id (default: `composer-2.5`) |
+| `CURSOR_AGENT__TOOL_PROFILE` | `coding` or `messaging` (default: `coding`) |
+
+Legacy flat names `CURSOR_AGENT_WORKSPACE` and `CURSOR_AGENT_CONFIG` are **not supported** — use `CURSOR_AGENT__RUNTIME__LOCAL__CWD` and `~/.cursor-agent/config.yaml` instead.
+
+### Workspace override
+
+Set the agent workspace without editing YAML:
+
+```bash
+export CURSOR_AGENT__RUNTIME__LOCAL__CWD="/path/to/your/project"
+```
+
+This command points session keys and SDK workspace resolution at the given directory.
+
+Or add the same key to a CWD `.env` file (see [Cursor API Key Onboarding — Optional local env file](cursor-api-key-onboarding.md#3-optional-local-env-file)).
+
+### Sessions database override
+
+```bash
+export CURSOR_AGENT_SESSIONS_DB="/path/to/sessions.db"
+```
+
+This command relocates the SQLite session store away from the default `~/.cursor-agent/sessions.db`.
+
+The default database uses SQLite **schema version 1**; opening an older file without version metadata is upgraded automatically on startup with existing session rows preserved. See [Architecture — Session SQLite baseline](architecture.md#session-sqlite-baseline-v1) for details.
+
+### Memory root override
+
+```bash
+export CURSOR_AGENT__MEMORY_ROOT="/path/to/memory"
+```
+
+This command changes where `USER.md` and `MEMORY.md` are read for memory injection.
+
+### Verify configuration locally
+
+```bash
+uv run pytest -m "not integration" -v
+```
+
+This command runs the unit test gate without requiring `CURSOR_API_KEY`.
+
+```bash
+uv run ruff check src tests && uv run mypy --strict src
+```
+
+This command matches the contributor lint and type-check gate from [AGENTS.md](../AGENTS.md).
+
 ## Humans
 
 ### Prerequisites
@@ -21,11 +86,13 @@ This command installs project dependencies into the local virtual environment.
 
 ### Configure `CURSOR_API_KEY`
 
-Do not commit real API keys. Follow [Cursor API Key Onboarding](cursor-api-key-onboarding.md) to create or copy a key, export it in your shell, or use a gitignored `.env` file from [.env.example](../.env.example).
+Do not commit real API keys. Follow [Cursor API Key Onboarding](cursor-api-key-onboarding.md) to create or copy a key, export it in your shell, or use a gitignored CWD `.env` file from [.env.example](../.env.example). For precedence and other overrides, see [Configuration](#configuration) above.
 
 ```bash
 export CURSOR_API_KEY="your-cursor-api-key"
 ```
+
+This command makes the key available to processes started from the current terminal session.
 
 ### First local use
 
@@ -41,6 +108,8 @@ Verify the project without an API key:
 uv run pytest -m "not integration" -v
 ```
 
+This command confirms the local project passes unit tests without SDK access.
+
 When you need SDK-backed behavior, set `CURSOR_API_KEY` and run integration tests as described in the API key onboarding guide.
 
 ## For AI agents
@@ -49,14 +118,15 @@ Start from [AGENTS.md](../AGENTS.md) for repository conventions, then use this t
 
 | Document | When to use | Verify command |
 |----------|-------------|----------------|
-| [docs/setup.md](setup.md) | Install, API key, gateway index, cron operator notes | `uv run pytest -m "not integration" -v` |
+| [docs/setup.md](setup.md) | Install, API key, config contract, gateway index, cron operator notes | `uv run pytest -m "not integration" -v` |
 | [docs/architecture.md](architecture.md) | System design, sessions, facade, tool profiles | — |
 | [docs/decisions/README.md](decisions/README.md) | Recorded architecture decisions (ADRs) | — |
 | [docs/cursor-api-key-onboarding.md](cursor-api-key-onboarding.md) | Create or export `CURSOR_API_KEY` | `test -n "$CURSOR_API_KEY" && echo "CURSOR_API_KEY is set"` |
 | [docs/telegram-gateway-onboarding.md](telegram-gateway-onboarding.md) | BotFather, `TELEGRAM_BOT_TOKEN`, gateway config, cron setup | `uv run cursor-agent gateway --config ~/.cursor-agent/gateway.yaml` (after config) |
 | [README.md](../README.md) | Project overview, first-run banner shape, usage examples | `uv run cursor-agent --help` |
+| [examples/README.md](../examples/README.md) | Product-facing CLI, gateway, profiles, memory, and cron examples | `uv run cursor-agent --help` |
 | [SECURITY.md](../SECURITY.md) | Messaging threat model, `messaging` profile, hook policy | `uv run pytest tests/unit/test_messaging_profile.py -v` |
-| [.env.example](../.env.example) | Environment variable names and placeholders | `grep CURSOR_API_KEY .env.example` |
+| [.env.example](../.env.example) | Canonical `CURSOR_AGENT__*` and `CURSOR_API_KEY` placeholders | `grep CURSOR_AGENT .env.example` |
 
 ## Gateway (Telegram)
 

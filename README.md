@@ -27,6 +27,7 @@ Orchestration layer only — the SDK owns the agent loop, tools, and inference. 
 | [Cursor API Key Onboarding](docs/cursor-api-key-onboarding.md) | Local setup guide for creating and exporting `CURSOR_API_KEY` |
 | [Telegram Gateway Onboarding](docs/telegram-gateway-onboarding.md) | Local setup guide for BotFather, `TELEGRAM_BOT_TOKEN`, allowlist, and gateway testing |
 | [.env.example](.env.example) | Environment variable reference |
+| [examples/README.md](examples/README.md) | Product-facing CLI, gateway, profiles, memory, and cron examples |
 
 ## Prerequisites
 
@@ -43,7 +44,13 @@ export CURSOR_API_KEY="your-cursor-api-key"
 uv run cursor-agent
 ```
 
-For a local `.env` file, copy [.env.example](.env.example) to `.env`, set `CURSOR_API_KEY`, and keep `.env` out of git. Full key setup: [Cursor API Key Onboarding](docs/cursor-api-key-onboarding.md).
+The first command installs project dependencies into the local virtual environment.
+
+The second command exports your Cursor API key for the current shell session.
+
+The third command starts the interactive REPL with the default `coding` profile.
+
+Alternatively, copy [.env.example](.env.example) to `.env` in the project directory, set `CURSOR_API_KEY`, and run `uv run cursor-agent` — the CLI loads CWD `.env` at startup without overriding variables already exported in your shell. Full key setup: [Cursor API Key Onboarding](docs/cursor-api-key-onboarding.md). Configuration precedence and overrides: [Setup guide](docs/setup.md#configuration).
 
 ## First run
 
@@ -79,6 +86,8 @@ Run the unit test gate without an API key:
 uv run pytest -m "not integration" -v
 ```
 
+This command runs the local test suite and skips integration tests that require `CURSOR_API_KEY`.
+
 ## Usage
 
 ```bash
@@ -90,11 +99,11 @@ uv run cursor-agent gateway                   # gateway using ~/.cursor-agent/ga
 uv run cursor-agent gateway --config /path/to/gateway.yaml
 ```
 
-Runtime config and session data live under `~/.cursor-agent/` (see [.env.example](.env.example) for overrides).
+Runtime config and session data live under `~/.cursor-agent/`. Override workspace, sessions DB, memory root, model, or tool profile via environment variables or YAML — see [Setup guide — Configuration](docs/setup.md#configuration) and [.env.example](.env.example).
 
 ## Memory
 
-Memory v1 reads `~/.cursor-agent/USER.md` and `~/.cursor-agent/MEMORY.md` by default. Override the directory with `memory_root` in `~/.cursor-agent/config.yaml` or `CURSOR_AGENT__MEMORY_ROOT` (see [.env.example](.env.example)). On the first user turn for a session, `cursor-agent` injects up to 8 KB before the message: up to 4 KB from `USER.md`, then the remaining budget from `MEMORY.md`. Oversized sections keep the end of the file.
+Memory v1 reads `~/.cursor-agent/USER.md` and `~/.cursor-agent/MEMORY.md` by default. Override the directory with `memory_root` in `~/.cursor-agent/config.yaml` or `CURSOR_AGENT__MEMORY_ROOT` (see [Setup guide — Configuration](docs/setup.md#configuration)). On the first user turn for a session, `cursor-agent` injects up to 8 KB before the message: up to 4 KB from `USER.md`, then the remaining budget from `MEMORY.md`. Oversized sections keep the end of the file.
 
 After that first turn, memory is frozen for the session: edits or new files on disk are not picked up until `/new` starts a fresh session row (or `/resume` on a row that has not yet injected memory). `/memory show` always reads from disk at command time.
 
@@ -104,7 +113,7 @@ Use `/memory show` in the CLI to inspect the exact effective payload, quotas, by
 
 The gateway runs **cursor-agent** as a long-running bot process with `tool_profile: messaging` — read-only workspace, deny hooks, empty MCP, sandbox network off. See [SECURITY.md](SECURITY.md) and the step-by-step [Telegram Gateway Onboarding](docs/telegram-gateway-onboarding.md).
 
-Example config: [examples/gateway.yaml.example](examples/gateway.yaml.example). Set `TELEGRAM_BOT_TOKEN` in the environment; do not commit real tokens.
+Example config: [examples/gateway.yaml.example](examples/gateway.yaml.example). More examples: [examples/README.md](examples/README.md). Set `TELEGRAM_BOT_TOKEN` in the environment; do not commit real tokens.
 
 ## Cron Jobs
 
@@ -114,7 +123,9 @@ Scheduled jobs are configured in `~/.cursor-agent/cron/jobs.yaml` and run inside
 
 The default **`coding`** profile runs the local SDK with **auto-approve** — tools execute without interactive prompts. That posture is a **developer convenience**, not a security boundary for public gateways or untrusted input. Optional dev hooks do not make `coding` gateway-safe.
 
-The **`messaging`** profile is read-only over the workspace: it auto-deploys deny hooks to `.cursor/hooks/messaging/`, passes `mcp_servers: {}`, and enables `sandbox_options.enabled: true` (network off). Use `cursor-agent --profile messaging` to validate hooks locally before gateway work.
+On **create** and **resume**, `coding` omits `mcp_servers` so your Cursor **project** (`.cursor/mcp.json`) and **user** MCP settings stay in effect. `messaging` always passes an empty `mcp_servers` map and enables sandbox (network off) on both paths.
+
+The **`messaging`** profile is read-only over the workspace: it auto-deploys deny hooks to `.cursor/hooks/messaging/` before the first agent run. Use `cursor-agent --profile messaging` to validate hooks locally before gateway work.
 
 For bots and gateways, use `tool_profile: messaging` as specified in [SECURITY.md](SECURITY.md). Do not rely on `coding` + auto-approve outside a trusted local dev session.
 

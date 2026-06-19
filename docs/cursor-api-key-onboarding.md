@@ -2,6 +2,8 @@
 
 `cursor-agent` needs a Cursor API key to create and run SDK agents. Keep the key local and never commit it.
 
+For workspace, sessions DB, memory root, and other overrides, see [Setup guide — Configuration](setup.md#configuration).
+
 ## 1. Create Or Find Your Cursor API Key
 
 1. Open <https://cursor.com/dashboard/api>.
@@ -29,13 +31,15 @@ This command verifies that the environment variable is non-empty without exposin
 
 ## 3. Optional Local Env File
 
-For local convenience, you may keep secrets in a gitignored `.env` file:
+For local convenience, keep secrets in a gitignored `.env` file in the **project directory** (current working directory when you run `cursor-agent`):
 
 ```bash
 cp .env.example .env
 ```
 
 This command creates a local environment file from placeholders.
+
+The CLI loads CWD `.env` at startup with `override=False` — if you already `export` a variable in your shell, that value wins over the file. This applies to `CURSOR_API_KEY` and all `CURSOR_AGENT__*` settings documented in [.env.example](../.env.example).
 
 Then edit `.env` locally and set:
 
