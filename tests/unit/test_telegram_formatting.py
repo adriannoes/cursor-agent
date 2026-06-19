@@ -142,7 +142,7 @@ def test_memory_heavy_assistant_reply_chunks_valid_telegram_html() -> None:
         _assert_telegram_html_chunk_valid(chunk)
     combined = "".join(chunks)
     assert "<b>Session context</b>" in combined
-    assert "<pre><code>" in combined
+    assert "<b>Toml:</b> <code>" in combined
     assert '<a href="https://example.com/prefs/0">guide</a>' in combined
     assert "• <b>Preference 0</b>" in combined
     assert "- Prefer <code>uv run pytest</code>" in combined
@@ -179,11 +179,45 @@ def test_render_inline_code() -> None:
 
 
 def test_render_fenced_code_block() -> None:
-    """Fenced code blocks render as <pre><code> with escaped content."""
+    """Fenced code blocks with a language tag render as bold label + inline code."""
     source = "```python\nprint('hi')\n```"
     assert render_cursor_markdown_for_telegram(source) == (
-        "<pre><code>print('hi')\n</code></pre>"
+        "<b>Python:</b> <code>print('hi')</code>"
     )
+
+
+def test_render_fenced_shell_block_uses_bold_label_and_inline_code() -> None:
+    """Shell fences render as bold label + inline code (no <pre> pill UI)."""
+    source = "```shell\necho ok\n```"
+    rendered = render_cursor_markdown_for_telegram(source)
+    assert rendered == "<b>Shell:</b> <code>echo ok</code>"
+    assert "<pre>" not in rendered
+
+
+def test_render_fenced_code_block_without_language_uses_inline_code_only() -> None:
+    """Bare fences without a language tag render as inline <code> only."""
+    source = "```\necho ok\n```"
+    assert render_cursor_markdown_for_telegram(source) == "<code>echo ok</code>"
+
+
+def test_render_adjacent_fenced_blocks_without_extra_blank_lines() -> None:
+    """Blank lines around fences must not stack into large Telegram gaps."""
+    source = (
+        "**Shell snippets**\n\n"
+        "```shell\n"
+        "echo ok\n"
+        "```\n\n"
+        "```bash\n"
+        "ls -la\n"
+        "```\n\n"
+        "**Python snippet**"
+    )
+    rendered = render_cursor_markdown_for_telegram(source)
+    assert "\n\n\n" not in rendered
+    assert "<b>Shell:</b> <code>echo ok</code>" in rendered
+    assert "<b>Bash:</b> <code>ls -la</code>" in rendered
+    assert rendered.index("<b>Shell snippets</b>") < rendered.index("<b>Shell:</b>")
+    assert rendered.index("<b>Bash:</b>") < rendered.index("<b>Python snippet</b>")
 
 
 def test_render_empty_text_returns_empty_string() -> None:
@@ -192,15 +226,15 @@ def test_render_empty_text_returns_empty_string() -> None:
 
 
 def test_render_prose_before_and_after_fenced_code() -> None:
-    """Prose around a fenced code block renders alongside the <pre><code> block."""
+    """Prose around a fenced code block renders alongside bold label + inline code."""
     source = "Run **this**:\n\n```sh\nls -la\n```\n\nThen check `output`."
     rendered = render_cursor_markdown_for_telegram(source)
 
     assert "<b>this</b>" in rendered
-    assert "<pre><code>ls -la\n</code></pre>" in rendered
+    assert "<b>Sh:</b> <code>ls -la</code>" in rendered
     assert "<code>output</code>" in rendered
-    assert rendered.index("<b>this</b>") < rendered.index("<pre><code>")
-    assert rendered.index("<pre><code>") < rendered.index("<code>output</code>")
+    assert rendered.index("<b>this</b>") < rendered.index("<b>Sh:</b>")
+    assert rendered.index("<b>Sh:</b>") < rendered.index("<code>output</code>")
 
 
 def test_render_heading_as_bold() -> None:
@@ -291,10 +325,10 @@ def test_split_telegram_html_fragments_preserves_tag_balance_near_bold() -> None
         _assert_balanced_supported_tags(fragment)
 
 
-def test_split_telegram_html_fragments_preserves_pre_code_blocks() -> None:
-    """Long <pre><code> blocks split without leaving unbalanced tags."""
+def test_split_telegram_html_fragments_preserves_fenced_inline_code_blocks() -> None:
+    """Long bold-label inline code blocks split without leaving unbalanced tags."""
     code_body = "line\n" * 900
-    html = f"<pre><code>{code_body}</code></pre>"
+    html = f"<b>Shell:</b> <code>{code_body}</code>"
     fragments = split_telegram_html_fragments(html)
     assert len(fragments) >= 2
     for fragment in fragments:

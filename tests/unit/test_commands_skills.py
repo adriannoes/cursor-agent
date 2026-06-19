@@ -1,4 +1,4 @@
-"""Unit tests for CLI /skills command (PRD-009 Wave 2, Task 4.1)."""
+"""Unit tests for CLI /skills command (PRD-009)."""
 
 from __future__ import annotations
 

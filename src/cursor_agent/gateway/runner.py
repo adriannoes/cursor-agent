@@ -5,13 +5,20 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TypeAlias
 
 from cursor_agent.cli.startup import bootstrap_messaging_hooks, create_store
 from cursor_agent.config.loader import CursorAgentConfig
+from cursor_agent.cron.delivery import (
+    build_cron_telegram_chunk_sender,
+    deliver_cron_result,
+)
+from cursor_agent.cron.executor import run_cron_job
+from cursor_agent.cron.models import CronJob
+from cursor_agent.cron.scheduler import CronScheduler
 from cursor_agent.errors import ConfigError
 from cursor_agent.gateway.config import (
     GatewayConfig,
@@ -74,6 +81,44 @@ def _validate_platform_adapters(
         )
 
 
+def _build_gateway_cron_executor(
+    *,
+    pool: SessionAgentPool,
+    store: SessionStore,
+    facade: SdkFacade,
+    config: CursorAgentConfig,
+    adapters: Sequence[PlatformAdapter],
+    logger: logging.Logger | None = None,
+) -> Callable[[CronJob], Awaitable[None]]:
+    """Return a scheduler callback that runs jobs through the shared gateway pool."""
+    effective_logger = logger if logger is not None else _MODULE_LOGGER
+    chunk_sender = build_cron_telegram_chunk_sender(adapters)
+
+    async def _execute_cron_job(job: CronJob) -> None:
+        outcome = await run_cron_job(
+            job,
+            pool=pool,
+            store=store,
+            facade=facade,
+            config=config,
+        )
+        # Metadata only: never log prompt or assistant body (PRD-009 boundary).
+        effective_logger.info(
+            "cron_job_outcome job_id=%s run_id=%s status=%s",
+            outcome.job_id,
+            outcome.run_id,
+            outcome.status.value,
+        )
+        await deliver_cron_result(
+            job,
+            outcome,
+            chunk_sender=chunk_sender,
+            logger=effective_logger,
+        )
+
+    return _execute_cron_job
+
+
 async def _start_adapters(
     ctx: GatewayContext,
     adapters: Sequence[PlatformAdapter],
@@ -120,6 +165,7 @@ async def gateway_runtime(
     shutdown_timeout_seconds: float | None = None,
     shutdown_complete: asyncio.Event | None = None,
     register_signals: bool = True,
+    cron_scheduler: CronScheduler | None = None,
 ) -> AsyncIterator[GatewayContext]:
     """Bootstrap gateway startup without opening the interactive REPL."""
     active_logger = logger if logger is not None else _MODULE_LOGGER
@@ -163,6 +209,20 @@ async def gateway_runtime(
             platform_adapters,
             active_logger,
         )
+        active_cron_scheduler = cron_scheduler
+        if active_cron_scheduler is None:
+            active_cron_scheduler = CronScheduler(
+                cursor_config,
+                executor=_build_gateway_cron_executor(
+                    pool=pool,
+                    store=store,
+                    facade=active_facade,
+                    config=cursor_config,
+                    adapters=platform_adapters,
+                    logger=active_logger,
+                ),
+                logger=active_logger,
+            )
         ctx = GatewayContext(
             gateway_config=loaded_gateway_config,
             config=cursor_config,
@@ -171,10 +231,13 @@ async def gateway_runtime(
             facade=active_facade,
             adapters=platform_adapters,
             shutdown_coordinator=coordinator,
+            cron_scheduler=active_cron_scheduler,
             _logger=active_logger,
         )
+        active_cron_scheduler.set_shutting_down_check(lambda: ctx.shutting_down)
         try:
             await _start_adapters(ctx, platform_adapters)
+            await active_cron_scheduler.start()
             if register_signals:
                 register_shutdown_signals(coordinator, ctx)
             yield ctx

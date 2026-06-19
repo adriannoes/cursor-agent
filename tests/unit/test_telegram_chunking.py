@@ -1,4 +1,4 @@
-"""Unit tests for Telegram session-key and reply chunking helpers (PRD-007 Wave 2B)."""
+"""Unit tests for Telegram session-key and reply chunking helpers (PRD-007)."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def _expected_workspace_hash(workspace: Path | str) -> str:
     return hashlib.sha256(absolute.encode()).hexdigest()[:8]
 
 
-# --- Session key helpers (sub-task 2.1) ---
+# --- Session key helpers ---
 
 
 def test_telegram_workspace_hash_is_stable_for_absolute_path(tmp_path: Path) -> None:
@@ -73,7 +73,7 @@ def test_telegram_session_key_format_str_chat_id(tmp_path: Path) -> None:
     )
 
 
-# --- HTML escape (sub-task 2.3) ---
+# --- HTML escape ---
 
 
 @pytest.mark.parametrize(
@@ -91,7 +91,7 @@ def test_escape_telegram_html_escapes_markup(raw: str, expected: str) -> None:
     assert escape_telegram_html(raw) == expected
 
 
-# --- Chunking (sub-task 2.3) ---
+# --- Chunking ---
 
 
 def test_split_telegram_html_reply_empty_text_returns_no_chunks() -> None:

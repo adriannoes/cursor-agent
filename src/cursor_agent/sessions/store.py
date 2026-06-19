@@ -186,6 +186,45 @@ class SessionStore:
             return None
         return _row_to_session_record(row)
 
+    async def prune_cron_sessions(self, job_id: str, *, keep_last: int) -> list[str]:
+        """Delete cron rows for ``job_id`` beyond the most recent ``keep_last``.
+
+        Cron sessions use the per-run key ``cron:{job_id}:{run_id}`` and are never
+        resumed, so without pruning they accumulate without bound. Returns the
+        ``agent_id`` of every pruned row so the caller can cancel the matching
+        SDK agents. (review: unbounded session/agent accumulation)
+
+        Defined before ``list`` so the return annotation resolves to builtin
+        ``list`` rather than this class's ``list`` method.
+
+        Example:
+            >>> pruned = await store.prune_cron_sessions("daily-report", keep_last=20)
+        """
+        if keep_last < 0:
+            raise ValueError(
+                f"invalid keep_last: received {keep_last!r}, "
+                "expected non-negative integer"
+            )
+        prefix = f"cron:{job_id}:"
+        pruned_agent_ids: list[str] = []
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT id, session_key, agent_id FROM sessions "
+                "WHERE session_key LIKE 'cron:%' "
+                "ORDER BY created_at DESC, id DESC"
+            )
+            rows = await cursor.fetchall()
+            matching = [
+                row for row in rows if str(row["session_key"]).startswith(prefix)
+            ]
+            for row in matching[keep_last:]:
+                await db.execute("DELETE FROM sessions WHERE id = ?", (str(row["id"]),))
+                pruned_agent_ids.append(str(row["agent_id"]))
+            if pruned_agent_ids:
+                await db.commit()
+        return pruned_agent_ids
+
     async def list(self, session_key: str) -> list[SessionRecord]:
         """List sessions for ``session_key`` ordered by ``updated_at`` descending."""
         sql = f"""
