@@ -219,7 +219,9 @@ def test_cron_remove_unknown_id_exits_error(cron_cli_env: Path) -> None:
 
 def test_cron_list_corrupt_jobs_yaml_exits_error(cron_cli_env: Path) -> None:
     """A malformed jobs.yaml makes cron list exit non-zero without a traceback."""
-    (cron_cli_env / "jobs.yaml").write_text("jobs:\n  - id: [unclosed\n", encoding="utf-8")
+    (cron_cli_env / "jobs.yaml").write_text(
+        "jobs:\n  - id: [unclosed\n", encoding="utf-8"
+    )
 
     result = CliRunner().invoke(app, ["cron", "list"])
 

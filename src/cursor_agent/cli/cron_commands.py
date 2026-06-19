@@ -97,9 +97,7 @@ def cron_list() -> None:
 
 @cron_app.command("show")
 def cron_show(
-    job_id: Annotated[
-        str, typer.Argument(help="Case-sensitive cron job id to show.")
-    ],
+    job_id: Annotated[str, typer.Argument(help="Case-sensitive cron job id to show.")],
 ) -> None:
     """Show the full configuration for a single cron job."""
     try:

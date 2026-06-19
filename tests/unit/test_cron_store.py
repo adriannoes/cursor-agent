@@ -78,9 +78,7 @@ async def test_concurrent_adds_do_not_lose_updates(tmp_path: Path) -> None:
     root = _cron_root(tmp_path)
 
     async def _add(job_id: str) -> None:
-        await asyncio.to_thread(
-            add_cron_job_atomic, config, root, _job(job_id)
-        )
+        await asyncio.to_thread(add_cron_job_atomic, config, root, _job(job_id))
 
     await asyncio.gather(_add("job-a"), _add("job-b"))
 

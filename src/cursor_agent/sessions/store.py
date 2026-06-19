@@ -219,9 +219,7 @@ class SessionStore:
                 row for row in rows if str(row["session_key"]).startswith(prefix)
             ]
             for row in matching[keep_last:]:
-                await db.execute(
-                    "DELETE FROM sessions WHERE id = ?", (str(row["id"]),)
-                )
+                await db.execute("DELETE FROM sessions WHERE id = ?", (str(row["id"]),))
                 pruned_agent_ids.append(str(row["agent_id"]))
             if pruned_agent_ids:
                 await db.commit()
