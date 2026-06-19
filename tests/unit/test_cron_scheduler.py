@@ -410,6 +410,24 @@ async def test_mtime_watcher_reloads_after_disk_write(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_start_tears_down_scheduler_when_initial_load_fails(
+    tmp_path: Path,
+) -> None:
+    """An invalid jobs.yaml at startup leaves no running APScheduler behind."""
+    from cursor_agent.errors import ConfigError
+
+    cron_root = _cron_root(tmp_path)
+    _write_jobs_yaml(cron_root, "jobs:\n  - id: broken\n    schedule: not-a-cron\n")
+    scheduler, _root, _executor = _build_scheduler(tmp_path, cron_root=cron_root)
+
+    with pytest.raises(ConfigError):
+        await scheduler.start()
+
+    assert scheduler._scheduler.running is False
+    assert scheduler.list_jobs_with_next_run() == []
+
+
+@pytest.mark.asyncio
 async def test_shutdown_stops_mtime_watcher(tmp_path: Path) -> None:
     """Shutdown cancels the mtime watcher without leaving background tasks."""
     poll_trigger = asyncio.Event()
