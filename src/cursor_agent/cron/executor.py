@@ -21,6 +21,10 @@ _MODULE_LOGGER = logging.getLogger(__name__)
 
 _CRON_SESSION_PREFIX = "cron:"
 
+# Per-job cron session rows are never resumed; keep a bounded history per job so
+# the sessions table does not grow without limit. (review: unbounded accumulation)
+CRON_SESSION_RETENTION_PER_JOB = 20
+
 
 class CronRunStatus(str, Enum):
     """Terminal status for a cron job execution attempt."""
@@ -141,6 +145,7 @@ async def run_cron_job(
     config: CursorAgentConfig,
     run_id: str | None = None,
     blocking: bool = True,
+    keep_sessions: int = CRON_SESSION_RETENTION_PER_JOB,
 ) -> CronJobRunOutcome:
     """Execute a cron job through the shared pool with an isolated session row.
 
@@ -148,9 +153,12 @@ async def run_cron_job(
     ``SessionAgentPool.send()``, and returns a channel-neutral outcome for the
     delivery layer. Prompt bodies and assistant output are never logged here.
 
-    If the run task is cancelled (for example a gateway shutdown drain timeout),
-    the per-run SDK agent is cancelled before the cancellation propagates so it
-    does not keep running after the gateway stops. (review: Should Fix)
+    After the run, cron session rows for the job beyond the most recent
+    ``keep_sessions`` are pruned and their SDK agents cancelled, bounding
+    accumulation. If the run task is cancelled (for example a gateway shutdown
+    drain timeout), the per-run SDK agent is cancelled before the cancellation
+    propagates so it does not keep running after the gateway stops.
+    (review: Should Fix)
     """
     effective_run_id = run_id if run_id is not None else uuid.uuid4().hex
     try:
@@ -177,7 +185,7 @@ async def run_cron_job(
             error_message=str(exc),
         )
     try:
-        return await _send_cron_prompt(
+        outcome = await _send_cron_prompt(
             job,
             row=row,
             pool=pool,
@@ -187,6 +195,27 @@ async def run_cron_job(
     except asyncio.CancelledError:
         await _cancel_agent_quietly(facade, row.agent_id)
         raise
+    await _prune_cron_sessions(store, facade, job.id, keep_last=keep_sessions)
+    return outcome
+
+
+async def _prune_cron_sessions(
+    store: SessionStore,
+    facade: SdkFacade,
+    job_id: str,
+    *,
+    keep_last: int,
+) -> None:
+    """Prune stale cron session rows for a job and cancel their SDK agents."""
+    try:
+        pruned_agent_ids = await store.prune_cron_sessions(job_id, keep_last=keep_last)
+    except Exception:
+        _MODULE_LOGGER.warning(
+            "cron session prune failed: job_id=%s", job_id, exc_info=True
+        )
+        return
+    for agent_id in pruned_agent_ids:
+        await _cancel_agent_quietly(facade, agent_id)
 
 
 async def _send_cron_prompt(

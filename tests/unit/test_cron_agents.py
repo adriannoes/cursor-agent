@@ -378,6 +378,34 @@ async def test_run_cron_job_returns_error_when_session_setup_fails(
     assert len(facade.cancelled_agents) == 1
 
 
+@pytest.mark.asyncio
+async def test_run_cron_job_prunes_old_sessions_beyond_retention(
+    cron_job: CronJob,
+    store: SessionStore,
+    config: object,
+) -> None:
+    """Repeated runs keep at most ``keep_sessions`` cron rows for the job."""
+    facade = CancelRecordingFacade(default_reply="done")
+    pool = SessionAgentPool(store=store, facade=facade, config=config)  # type: ignore[arg-type]
+
+    for index in range(5):
+        await run_cron_job(
+            cron_job,
+            pool=pool,
+            store=store,
+            facade=facade,
+            config=config,  # type: ignore[arg-type]
+            run_id=f"run-{index}",
+            keep_sessions=2,
+        )
+
+    # Three oldest per-run agents were cancelled during pruning across the runs.
+    assert len(facade.cancelled_agents) == 3
+    # Exactly the two most recent rows survived (keep_sessions=2).
+    remaining = await store.prune_cron_sessions(cron_job.id, keep_last=0)
+    assert len(remaining) == 2
+
+
 @pytest.mark.parametrize(
     ("relative_path",),
     [
