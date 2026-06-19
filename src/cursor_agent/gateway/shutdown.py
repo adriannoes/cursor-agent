@@ -45,6 +45,8 @@ class GatewayShutdownCoordinator:
                 return GATEWAY_SHUTDOWN_EXIT_CODE
 
             ctx.shutting_down = True
+            if ctx.cron_scheduler is not None:
+                ctx.cron_scheduler.pause_scheduling()
             await stop_adapters(ctx.adapters)
 
             for agent_id in list(ctx._active_agent_ids):
@@ -58,6 +60,7 @@ class GatewayShutdownCoordinator:
                     )
 
             await self._await_or_cancel_dispatch_tasks(ctx)
+            await self._shutdown_cron_scheduler(ctx)
 
             try:
                 await ctx.facade.close()
@@ -93,6 +96,11 @@ class GatewayShutdownCoordinator:
         for task in still_pending:
             task.cancel()
         await asyncio.gather(*still_pending, return_exceptions=True)
+
+    async def _shutdown_cron_scheduler(self, ctx: GatewayContext) -> None:
+        if ctx.cron_scheduler is None:
+            return
+        await ctx.cron_scheduler.shutdown(timeout=self.shutdown_timeout_seconds)
 
 
 def register_shutdown_signals(

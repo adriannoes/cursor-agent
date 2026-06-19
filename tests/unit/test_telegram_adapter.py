@@ -466,6 +466,35 @@ async def test_telegram_inbound_ignores_topic_messages(tmp_path: object) -> None
 
 
 @pytest.mark.asyncio
+async def test_telegram_send_html_chunk_uses_html_parse_mode(
+    tmp_path: object,
+) -> None:
+    """Cron delivery sends pre-rendered HTML chunks with parse_mode=HTML."""
+    adapter, fake_bot, _ = _make_adapter(tmp_path)
+
+    await adapter.send_html_chunk("444555666", "<b>preformatted</b>")
+
+    assert len(fake_bot.send_message_calls) == 1
+    assert fake_bot.send_message_calls[0]["chat_id"] == 444555666
+    assert fake_bot.send_message_calls[0]["parse_mode"] == "HTML"
+    assert fake_bot.send_message_calls[0]["text"] == "<b>preformatted</b>"
+
+
+@pytest.mark.asyncio
+async def test_telegram_send_html_chunk_after_stop_raises_delivery_error(
+    tmp_path: object,
+) -> None:
+    """Cron delivery after adapter stop reports failure to the delivery layer."""
+    adapter, fake_bot, _ = _make_adapter(tmp_path)
+    await adapter.stop()
+
+    with pytest.raises(RuntimeError, match="stopped"):
+        await adapter.send_html_chunk("444555666", "<b>late</b>")
+
+    assert fake_bot.send_message_calls == []
+
+
+@pytest.mark.asyncio
 async def test_telegram_send_message_delivers_html_chunks_in_order(
     tmp_path: object,
 ) -> None:

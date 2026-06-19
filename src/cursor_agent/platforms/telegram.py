@@ -99,6 +99,18 @@ def _default_dispatcher_factory() -> _DispatcherProtocol:
     return cast(_DispatcherProtocol, Dispatcher())
 
 
+def _parse_delivery_chat_id(chat_id: str) -> int | str:
+    """Parse cron-configured Telegram chat id for bot.send_message."""
+    stripped = chat_id.strip()
+    if not stripped:
+        raise ValueError(
+            f"invalid telegram chat_id: received {chat_id!r}, expected non-empty string"
+        )
+    if stripped.lstrip("-").isdigit():
+        return int(stripped)
+    return stripped
+
+
 def _parse_telegram_chat_id(session_key: str) -> int:
     """Extract Telegram chat ID from an adapter-owned session key."""
     match = _SESSION_KEY_PATTERN.match(session_key)
@@ -255,6 +267,27 @@ class TelegramAdapter:
         self._dispatcher = None
         self._on_inbound = None
         self._logger.info("telegram_adapter_stopped platform=telegram")
+
+    async def send_html_chunk(self, chat_id: str, html: str) -> None:
+        """Deliver one pre-rendered HTML chunk for cron post-run delivery."""
+        if not html or not html.strip():
+            return
+        bot = self._bot
+        if bot is None:
+            if self._stopped:
+                raise RuntimeError(
+                    "telegram cron delivery failed: adapter stopped before HTML chunk "
+                    f"delivery for chat_id={chat_id!r}"
+                )
+            bot = self._bot_factory(self._platform_config.bot_token)
+            self._bot = bot
+        assert bot is not None
+        parsed_chat_id = _parse_delivery_chat_id(chat_id)
+        await bot.send_message(
+            chat_id=parsed_chat_id,
+            text=html,
+            parse_mode="HTML",
+        )
 
     async def send_message(self, outbound: OutboundMessage) -> None:
         """Deliver escaped HTML reply chunks to the Telegram chat in session_key."""
