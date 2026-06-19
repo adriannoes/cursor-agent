@@ -1,10 +1,10 @@
-# cursor-agent
+# Cursor Agent
 
-> **Humans:** quick start below. **Agents:** start at **[AGENTS.md](AGENTS.md)**.
+> **Humans:** quick start below. **Contributors and agents:** start at **[AGENTS.md](AGENTS.md)**.
 
-Clean-room agent inspired by [Hermes Agent](https://github.com/NousResearch/hermes-agent) behavior and [OpenClaw](https://github.com/openclaw/openclaw) gateway patterns — reference docs and codebases may be studied for patterns, with **zero copied code** (not a fork). Powered by the [Cursor Python SDK](https://cursor.com/docs/sdk/python) and **Composer 2.5**.
+Clean-room agent inspired by [Hermes Agent](https://github.com/NousResearch/hermes-agent) behavior and [OpenClaw](https://github.com/openclaw/openclaw) gateway patterns. Powered by the [Cursor Python SDK](https://cursor.com/docs/sdk/python) and **Composer 2.5**.
 
-Orchestration layer only — the SDK owns the agent loop, tools, and inference. **cursor-agent** adds sessions, configuration, CLI UX, concurrency, and security policy (tool profiles, hooks, allowlists).
+Orchestration layer only — the SDK owns the agent loop, tools, and inference. **Cursor Agent** adds sessions, configuration, CLI UX, concurrency and security policy (tool profiles, hooks, allowlists).
 
 ## What it provides
 
@@ -19,7 +19,10 @@ Orchestration layer only — the SDK owns the agent loop, tools, and inference. 
 
 | Document | Description |
 |----------|-------------|
-| [AGENTS.md](AGENTS.md) | **Agent entry point** — repo map, conventions, verification |
+| [Setup guide](docs/setup.md) | Install, API key, gateway index for humans and AI agents |
+| [Architecture](docs/architecture.md) | System design — sessions, facade, concurrency, profiles |
+| [Architecture decisions](docs/decisions/README.md) | Curated ADR index for contributors |
+| [AGENTS.md](AGENTS.md) | **Agent entry point** — conventions, verification, tool profiles |
 | [SECURITY.md](SECURITY.md) | Messaging threat model, hooks, and acceptance probes |
 | [Cursor API Key Onboarding](docs/cursor-api-key-onboarding.md) | Local setup guide for creating and exporting `CURSOR_API_KEY` |
 | [Telegram Gateway Onboarding](docs/telegram-gateway-onboarding.md) | Local setup guide for BotFather, `TELEGRAM_BOT_TOKEN`, allowlist, and gateway testing |
@@ -41,6 +44,34 @@ uv run cursor-agent
 ```
 
 For a local `.env` file, copy [.env.example](.env.example) to `.env`, set `CURSOR_API_KEY`, and keep `.env` out of git. Full key setup: [Cursor API Key Onboarding](docs/cursor-api-key-onboarding.md).
+
+## First run
+
+On your first interactive launch (`uv run cursor-agent`), the CLI prints a welcome banner before the REPL prompt. The banner lists only real local commands — not gateway, cron, or Telegram shortcuts.
+
+```text
+==========================================================
+                     >_  CURSOR AGENT
+                   powered by Composer
+
+   You bring the ideas. We handle the repetitive parts.
+
+     ✓ Installation complete — you're ready to build.
+
+Get started:
+  - describe what you want, in plain language
+  - /help            list commands
+  - /new             start a fresh session
+  - /skills          list available workspace skills
+  - sessions list    see past sessions
+
+  Setup & docs: docs/setup.md
+==========================================================
+```
+
+On later launches the banner is shorter (logo, tagline, and a ready line). Suppress it with `--no-banner`, or when stdout is not a TTY or `CI=1` is set.
+
+Before the first session, export `CURSOR_API_KEY` — see [Setup guide](docs/setup.md) and [Cursor API Key Onboarding](docs/cursor-api-key-onboarding.md). For Telegram gateway setup, see [Telegram Gateway Onboarding](docs/telegram-gateway-onboarding.md).
 
 Run the unit test gate without an API key:
 
@@ -79,12 +110,6 @@ Example config: [examples/gateway.yaml.example](examples/gateway.yaml.example). 
 
 Scheduled jobs are configured in `~/.cursor-agent/cron/jobs.yaml` and run inside `cursor-agent gateway`. Use `cursor-agent cron list|add|remove` to manage them without hand-editing YAML. Job prompts are capped at 64 KiB, schedules use UTC by default, and jobs with `delivery.telegram.chat_id` deliver formatted output through the Telegram gateway. See [Telegram Gateway Onboarding](docs/telegram-gateway-onboarding.md#9-optional-scheduled-cron-jobs) for the full setup and demo flow.
 
-## Development hooks (optional)
-
-For local work with `tool_profile: coding`, you may add an optional `.cursor/hooks.json` in your workspace to moderate tool behavior (for example, shell gates). **cursor-agent does not install messaging deny hooks for `coding`** — any dev hooks are a documented developer convenience only. See the [Cursor Hooks](https://cursor.com/docs/hooks) schema and wire hook scripts under `.cursor/hooks/` as needed.
-
-For `tool_profile: messaging`, deny hooks are **auto-deployed** on CLI startup to `.cursor/hooks.json` and `.cursor/hooks/messaging/*.sh` in the active workspace (source versioned under `hooks/messaging/` in the repo). Sandbox and MCP policy are defined in [SECURITY.md](SECURITY.md).
-
 ## Auto-approve risk (`coding` vs `messaging`)
 
 The default **`coding`** profile runs the local SDK with **auto-approve** — tools execute without interactive prompts. That posture is a **developer convenience**, not a security boundary for public gateways or untrusted input. Optional dev hooks do not make `coding` gateway-safe.
@@ -92,6 +117,20 @@ The default **`coding`** profile runs the local SDK with **auto-approve** — to
 The **`messaging`** profile is read-only over the workspace: it auto-deploys deny hooks to `.cursor/hooks/messaging/`, passes `mcp_servers: {}`, and enables `sandbox_options.enabled: true` (network off). Use `cursor-agent --profile messaging` to validate hooks locally before gateway work.
 
 For bots and gateways, use `tool_profile: messaging` as specified in [SECURITY.md](SECURITY.md). Do not rely on `coding` + auto-approve outside a trusted local dev session.
+
+## What's next
+
+**v1.0** ships the first-run welcome banner, one-time getting-started hints, and a [setup docs index](docs/setup.md). Post-1.0 roadmap:
+
+- Interactive `cursor-agent setup` wizard for API keys and local configuration.
+- Discord and Slack gateway onboarding at the same bar as the Telegram guides.
+- `full` tool profile with MCP-backed web search (GitHub + Brave Search).
+- Terminal output fallback when the locale cannot render Unicode symbols (for example, replacing checkmarks with ASCII).
+- Session search, gateway queueing, and a Textual-based TUI — promoted when demand justifies scope.
+
+## Contributing
+
+Bug reports, feature ideas, and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for issue templates and the local verification gate.
 
 ## License
 

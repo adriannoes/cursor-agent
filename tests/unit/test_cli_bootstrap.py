@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from cursor_agent.cli.app import run_default
 from cursor_agent.cli.startup import (
     create_store,
     repl_runtime,
+    resolve_sessions_db_path,
     session_key_for,
 )
 from cursor_agent.config.loader import CursorAgentConfig, load_config
@@ -41,6 +44,38 @@ def test_create_store_uses_override_path(
     """create_store honors store_path override."""
     db_path = tmp_path / "custom.db"
     store = create_store(config, store_path=db_path)
+    assert store._db_path == db_path
+
+
+def test_resolve_sessions_db_path_uses_default_when_env_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default sessions DB path is used when CURSOR_AGENT_SESSIONS_DB is unset."""
+    monkeypatch.delenv("CURSOR_AGENT_SESSIONS_DB", raising=False)
+    from cursor_agent.cli.startup import DEFAULT_DB_PATH
+
+    assert resolve_sessions_db_path() == DEFAULT_DB_PATH
+
+
+def test_resolve_sessions_db_path_honors_env_override(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """CURSOR_AGENT_SESSIONS_DB selects the SQLite session store path."""
+    db_path = tmp_path / "custom-sessions.db"
+    monkeypatch.setenv("CURSOR_AGENT_SESSIONS_DB", str(db_path))
+    assert resolve_sessions_db_path() == db_path
+
+
+def test_create_store_uses_env_sessions_db_when_no_store_path(
+    config: CursorAgentConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """create_store falls back to CURSOR_AGENT_SESSIONS_DB before the default path."""
+    db_path = tmp_path / "env-sessions.db"
+    monkeypatch.setenv("CURSOR_AGENT_SESSIONS_DB", str(db_path))
+    store = create_store(config)
     assert store._db_path == db_path
 
 
@@ -252,3 +287,43 @@ async def test_repl_runtime_coding_skips_messaging_hook_deploy(
             facade=facade,
         ):
             mock_ensure.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_default_welcome_before_repl_bootstrap(
+    config: CursorAgentConfig,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default bootstrap invokes welcome rendering before REPL startup."""
+    call_order: list[str] = []
+
+    def stub_render_welcome(
+        _writer: object,
+        *,
+        first_run: bool,
+        is_tty: bool,
+        no_banner: bool,
+        is_ci: bool,
+    ) -> bool:
+        _ = (first_run, is_tty, no_banner, is_ci)
+        call_order.append("render_welcome")
+        return False
+
+    @asynccontextmanager
+    async def stub_repl_runtime(_cfg: CursorAgentConfig):
+        call_order.append("repl_runtime")
+        yield object(), session_key_for(config), object(), object()
+
+    async def stub_run_repl(*_args: object, **_kwargs: object) -> None:
+        call_order.append("run_repl")
+        return None
+
+    monkeypatch.setattr("cursor_agent.cli.app.render_welcome", stub_render_welcome)
+    monkeypatch.setattr("cursor_agent.cli.app.repl_runtime", stub_repl_runtime)
+    monkeypatch.setattr("cursor_agent.cli.app.run_repl", stub_run_repl)
+
+    await run_default(config, marker_home=tmp_path, is_tty=True, is_ci=False)
+
+    assert call_order.index("render_welcome") < call_order.index("repl_runtime")
+    assert call_order.index("render_welcome") < call_order.index("run_repl")
