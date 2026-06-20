@@ -29,9 +29,17 @@ CLI override: `cursor-agent --profile messaging`
 
 1. **Read the request and relevant source** before editing — grep-friendly modules, explicit types, small focused functions.
 2. **TDD:** for functional changes, write a **failing** pytest test → implement → green.
-3. **Keep SDK isolation:** import `cursor_sdk` only from `src/cursor_agent/sdk_facade.py`.
+3. **Keep SDK isolation:** import `cursor_sdk` only from `src/cursor_agent/sdk_facade.py` and `src/cursor_agent/sdk_error_mapping.py`.
 4. **Verify locally** before opening a PR — commands below match CI (see [CONTRIBUTING.md](CONTRIBUTING.md)).
-5. **Do not commit secrets** — use `CURSOR_AGENT__*` env vars or `CURSOR_API_KEY` (see `.env.example`).
+5. **Do not commit secrets** — use `CURSOR_AGENT__*` env vars or `CURSOR_API_KEY` (see [.env.example](.env.example) and [docs/setup.md — Configuration](docs/setup.md#configuration)).
+
+### Configuration precedence
+
+```text
+CLI flags > env (including CWD .env) > ~/.cursor-agent/config.yaml > defaults
+```
+
+At startup the CLI loads CWD `.env` with `override=False` (exported shell env wins). Canonical names: `CURSOR_API_KEY`, `CURSOR_AGENT__RUNTIME__LOCAL__CWD`, `CURSOR_AGENT__MEMORY_ROOT`, `CURSOR_AGENT_SESSIONS_DB`, `CURSOR_AGENT__MODEL`, `CURSOR_AGENT__TOOL_PROFILE`. Legacy `CURSOR_AGENT_WORKSPACE` and `CURSOR_AGENT_CONFIG` are not supported.
 
 ### Local verification (no API key required for unit tests)
 
@@ -39,10 +47,12 @@ CLI override: `cursor-agent --profile messaging`
 uv run ruff check src tests
 uv run ruff format --check src tests
 uv run mypy --strict src
-uv run pytest -m "not integration" -v
+uv run pytest -m "not integration and not package_smoke" -v
 ```
 
 Integration tests (`pytest -m integration -v`) require `CURSOR_API_KEY` and skip when it is unset.
+
+Package smoke (`pytest -m package_smoke -v`) builds a wheel, installs it into a temporary virtualenv, and verifies `cursor-agent --help` plus bundled messaging hooks. No API key required. CI runs it in a separate job; include it before release tags.
 
 Focused messaging/hook checks:
 
@@ -61,7 +71,7 @@ uv run pytest tests/unit/test_cli_profile.py tests/unit/test_messaging_profile.p
 | Project name | `cursor-agent` |
 | Python package | `cursor_agent` |
 | Config directory | `~/.cursor-agent` |
-| Environment variables | prefix `CURSOR_AGENT__*` (see also `CURSOR_API_KEY` in `.env.example`) |
+| Environment variables | `CURSOR_AGENT__*` nested prefix (see [setup — Configuration](docs/setup.md#configuration)); `CURSOR_API_KEY` for the SDK; `CURSOR_AGENT_SESSIONS_DB` flat override for sessions DB |
 | CLI | `cursor-agent` |
 | Dependency manager | `uv` (per `pyproject.toml`) |
 | Linter / formatter | `ruff` |
@@ -83,11 +93,10 @@ uv run pytest tests/unit/test_cli_profile.py tests/unit/test_messaging_profile.p
 ## What NOT to do
 
 - **Do not copy code** from reference projects — study patterns, reimplement in `cursor_agent`.
-- **Do not import `cursor_sdk`** outside `sdk_facade.py`.
+- **Do not import `cursor_sdk`** outside `sdk_facade.py` and `sdk_error_mapping.py`.
 - **Do not skip TDD** for functional requirements.
 - **Do not assume** features exist — verify in source and tests.
 - **Do not create** unsolicited documentation files.
-- **Do not use** `cursor-hermes` — the correct name is `cursor-agent`.
 
 ---
 
@@ -108,6 +117,7 @@ For install, API key, and gateway setup without prior context, start at [docs/se
 | [.env.example](.env.example) | Environment variable reference |
 | [pyproject.toml](pyproject.toml) | Package metadata and quality gates |
 | [hooks/messaging/](hooks/messaging/) | Versioned deny-hook scripts |
+| [examples/README.md](examples/README.md) | Product-facing CLI, gateway, profiles, memory, and cron examples |
 | [examples/gateway.yaml.example](examples/gateway.yaml.example) | Sample gateway configuration |
 | [Cursor Python SDK](https://cursor.com/docs/sdk/python) | Upstream SDK documentation |
 | [Cursor Hooks](https://cursor.com/docs/hooks) | Hook schema reference |

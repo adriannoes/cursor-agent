@@ -8,6 +8,8 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.messaging_hooks import ensure_messaging_hooks
 from cursor_agent.tool_profile_policy import requires_messaging_hooks
@@ -18,6 +20,21 @@ from cursor_agent.sessions.store import SessionStore
 
 DEFAULT_DB_PATH = Path.home() / ".cursor-agent" / "sessions.db"
 _MODULE_LOGGER = logging.getLogger(__name__)
+_CWD_DOTENV_FILENAME = ".env"
+
+
+def load_cwd_dotenv() -> None:
+    """Load gitignored CWD ``.env`` into ``os.environ`` without overriding exports.
+
+    Called during CLI bootstrap so values like ``CURSOR_API_KEY`` are visible to the
+    SDK facade via ``os.environ`` (Pydantic ``env_file`` alone does not populate it).
+
+    Example:
+        >>> load_cwd_dotenv()  # doctest: +SKIP
+    """
+    env_path = Path.cwd() / _CWD_DOTENV_FILENAME
+    if env_path.is_file():
+        load_dotenv(env_path, override=False)
 
 
 def resolve_sessions_db_path() -> Path:
@@ -29,6 +46,7 @@ def resolve_sessions_db_path() -> Path:
         >>> resolve_sessions_db_path()  # doctest: +SKIP
         PosixPath('/Users/me/.cursor-agent/sessions.db')
     """
+    load_cwd_dotenv()
     override = os.environ.get("CURSOR_AGENT_SESSIONS_DB", "").strip()
     if override:
         return Path(override).expanduser()
@@ -78,6 +96,7 @@ async def repl_runtime(
     facade: SdkFacade | None = None,
 ) -> AsyncIterator[tuple[SessionAgentPool, str, SessionStore, SdkFacade]]:
     """Bootstrap pool, session key, store, and facade for the interactive REPL."""
+    load_cwd_dotenv()
     bootstrap_messaging_hooks(config)
     store = create_store(config, store_path=store_path)
     await store.initialize()

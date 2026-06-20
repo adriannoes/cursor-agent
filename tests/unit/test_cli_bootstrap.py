@@ -11,6 +11,7 @@ import pytest
 from cursor_agent.cli.app import run_default
 from cursor_agent.cli.startup import (
     create_store,
+    load_cwd_dotenv,
     repl_runtime,
     resolve_sessions_db_path,
     session_key_for,
@@ -287,6 +288,82 @@ async def test_repl_runtime_coding_skips_messaging_hook_deploy(
             facade=facade,
         ):
             mock_ensure.assert_not_called()
+
+
+# --- PRD-012 Task 1.1: advertised env / dotenv regressions ---
+
+
+def test_session_key_reflects_dotenv_workspace_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bootstrap session key uses workspace cwd loaded from CWD .env."""
+    workspace = tmp_path / "dotenv-workspace"
+    workspace.mkdir()
+    (tmp_path / ".env").write_text(
+        f"CURSOR_AGENT__RUNTIME__LOCAL__CWD={workspace}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("CURSOR_AGENT__RUNTIME__LOCAL__CWD", raising=False)
+    monkeypatch.chdir(tmp_path)
+    load_cwd_dotenv()
+    config = load_config(config_path=tmp_path / "missing.yaml")
+    assert session_key_for(config) == expected_session_key(str(workspace))
+
+
+def test_create_store_uses_dotenv_sessions_db_when_env_unexported(
+    config: CursorAgentConfig,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """create_store honors CURSOR_AGENT_SESSIONS_DB from CWD .env after CLI bootstrap."""
+    db_path = tmp_path / "dotenv-sessions.db"
+    (tmp_path / ".env").write_text(
+        f"CURSOR_AGENT_SESSIONS_DB={db_path}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("CURSOR_AGENT_SESSIONS_DB", raising=False)
+    monkeypatch.chdir(tmp_path)
+    store = create_store(config)
+    assert store._db_path == db_path
+
+
+async def test_repl_runtime_passes_dotenv_cursor_api_key_to_facade(
+    config: CursorAgentConfig,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Facade bootstrap receives CURSOR_API_KEY from CWD .env when shell env is unset."""
+    captured_api_keys: list[str | None] = []
+
+    class RecordingSdkFacade:
+        """Capture api_key passed to the production AsyncSdkFacade constructor."""
+
+        def __init__(
+            self,
+            *,
+            api_key: str | None = None,
+            local_setting_sources: list[str] | None = None,
+            **kwargs: object,
+        ) -> None:
+            _ = (local_setting_sources, kwargs)
+            captured_api_keys.append(api_key)
+
+        async def __aenter__(self) -> RecordingSdkFacade:
+            return self
+
+        async def __aexit__(self, *_exc: object) -> None:
+            return None
+
+    (tmp_path / ".env").write_text("CURSOR_API_KEY=from-dotenv-key\n", encoding="utf-8")
+    monkeypatch.delenv("CURSOR_API_KEY", raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("cursor_agent.cli.startup.AsyncSdkFacade", RecordingSdkFacade)
+
+    async with repl_runtime(config):
+        pass
+
+    assert captured_api_keys == ["from-dotenv-key"]
 
 
 @pytest.mark.asyncio
