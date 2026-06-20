@@ -243,6 +243,11 @@ class TelegramDelivery:
         """Send a plain-text reply without HTML parse mode."""
         bot = self._get_bot()
         if bot is None:
+            self._logger.warning(
+                "telegram_plain_reply_dropped platform=telegram chat_id=%s "
+                "reason=bot_unavailable",
+                chat_id,
+            )
             return
         await bot.send_message(chat_id=chat_id, text=text)
 

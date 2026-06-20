@@ -220,7 +220,7 @@ class SessionStore:
                 SELECT {_SELECT_COLUMNS}
                 FROM sessions
                 WHERE session_key = ?
-                ORDER BY updated_at DESC
+                ORDER BY updated_at DESC, rowid DESC
                 LIMIT 1
                 """
             query_params: tuple[Any, ...] = (session_key,)

@@ -440,3 +440,20 @@ async def test_telegram_send_message_uses_shared_reply_chunking_helper(
     assert "<b>Summary</b>" in rendered
     assert "<code>README.md</code>" in rendered
     assert '<a href="https://example.com/docs">docs</a>' in rendered
+
+
+@pytest.mark.asyncio
+async def test_telegram_send_plain_reply_logs_when_bot_unavailable(
+    tmp_path: object,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Plain command replies log a warning instead of failing silently when bot is unset."""
+    adapter, fake_bot, _ = make_adapter(tmp_path)
+
+    with caplog.at_level(logging.WARNING):
+        await adapter._delivery.send_plain_reply(1, "help text")
+
+    assert fake_bot.send_message_calls == []
+    assert any(
+        "telegram_plain_reply_dropped" in record.message for record in caplog.records
+    )
