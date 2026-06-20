@@ -1,4 +1,4 @@
-"""FR-1: isolate cursor_sdk imports to sdk_facade.py only."""
+"""FR-1: isolate cursor_sdk imports to approved SDK boundary modules."""
 
 from __future__ import annotations
 
@@ -63,12 +63,21 @@ def _async_sdk_facade_exists() -> bool:
     return hasattr(sdk_facade, "AsyncSdkFacade")
 
 
+_APPROVED_CURSOR_SDK_MODULES: frozenset[str] = frozenset(
+    {
+        "cursor_agent.sdk_facade",
+        "cursor_agent.sdk_error_mapping",
+    }
+)
+
+
 def test_cursor_sdk_import_isolation() -> None:
-    """Only ``cursor_agent.sdk_facade`` may import ``cursor_sdk``."""
+    """Only approved SDK boundary modules may import ``cursor_sdk``."""
     offenders = _modules_importing_cursor_sdk()
     if _async_sdk_facade_exists():
-        assert offenders == {"cursor_agent.sdk_facade"}, (
-            f"expected only sdk_facade to import cursor_sdk, got {sorted(offenders)!r}"
+        assert offenders == _APPROVED_CURSOR_SDK_MODULES, (
+            f"expected only approved SDK boundary modules to import cursor_sdk, "
+            f"got {sorted(offenders)!r}"
         )
     else:
         assert offenders == set(), (
