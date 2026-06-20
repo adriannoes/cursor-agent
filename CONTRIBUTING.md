@@ -29,15 +29,43 @@ Choose the **Bug report** or **Feature request** template when opening an issue 
    uv run ruff check src tests
    uv run ruff format --check src tests
    uv run mypy --strict src
-   uv run pytest -m "not integration" -v
+   uv run pytest -m "not integration and not package_smoke" -v
    ```
 
    Integration tests (`pytest -m integration -v`) need `CURSOR_API_KEY` and skip when it is unset.
+
+   Package smoke (`pytest -m package_smoke -v`) builds a wheel, installs it into a temporary virtualenv, and verifies `cursor-agent --help` plus bundled messaging hooks. It does not need `CURSOR_API_KEY`. CI runs it in a separate job; include it before release tags.
 
 4. **Commit** with [Conventional Commits](https://www.conventionalcommits.org/) (e.g. `feat(cli): add welcome banner`, `fix(gateway): handle empty allowlist`).
 5. **Open a PR** with a clear description, linked issues (`Fixes #123`), and notes on testing.
 
 Keep PRs focused — one functional change per PR when possible.
+
+## Release readiness (public launch / version tags)
+
+Before tagging a release or merging a launch PR, run:
+
+```bash
+uv run ruff check src tests
+uv run ruff format --check src tests
+uv run mypy --strict src
+uv run pytest --cov=cursor_agent --cov-report=term-missing --cov-fail-under=85 -m "not integration and not package_smoke"
+uv run pytest -m package_smoke -v
+uv run pytest tests/test_package_metadata.py -v
+```
+
+Optional when `CURSOR_API_KEY` is available:
+
+```bash
+uv run pytest -m integration -v
+```
+
+Also confirm:
+
+- Public docs (README, `docs/setup.md`, `.env.example`) match supported env names and setup steps.
+- No secrets in diffs, logs, or example files.
+- No new source or test files above 500 lines without a written exception in the PR.
+- Messaging/gateway changes were exercised with `tool_profile: messaging` where relevant.
 
 ## Code style and conventions
 
