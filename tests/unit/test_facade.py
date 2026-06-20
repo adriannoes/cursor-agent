@@ -368,8 +368,8 @@ async def test_coding_create_agent_omits_mcp_servers_and_sandbox() -> None:
 
 
 @pytest.mark.asyncio
-async def test_coding_resume_agent_passes_empty_mcp_without_sandbox() -> None:
-    """Coding resume keeps empty MCP reinject without enabling sandbox."""
+async def test_coding_resume_agent_omits_mcp_servers_and_sandbox() -> None:
+    """Coding resume must omit MCP override so SDK/project settings apply."""
     mock_agent = AsyncMock()
     mock_agent.agent_id = "agent-coding-resume"
     mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
@@ -388,17 +388,42 @@ async def test_coding_resume_agent_passes_empty_mcp_without_sandbox() -> None:
     )
 
     options = _resume_request_options(mock_client)
-    assert options.get("mcpServers") == {}
+    assert "mcpServers" not in options
+    assert "mcp_servers" not in options
     local_opts = options.get("local")
     assert isinstance(local_opts, dict)
     assert _sandbox_enabled(local_opts) is None
 
 
 @pytest.mark.asyncio
-async def test_resume_agent_reinjects_mcp_servers_from_profile() -> None:
-    """resume_agent passes stub mcp_servers for the tool profile."""
+async def test_messaging_create_agent_passes_empty_mcp_servers_and_sandbox() -> None:
+    """Messaging create must pass explicit empty MCP servers and sandbox."""
     mock_agent = AsyncMock()
-    mock_agent.agent_id = "agent-resume"
+    mock_agent.agent_id = "agent-messaging-create"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.create = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(api_key="test-key")
+    facade._client = mock_client
+
+    await facade.create_agent(workspace="/repo/path", tool_profile="messaging")
+
+    create_call = mock_client.agents.create.await_args
+    create_options = create_call.args[0] if create_call.args else None
+    assert isinstance(create_options, dict)
+    assert create_options.get("mcp_servers") == {}
+    local_opts = create_call.kwargs["local"]
+    assert _sandbox_enabled(local_opts) is True
+
+
+@pytest.mark.asyncio
+async def test_messaging_resume_agent_passes_empty_mcp_servers_and_sandbox() -> None:
+    """Messaging resume must pass explicit empty MCP servers and sandbox."""
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-messaging-resume"
     mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
     mock_agent.__aexit__ = AsyncMock(return_value=None)
 
@@ -409,13 +434,16 @@ async def test_resume_agent_reinjects_mcp_servers_from_profile() -> None:
     facade._client = mock_client
 
     await facade.resume_agent(
-        "agent-resume",
+        "agent-messaging-resume",
         workspace="/repo",
-        tool_profile="coding",
+        tool_profile="messaging",
     )
 
     options = _resume_request_options(mock_client)
     assert options.get("mcpServers") == {}
+    local_opts = options.get("local")
+    assert isinstance(local_opts, dict)
+    assert _sandbox_enabled(local_opts) is True
 
 
 @pytest.mark.asyncio
@@ -554,7 +582,7 @@ async def test_retry_honors_retryable_errors_max_three_attempts() -> None:
     facade._client = mock_client
 
     with patch(
-        "cursor_agent.sdk_facade.asyncio.sleep", new_callable=AsyncMock
+        "cursor_agent.sdk_retry.asyncio.sleep", new_callable=AsyncMock
     ) as sleep_mock:
         agent_id = await facade.create_agent(workspace="/ws")
 
@@ -575,7 +603,7 @@ async def test_retry_does_not_retry_non_retryable_errors() -> None:
     facade._client = mock_client
 
     with patch(
-        "cursor_agent.sdk_facade.asyncio.sleep", new_callable=AsyncMock
+        "cursor_agent.sdk_retry.asyncio.sleep", new_callable=AsyncMock
     ) as sleep_mock:
         with pytest.raises(_NonRetryableFacadeError):
             await facade.create_agent(workspace="/ws")
