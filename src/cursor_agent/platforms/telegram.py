@@ -5,13 +5,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import re
 from collections.abc import Awaitable, Callable
-from pathlib import Path
-from typing import Final, Protocol, cast
+from typing import cast
 
 from aiogram import Bot, Dispatcher, F
-from aiogram.enums import ChatAction, ChatType
+from aiogram.enums import ChatType
 from aiogram.types import Message
 
 from cursor_agent.config.loader import CursorAgentConfig
@@ -23,63 +21,30 @@ from cursor_agent.platforms.base import (
     InboundMessage,
     OutboundMessage,
 )
-from cursor_agent.platforms.telegram_chunking import (
-    split_plain_text_reply,
-    telegram_session_key,
+from cursor_agent.platforms.telegram_chunking import telegram_session_key
+from cursor_agent.platforms.telegram_commands import (
+    SUPPORTED_TELEGRAM_COMMANDS,
+    TELEGRAM_HELP_TEXT,
+    TelegramCommandRouter,
+    parse_telegram_command,
+    workspace_path,
 )
-from cursor_agent.platforms.telegram_formatting import (
-    prepare_telegram_assistant_reply_chunks,
+from cursor_agent.platforms.telegram_delivery import (
+    BotFactory,
+    BotProtocol,
+    Sleeper,
+    TelegramDelivery,
 )
 from cursor_agent.product_copy import TELEGRAM_NO_SESSION_HINT
 from cursor_agent.sdk_facade import SdkFacade
-from cursor_agent.sessions.models import SessionCreateParams
 from cursor_agent.sessions.store import SessionStore
 
-TELEGRAM_TYPING_REFRESH_SECONDS = 5.0
-_SESSION_KEY_PATTERN = re.compile(r"^telegram:(?P<chat_id>-?\d+):[0-9a-f]{8}$")
-
-TELEGRAM_NEW_CONFIRMATION: Final[str] = "Started a new conversation."
-TELEGRAM_STOP_SUCCESS: Final[str] = "Run cancelled."
-TELEGRAM_STOP_NO_SESSION: Final[str] = (
-    "No active session. Send /new to start a conversation."
-)
-TELEGRAM_HELP_TEXT: Final[str] = """\
-Telegram commands:
-
-/new — Start or reset your conversation
-/stop — Cancel the current run
-/help — Show this message
-"""
-
-_SUPPORTED_TELEGRAM_COMMANDS: Final[frozenset[str]] = frozenset(
-    {"new", "stop", "help", "start"},
-)
-
-Sleeper = Callable[[float], Awaitable[None]]
+# Re-exported for existing behavior-lock imports in unit tests.
+_parse_telegram_command = parse_telegram_command
+_SUPPORTED_TELEGRAM_COMMANDS = SUPPORTED_TELEGRAM_COMMANDS
 
 
-class _BotProtocol(Protocol):
-    async def send_message(
-        self,
-        chat_id: int | str,
-        text: str,
-        *,
-        parse_mode: str | None = None,
-        **kwargs: object,
-    ) -> object: ...
-
-    async def send_chat_action(
-        self,
-        chat_id: int | str,
-        action: str,
-        **kwargs: object,
-    ) -> object: ...
-
-    @property
-    def session(self) -> object: ...
-
-
-class _DispatcherProtocol(Protocol):
+class _DispatcherProtocol:
     message: object
 
     async def start_polling(self, bot: object, **kwargs: object) -> None: ...
@@ -87,69 +52,15 @@ class _DispatcherProtocol(Protocol):
     def stop_polling(self) -> Awaitable[None] | None: ...
 
 
-BotFactory = Callable[[str], _BotProtocol]
-DispatcherFactory = Callable[[], _DispatcherProtocol]
-
-
-def _default_bot_factory(token: str) -> _BotProtocol:
-    return cast(_BotProtocol, Bot(token))
+def _default_bot_factory(token: str) -> BotProtocol:
+    return cast(BotProtocol, Bot(token))
 
 
 def _default_dispatcher_factory() -> _DispatcherProtocol:
     return cast(_DispatcherProtocol, Dispatcher())
 
 
-def _parse_delivery_chat_id(chat_id: str) -> int | str:
-    """Parse cron-configured Telegram chat id for bot.send_message."""
-    stripped = chat_id.strip()
-    if not stripped:
-        raise ValueError(
-            f"invalid telegram chat_id: received {chat_id!r}, expected non-empty string"
-        )
-    if stripped.lstrip("-").isdigit():
-        return int(stripped)
-    return stripped
-
-
-def _parse_telegram_chat_id(session_key: str) -> int:
-    """Extract Telegram chat ID from an adapter-owned session key."""
-    match = _SESSION_KEY_PATTERN.match(session_key)
-    if match is None:
-        msg = (
-            "invalid telegram session_key for outbound delivery: "
-            f"received {session_key!r}, expected "
-            "'telegram:<chat_id>:<8-char-hex-workspace-hash>'"
-        )
-        raise ValueError(msg)
-    return int(match.group("chat_id"))
-
-
-def _workspace_path(
-    gateway_config: GatewayConfig,
-    config: CursorAgentConfig,
-) -> str:
-    """Return the canonical workspace path used for Telegram session keys."""
-    return config.runtime.local.cwd or gateway_config.workspace
-
-
-def _resolved_workspace(
-    gateway_config: GatewayConfig,
-    config: CursorAgentConfig,
-) -> str:
-    """Return the absolute workspace path used for SDK agent creation."""
-    return str(Path(_workspace_path(gateway_config, config)).resolve())
-
-
-def _parse_telegram_command(text: str) -> str | None:
-    """Return a supported Telegram slash command name, or ``None`` for free text."""
-    stripped = text.strip()
-    if not stripped.startswith("/"):
-        return None
-    command_token = stripped.split(maxsplit=1)[0]
-    command_name = command_token.split("@", maxsplit=1)[0].lstrip("/").lower()
-    if command_name in _SUPPORTED_TELEGRAM_COMMANDS:
-        return command_name
-    return None
+DispatcherFactory = Callable[[], _DispatcherProtocol]
 
 
 class TelegramAdapter:
@@ -193,12 +104,31 @@ class TelegramAdapter:
         self._bot_factory = bot_factory or _default_bot_factory
         self._dispatcher_factory = dispatcher_factory or _default_dispatcher_factory
         self._sleeper = sleeper or asyncio.sleep
-        self._bot: _BotProtocol | None = None
+        self._bot: BotProtocol | None = None
         self._dispatcher: _DispatcherProtocol | None = None
         self._polling_task: asyncio.Task[None] | None = None
         self._on_inbound: GatewayInboundCallback | None = None
-        self._typing_tasks: dict[int, asyncio.Task[None]] = {}
         self._stopped = False
+        self._delivery = TelegramDelivery(
+            platform_config=platform_config,
+            bot_factory=self._bot_factory,
+            logger=logger,
+            sleeper=self._sleeper,
+            is_stopped=lambda: self._stopped,
+            get_bot=lambda: self._bot,
+            set_bot=self._set_bot,
+        )
+        self._commands = TelegramCommandRouter(
+            gateway_config=gateway_config,
+            config=config,
+            store=store,
+            facade=facade,
+            logger=logger,
+            send_plain_reply=self._delivery.send_plain_reply,
+        )
+
+    def _set_bot(self, bot: BotProtocol) -> None:
+        self._bot = bot
 
     @property
     def platform(self) -> str:
@@ -207,7 +137,7 @@ class TelegramAdapter:
 
     def active_typing_task_count(self) -> int:
         """Return the number of in-flight typing refresh tasks (test helper)."""
-        return sum(1 for task in self._typing_tasks.values() if not task.done())
+        return self._delivery.typing.active_task_count()
 
     async def start(self, on_inbound: GatewayInboundCallback) -> None:
         """Register handlers and begin aiogram long polling in a background task."""
@@ -247,7 +177,7 @@ class TelegramAdapter:
     async def stop(self) -> None:
         """Stop polling, cancel typing tasks, and close the bot HTTP session."""
         self._stopped = True
-        await self._cancel_all_typing_tasks()
+        await self._delivery.typing.cancel_all()
         if self._polling_task is not None:
             self._polling_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -270,115 +200,11 @@ class TelegramAdapter:
 
     async def send_html_chunk(self, chat_id: str, html: str) -> None:
         """Deliver one pre-rendered HTML chunk for cron post-run delivery."""
-        if not html or not html.strip():
-            return
-        bot = self._bot
-        if bot is None:
-            if self._stopped:
-                raise RuntimeError(
-                    "telegram cron delivery failed: adapter stopped before HTML chunk "
-                    f"delivery for chat_id={chat_id!r}"
-                )
-            bot = self._bot_factory(self._platform_config.bot_token)
-            self._bot = bot
-        assert bot is not None
-        parsed_chat_id = _parse_delivery_chat_id(chat_id)
-        await bot.send_message(
-            chat_id=parsed_chat_id,
-            text=html,
-            parse_mode="HTML",
-        )
+        await self._delivery.send_html_chunk(chat_id, html)
 
     async def send_message(self, outbound: OutboundMessage) -> None:
         """Deliver escaped HTML reply chunks to the Telegram chat in session_key."""
-        if not outbound.text or not outbound.text.strip():
-            return
-        bot = self._bot
-        if bot is None:
-            if self._stopped:
-                self._logger.info(
-                    "telegram_outbound_skipped_after_stop platform=telegram "
-                    "session_key=%s",
-                    outbound.session_key,
-                )
-                return
-            bot = self._bot_factory(self._platform_config.bot_token)
-            self._bot = bot
-        assert bot is not None
-
-        chat_id = _parse_telegram_chat_id(outbound.session_key)
-        chunks = prepare_telegram_assistant_reply_chunks(
-            outbound.text,
-            logger=self._logger,
-        )
-        self._logger.info(
-            "telegram_outbound_send platform=telegram chat_id=%s session_key=%s "
-            "chunk_count=%s",
-            chat_id,
-            outbound.session_key,
-            len(chunks),
-        )
-        sent_chunks = 0
-        try:
-            for chunk in chunks:
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text=chunk,
-                    parse_mode="HTML",
-                )
-                sent_chunks += 1
-        except Exception as exc:
-            if sent_chunks == 0:
-                self._logger.warning(
-                    "telegram_outbound_html_fallback platform=telegram chat_id=%s "
-                    "session_key=%s exception_class=%s",
-                    chat_id,
-                    outbound.session_key,
-                    exc.__class__.__name__,
-                )
-                await self._deliver_plain_text_fallback(bot, chat_id, outbound)
-                return
-            self._logger.exception(
-                "telegram_outbound_failed platform=telegram chat_id=%s "
-                "session_key=%s exception_class=%s",
-                chat_id,
-                outbound.session_key,
-                exc.__class__.__name__,
-            )
-            raise
-
-    async def _deliver_plain_text_fallback(
-        self,
-        bot: _BotProtocol,
-        chat_id: int,
-        outbound: OutboundMessage,
-    ) -> None:
-        """Send the plain-text fallback, keeping the safe-log guarantee on failure."""
-        try:
-            await self._send_plain_text_fallback(bot, chat_id, outbound.text)
-        except Exception as exc:
-            self._logger.exception(
-                "telegram_outbound_failed platform=telegram chat_id=%s "
-                "session_key=%s exception_class=%s",
-                chat_id,
-                outbound.session_key,
-                exc.__class__.__name__,
-            )
-            raise
-
-    async def _send_plain_text_fallback(
-        self,
-        bot: _BotProtocol,
-        chat_id: int,
-        text: str,
-    ) -> None:
-        """Deliver the reply as plain text when Telegram rejects parse_mode=HTML.
-
-        Only used when the first HTML chunk fails, so no partial HTML delivery is
-        duplicated. Sends raw (unescaped) text without ``parse_mode``.
-        """
-        for chunk in split_plain_text_reply(text):
-            await bot.send_message(chat_id=chat_id, text=chunk)
+        await self._delivery.send_message(outbound)
 
     def _register_handlers(self) -> None:
         if self._dispatcher is None:
@@ -441,9 +267,9 @@ class TelegramAdapter:
             return
 
         assert message.text is not None
-        command = _parse_telegram_command(message.text)
+        command = parse_telegram_command(message.text)
         if command is not None:
-            await self._dispatch_telegram_command(
+            await self._commands.dispatch(
                 command,
                 chat_id=chat_id,
                 session_key=inbound.session_key,
@@ -451,7 +277,7 @@ class TelegramAdapter:
             return
 
         if await self._store.resolve(inbound.session_key) is None:
-            await self._send_plain_reply(chat_id, TELEGRAM_NO_SESSION_HINT)
+            await self._delivery.send_plain_reply(chat_id, TELEGRAM_NO_SESSION_HINT)
             return
 
         await self._start_typing(chat_id)
@@ -460,97 +286,13 @@ class TelegramAdapter:
         finally:
             await self._stop_typing(chat_id)
 
-    async def _dispatch_telegram_command(
-        self,
-        command: str,
-        *,
-        chat_id: int,
-        session_key: str,
-    ) -> None:
-        if command == "new":
-            await self._handle_new_command(chat_id=chat_id, session_key=session_key)
-            return
-        if command == "stop":
-            await self._handle_stop_command(chat_id=chat_id, session_key=session_key)
-            return
-        if command == "help":
-            await self._send_plain_reply(chat_id, TELEGRAM_HELP_TEXT.strip())
-            return
-        if command == "start":
-            await self._send_plain_reply(chat_id, TELEGRAM_NO_SESSION_HINT)
-            return
-        msg = (
-            "unsupported telegram command dispatch: "
-            f"received {command!r}, expected one of {sorted(_SUPPORTED_TELEGRAM_COMMANDS)!r}"
-        )
-        raise ValueError(msg)
-
-    async def _handle_new_command(self, *, chat_id: int, session_key: str) -> None:
-        previous = await self._store.resolve(session_key)
-        workspace = _resolved_workspace(self._gateway_config, self._config)
-        agent_id = await self._facade.create_agent(
-            workspace=workspace,
-            model=self._config.model,
-            tool_profile=self._config.tool_profile,
-            runtime_mode=self._config.runtime.mode,
-        )
-        await self._store.create(
-            SessionCreateParams(
-                session_key=session_key,
-                agent_id=agent_id,
-                workspace=workspace,
-                runtime=self._config.runtime.mode,
-                tool_profile=self._config.tool_profile,
-                title=None,
-            ),
-        )
-        if previous is not None and previous.agent_id != agent_id:
-            await self._cancel_superseded_agent(session_key, previous.agent_id)
-        self._logger.info(
-            "telegram_command_new platform=telegram chat_id=%s session_key=%s",
-            chat_id,
-            session_key,
-        )
-        await self._send_plain_reply(chat_id, TELEGRAM_NEW_CONFIRMATION)
-
-    async def _cancel_superseded_agent(self, session_key: str, agent_id: str) -> None:
-        """Best-effort cancel of the agent replaced by ``/new``.
-
-        Long-running gateways would otherwise leak superseded SDK agents on every
-        ``/new``. Cancellation is best-effort: a failure must not break ``/new``.
-        """
-        try:
-            await self._facade.cancel(agent_id)
-        except Exception as exc:
-            self._logger.warning(
-                "telegram_new_supersede_cancel_failed platform=telegram "
-                "session_key=%s exception_class=%s",
-                session_key,
-                exc.__class__.__name__,
-            )
-            return
-        self._logger.info(
-            "telegram_new_superseded_agent_cancelled platform=telegram session_key=%s",
-            session_key,
-        )
-
-    async def _handle_stop_command(self, *, chat_id: int, session_key: str) -> None:
-        row = await self._store.resolve(session_key)
-        if row is None:
-            await self._send_plain_reply(chat_id, TELEGRAM_STOP_NO_SESSION)
-            return
-        await self._facade.cancel(row.agent_id)
-        self._logger.info(
-            "telegram_command_stop platform=telegram chat_id=%s session_key=%s",
-            chat_id,
-            session_key,
-        )
-        await self._send_plain_reply(chat_id, TELEGRAM_STOP_SUCCESS)
-
-    async def _send_plain_reply(self, chat_id: int, text: str) -> None:
+    async def _start_typing(self, chat_id: int) -> None:
         if self._bot is None:
             return
-        await self._bot.send_message(chat_id=chat_id, text=text)
+        await self._delivery.typing.start(self._bot, chat_id)
+
+    async def _stop_typing(self, chat_id: int) -> None:
+        await self._delivery.typing.stop(chat_id)
 
     @staticmethod
     def _normalized_chat_type(chat_type: object) -> str:
@@ -572,7 +314,7 @@ class TelegramAdapter:
     def _build_inbound_message(self, message: Message) -> InboundMessage:
         assert message.from_user is not None
         assert message.text is not None
-        workspace = _workspace_path(self._gateway_config, self._config)
+        workspace = workspace_path(self._gateway_config, self._config)
         return InboundMessage(
             platform="telegram",
             sender_id=str(message.from_user.id),
@@ -580,52 +322,10 @@ class TelegramAdapter:
             text=message.text,
         )
 
-    async def _start_typing(self, chat_id: int) -> None:
-        await self._stop_typing(chat_id)
-        if self._bot is None:
-            return
-        await self._bot.send_chat_action(
-            chat_id=chat_id,
-            action=ChatAction.TYPING.value,
-        )
-        task = asyncio.create_task(
-            self._typing_refresh_loop(chat_id),
-            name=f"telegram-typing-{chat_id}",
-        )
-        self._typing_tasks[chat_id] = task
 
-    async def _stop_typing(self, chat_id: int) -> None:
-        task = self._typing_tasks.pop(chat_id, None)
-        if task is None:
-            return
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
-
-    async def _cancel_all_typing_tasks(self) -> None:
-        chat_ids = list(self._typing_tasks)
-        for chat_id in chat_ids:
-            await self._stop_typing(chat_id)
-
-    async def _typing_refresh_loop(self, chat_id: int) -> None:
-        if self._bot is None:
-            return
-        try:
-            while True:
-                await self._sleeper(TELEGRAM_TYPING_REFRESH_SECONDS)
-                await self._bot.send_chat_action(
-                    chat_id=chat_id,
-                    action=ChatAction.TYPING.value,
-                )
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            self._logger.exception(
-                "telegram_typing_failed platform=telegram chat_id=%s "
-                "exception_class=%s",
-                chat_id,
-                exc.__class__.__name__,
-            )
-
-
-__all__ = ["TelegramAdapter"]
+__all__ = [
+    "TELEGRAM_HELP_TEXT",
+    "TelegramAdapter",
+    "_SUPPORTED_TELEGRAM_COMMANDS",
+    "_parse_telegram_command",
+]
