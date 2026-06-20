@@ -1,86 +1,178 @@
-# cursor-agent examples
+#!/usr/bin/env python3
+"""SDK tools inventory spike (PRD-000 T3) — historical SDK investigation.
 
-Product-facing examples for the orchestration layer. Use `cursor-agent` and its CLI — not raw `cursor_sdk` imports.
+**Not a product example.** This script imports ``cursor_sdk`` directly to record
+observed native tool names from ``run.messages()``. For orchestration-layer usage,
+use ``cursor-agent`` and ``cursor_agent.sdk_facade``. See ``examples/README.md``.
 
-Historical SDK investigation scripts are archived under [docs/archive/sdk-spikes/](../docs/archive/sdk-spikes/) and are not recommended for new integrations.
+Introspection API (cursor-sdk 0.1.7)
+------------------------------------
+The public docs describe ``SDKSystemMessage.tools``, but local runs observed during
+this spike did not emit system messages. The stable surface available in practice is
+``SDKToolUseMessage`` from ``run.messages()``. This script therefore records the
+native tools observed during a deterministic probe prompt. Treat the snapshot as an
+observed baseline, not a complete declared account inventory.
 
-## Local CLI
+Regenerate snapshot
+-------------------
+::
 
-Interactive REPL with the default `coding` profile:
+    CURSOR_API_KEY=... uv run python docs/archive/sdk-spikes/tools_list.py > sdk-tools-snapshot.txt
 
-```bash
-export CURSOR_API_KEY="your-cursor-api-key"
-uv run cursor-agent
-```
+Requires ``CURSOR_API_KEY`` in the environment (see ``.env.example``). Do not commit secrets.
+"""
 
-Validate the `messaging` profile and deny hooks locally before gateway work:
+from __future__ import annotations
 
-```bash
-uv run cursor-agent --profile messaging
-```
+import asyncio
+import os
+import sys
+from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import date
 
-List persisted sessions for the current workspace key:
+from cursor_sdk import AsyncClient, AsyncRun, LocalAgentOptions
+from cursor_sdk.types import SDKToolUseMessage
 
-```bash
-uv run cursor-agent sessions list
-```
+COMPOSER_MODEL = "composer-2.5"
+CURSOR_SDK_PIN = "0.1.7"
+TOOL_PROBE_PROMPT = (
+    "Use your repository tools, not memory, to do both tasks: read README.md and "
+    "search for the string cursor-agent in pyproject.toml. "
+    "Reply with DONE after using the tools."
+)
+CURSOR_DASHBOARD_URL = "https://cursor.com/dashboard/integrations"
+SNAPSHOT_SOURCE = "docs/archive/sdk-spikes/tools_list.py"
 
-Inspect CLI options:
 
-```bash
-uv run cursor-agent --help
-```
+@dataclass(frozen=True)
+class ToolInventoryEntry:
+    """One observed tool name from SDK tool-call events."""
 
-Full setup, configuration precedence, and verification without an API key: [docs/setup.md — Configuration](../docs/setup.md#configuration).
+    name: str
+    description: str | None = None
 
-## Tool profiles
 
-| Profile | Use case |
-|---------|----------|
-| `coding` | Trusted local development — SDK auto-approve; optional dev hooks |
-| `messaging` | Gateways and bots — read-only workspace, deny hooks, empty MCP, sandbox network off |
+def validate_cursor_api_key() -> bool:
+    """Return True when CURSOR_API_KEY is set; otherwise print guidance and return False."""
+    if os.environ.get("CURSOR_API_KEY"):
+        return True
 
-Override on the CLI with `--profile messaging` or set `CURSOR_AGENT__TOOL_PROFILE` / `tool_profile` in `~/.cursor-agent/config.yaml`. See [SECURITY.md](../SECURITY.md) for the messaging threat model.
+    print(
+        "CURSOR_API_KEY is not set.\n"
+        "Export CURSOR_API_KEY in your shell; see .env.example and "
+        f"{CURSOR_DASHBOARD_URL}",
+        file=sys.stderr,
+    )
+    return False
 
-## Gateway configuration
 
-Copy [gateway.yaml.example](gateway.yaml.example) to `~/.cursor-agent/gateway.yaml`, set `TELEGRAM_BOT_TOKEN` in the environment, and run:
+def merge_tool_entries(
+    entries: Sequence[ToolInventoryEntry],
+) -> list[ToolInventoryEntry]:
+    """Return unique tool entries preserving first-seen order."""
+    seen: set[str] = set()
+    merged: list[ToolInventoryEntry] = []
+    for entry in entries:
+        if entry.name in seen:
+            continue
+        seen.add(entry.name)
+        merged.append(entry)
+    return merged
 
-```bash
-uv run cursor-agent gateway
-```
 
-Override the config path:
+async def collect_tools_from_run(
+    run: AsyncRun,
+) -> list[ToolInventoryEntry]:
+    """Drain ``run.messages()`` and collect completed tool-call names."""
+    collected: list[ToolInventoryEntry] = []
 
-```bash
-uv run cursor-agent gateway --config /path/to/gateway.yaml
-```
+    async for message in run.messages():
+        if not isinstance(message, SDKToolUseMessage):
+            continue
+        if message.status != "completed":
+            continue
+        name = message.name.strip()
+        if not name:
+            continue
+        collected.append(
+            ToolInventoryEntry(
+                name=name,
+                description="Observed completed SDK native tool call.",
+            )
+        )
 
-Step-by-step Telegram onboarding: [docs/telegram-gateway-onboarding.md](../docs/telegram-gateway-onboarding.md).
+    return merge_tool_entries(collected)
 
-## Memory files
 
-Memory v1 reads `USER.md` and `MEMORY.md` from `~/.cursor-agent/` by default. Override with `CURSOR_AGENT__MEMORY_ROOT` or `memory_root` in config YAML.
+async def discover_tools(workspace: str) -> list[ToolInventoryEntry]:
+    """Launch bridge, send the probe prompt, and collect observed tool calls."""
+    async with await AsyncClient.launch_bridge(workspace=workspace) as client:
+        async with await client.agents.create(
+            model=COMPOSER_MODEL,
+            local=LocalAgentOptions(cwd=workspace),
+        ) as agent:
+            run = await agent.send(TOOL_PROBE_PROMPT)
+            tools = await collect_tools_from_run(run)
+            await run.wait()
+            return tools
 
-In the REPL, use `/memory show` to inspect the effective payload. Edits on disk apply on the next `/new` session — see [README.md — Memory](../README.md#memory).
 
-## Cron jobs
+def format_snapshot_header() -> str:
+    """Return comment header lines for stdout or snapshot file."""
+    today = date.today().isoformat()
+    return "\n".join(
+        [
+            "# SDK tools snapshot",
+            f"# Generated: {today}",
+            f"# cursor-sdk: {CURSOR_SDK_PIN}",
+            f"# Generated by: {SNAPSHOT_SOURCE}",
+            "# Introspection: observed run.messages() -> SDKToolUseMessage names",
+            "# Note: SDKSystemMessage.tools was not emitted by local runs in 0.1.7",
+            "",
+        ]
+    )
 
-Scheduled jobs run inside the long-running gateway process. Manage them from the CLI:
 
-```bash
-uv run cursor-agent cron list
-uv run cursor-agent cron list --strict
-uv run cursor-agent cron show <job_id>
-```
+def format_tool_inventory(tools: Sequence[ToolInventoryEntry]) -> str:
+    """Format tool names (and descriptions when present) for human readers."""
+    if not tools:
+        return "Tools (0):\n  (none observed in SDKSystemMessage.tools)\n"
 
-Jobs are stored in `~/.cursor-agent/cron/jobs.yaml`. Full operator notes: [docs/setup.md — Cron operator notes](../docs/setup.md#cron-operator-notes).
+    lines = [f"Tools ({len(tools)}):"]
+    for index, tool in enumerate(tools, start=1):
+        if tool.description:
+            lines.append(f"  {index}. {tool.name}")
+            lines.append(f"     description: {tool.description}")
+        else:
+            lines.append(f"  {index}. {tool.name}")
+    return "\n".join(lines) + "\n"
 
-## Historical SDK spikes
 
-Early bridge and tool-introspection probes are preserved for provenance only:
+def render_inventory(
+    tools: Sequence[ToolInventoryEntry],
+) -> str:
+    """Render full snapshot body (header + inventory)."""
+    return format_snapshot_header() + format_tool_inventory(tools)
 
-- [docs/archive/sdk-spikes/async_repl.py](../docs/archive/sdk-spikes/async_repl.py)
-- [docs/archive/sdk-spikes/tools_list.py](../docs/archive/sdk-spikes/tools_list.py)
 
-Do not treat these as the public integration path. Application code should use `cursor_agent.sdk_facade` instead of importing `cursor_sdk` directly.
+async def main() -> None:
+    """Validate API key, introspect tools, print inventory to stdout."""
+    if not validate_cursor_api_key():
+        raise SystemExit(1)
+
+    workspace = os.getcwd()
+    tools = await discover_tools(workspace)
+
+    if not tools:
+        print(
+            "No completed tool_call events observed while streaming run.messages().",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+    print(render_inventory(tools), end="")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

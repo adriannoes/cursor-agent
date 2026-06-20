@@ -1,86 +1,131 @@
-# cursor-agent examples
+#!/usr/bin/env python3
+"""Async REPL spike (PRD-000 T2) — historical SDK investigation.
 
-Product-facing examples for the orchestration layer. Use `cursor-agent` and its CLI — not raw `cursor_sdk` imports.
+**Not a product example.** This script imports ``cursor_sdk`` directly to measure
+cold-start latency and multi-turn context. For day-to-day use, run ``cursor-agent``
+instead. See ``examples/README.md`` for the public product path.
+"""
 
-Historical SDK investigation scripts are archived under [docs/archive/sdk-spikes/](../docs/archive/sdk-spikes/) and are not recommended for new integrations.
+# Cold start measured: ~4.33s on 2026-06-15 (model=composer-2.5).
+# Re-measure: `uv run python docs/archive/sdk-spikes/async_repl.py` with CURSOR_API_KEY set.
 
-## Local CLI
+from __future__ import annotations
 
-Interactive REPL with the default `coding` profile:
+import asyncio
+import os
+import socket
+import sys
+import time
 
-```bash
-export CURSOR_API_KEY="your-cursor-api-key"
-uv run cursor-agent
-```
+from cursor_sdk import AsyncClient, LocalAgentOptions
 
-Validate the `messaging` profile and deny hooks locally before gateway work:
+COMPOSER_MODEL = "composer-2.5"
+MEMORABLE_TOKEN = "PLUMBA-7742"
+CURSOR_DASHBOARD_URL = "https://cursor.com/dashboard/integrations"
 
-```bash
-uv run cursor-agent --profile messaging
-```
 
-List persisted sessions for the current workspace key:
+def validate_cursor_api_key() -> bool:
+    """Return True when CURSOR_API_KEY is set; otherwise print guidance and return False.
 
-```bash
-uv run cursor-agent sessions list
-```
+    Example:
+        >>> os.environ["CURSOR_API_KEY"] = "test-key"
+        >>> validate_cursor_api_key()
+        True
+    """
+    if os.environ.get("CURSOR_API_KEY"):
+        return True
 
-Inspect CLI options:
+    print(
+        "CURSOR_API_KEY is not set.\n"
+        "Export CURSOR_API_KEY in your shell; see .env.example and "
+        f"{CURSOR_DASHBOARD_URL}",
+        file=sys.stderr,
+    )
+    return False
 
-```bash
-uv run cursor-agent --help
-```
 
-Full setup, configuration precedence, and verification without an API key: [docs/setup.md — Configuration](../docs/setup.md#configuration).
+def response_recalls_token(response_text: str, token: str) -> bool:
+    """Return True when *response_text* references *token* (case-insensitive).
 
-## Tool profiles
+    Example:
+        >>> response_recalls_token("The codeword was PLUMBA-7742.", "PLUMBA-7742")
+        True
+    """
+    normalized_response = response_text.casefold()
+    normalized_token = token.casefold()
+    return normalized_token in normalized_response
 
-| Profile | Use case |
-|---------|----------|
-| `coding` | Trusted local development — SDK auto-approve; optional dev hooks |
-| `messaging` | Gateways and bots — read-only workspace, deny hooks, empty MCP, sandbox network off |
 
-Override on the CLI with `--profile messaging` or set `CURSOR_AGENT__TOOL_PROFILE` / `tool_profile` in `~/.cursor-agent/config.yaml`. See [SECURITY.md](../SECURITY.md) for the messaging threat model.
+async def run_two_turn_demo(workspace: str) -> float:
+    """Run bridge + agent with two turns; return cold-start seconds for turn one.
 
-## Gateway configuration
+    Turn one establishes a memorable token; turn two must recall it.
 
-Copy [gateway.yaml.example](gateway.yaml.example) to `~/.cursor-agent/gateway.yaml`, set `TELEGRAM_BOT_TOKEN` in the environment, and run:
+    Args:
+        workspace: Local workspace path passed to launch_bridge and LocalAgentOptions.
 
-```bash
-uv run cursor-agent gateway
-```
+    Returns:
+        Cold-start latency in seconds (first send through first response text).
 
-Override the config path:
+    Raises:
+        SystemExit: When the second turn does not reference the first-turn token.
+    """
+    # Local-first for CLI/gateway (launch_bridge + local cwd); cloud reserved for
+    # batch jobs.
+    async with await AsyncClient.launch_bridge(workspace=workspace) as client:
+        async with await client.agents.create(
+            model=COMPOSER_MODEL,
+            local=LocalAgentOptions(cwd=workspace),
+        ) as agent:
+            first_prompt = (
+                f"Remember this secret codeword exactly: {MEMORABLE_TOKEN}. "
+                "Reply with only ACK."
+            )
+            cold_start_started = time.perf_counter()
+            first_run = await agent.send(first_prompt)
+            first_response = await first_run.text()
+            cold_start_seconds = time.perf_counter() - cold_start_started
 
-```bash
-uv run cursor-agent gateway --config /path/to/gateway.yaml
-```
+            print("--- Turn 1 ---")
+            print(first_response)
+            print()
 
-Step-by-step Telegram onboarding: [docs/telegram-gateway-onboarding.md](../docs/telegram-gateway-onboarding.md).
+            second_prompt = (
+                "What was the secret codeword I gave you in our first message? "
+                "Reply with only that codeword."
+            )
+            second_run = await agent.send(second_prompt)
+            second_response = await second_run.text()
 
-## Memory files
+            print("--- Turn 2 ---")
+            print(second_response)
+            print()
 
-Memory v1 reads `USER.md` and `MEMORY.md` from `~/.cursor-agent/` by default. Override with `CURSOR_AGENT__MEMORY_ROOT` or `memory_root` in config YAML.
+            if not response_recalls_token(second_response, MEMORABLE_TOKEN):
+                print(
+                    "Second turn did not reference the first-turn token "
+                    f"{MEMORABLE_TOKEN!r}.",
+                    file=sys.stderr,
+                )
+                raise SystemExit(3)
 
-In the REPL, use `/memory show` to inspect the effective payload. Edits on disk apply on the next `/new` session — see [README.md — Memory](../README.md#memory).
+            return cold_start_seconds
 
-## Cron jobs
 
-Scheduled jobs run inside the long-running gateway process. Manage them from the CLI:
+async def main() -> None:
+    """Entry point: validate API key, run demo, report cold start."""
+    if not validate_cursor_api_key():
+        raise SystemExit(1)
 
-```bash
-uv run cursor-agent cron list
-uv run cursor-agent cron list --strict
-uv run cursor-agent cron show <job_id>
-```
+    workspace = os.getcwd()
+    cold_start_seconds = await run_two_turn_demo(workspace)
 
-Jobs are stored in `~/.cursor-agent/cron/jobs.yaml`. Full operator notes: [docs/setup.md — Cron operator notes](../docs/setup.md#cron-operator-notes).
+    host = socket.gethostname()
+    print(
+        f"Cold start (turn 1): {cold_start_seconds:.2f}s "
+        f"(host={host}, model={COMPOSER_MODEL})"
+    )
 
-## Historical SDK spikes
 
-Early bridge and tool-introspection probes are preserved for provenance only:
-
-- [docs/archive/sdk-spikes/async_repl.py](../docs/archive/sdk-spikes/async_repl.py)
-- [docs/archive/sdk-spikes/tools_list.py](../docs/archive/sdk-spikes/tools_list.py)
-
-Do not treat these as the public integration path. Application code should use `cursor_agent.sdk_facade` instead of importing `cursor_sdk` directly.
+if __name__ == "__main__":
+    asyncio.run(main())
