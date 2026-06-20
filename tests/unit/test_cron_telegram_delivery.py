@@ -16,7 +16,7 @@ from cursor_agent.cron.delivery import (
 from cursor_agent.platforms.telegram import TelegramAdapter
 
 from tests.unit.gateway_fakes import FakePlatformAdapter
-from tests.unit.test_telegram_adapter import _make_adapter
+from tests.unit.telegram_adapter_fakes import make_adapter
 from cursor_agent.cron.executor import CronJobRunOutcome, CronRunStatus
 from cursor_agent.cron.models import CronJob
 from cursor_agent.platforms.telegram_chunking import TELEGRAM_MESSAGE_LIMIT
@@ -320,7 +320,7 @@ def test_build_cron_telegram_chunk_sender_returns_telegram_adapter(
     tmp_path: object,
 ) -> None:
     """Production bridge resolves the registered Telegram adapter as chunk sender."""
-    adapter, _fake_bot, _fake_dispatcher = _make_adapter(tmp_path)
+    adapter, _fake_bot, _fake_dispatcher = make_adapter(tmp_path)
     sender = build_cron_telegram_chunk_sender([adapter])
     assert isinstance(sender, TelegramAdapter)
     assert sender is adapter
@@ -337,7 +337,7 @@ async def test_telegram_cron_chunk_sender_sends_preformatted_html(
     tmp_path: object,
 ) -> None:
     """Cron chunk sender must send HTML parse mode without re-formatting Markdown."""
-    adapter, fake_bot, _fake_dispatcher = _make_adapter(tmp_path)
+    adapter, fake_bot, _fake_dispatcher = make_adapter(tmp_path)
     sender = build_cron_telegram_chunk_sender([adapter])
     assert sender is not None
 
