@@ -9,6 +9,7 @@ import pytest
 from pydantic_settings import BaseSettings
 
 from cursor_agent.config import CursorAgentConfig, load_config
+from cursor_agent.cli.startup import load_cwd_dotenv
 from cursor_agent.errors import ConfigError
 
 
@@ -215,3 +216,117 @@ def test_precedence_env_memory_root_over_yaml(
     monkeypatch.setenv("CURSOR_AGENT__MEMORY_ROOT", "/from/env")
     config = load_config(config_path=config_file)
     assert config.memory_root == "/from/env"
+
+
+# --- PRD-012 Task 1.1: advertised env / dotenv regressions ---
+
+
+def test_unsupported_cursor_agent_workspace_env_is_ignored(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Legacy flat CURSOR_AGENT_WORKSPACE from .env.example must not set workspace cwd."""
+    monkeypatch.setenv("CURSOR_AGENT_WORKSPACE", "/from/unsupported-flat")
+    monkeypatch.delenv("CURSOR_AGENT__RUNTIME__LOCAL__CWD", raising=False)
+    config = load_config(config_path=tmp_path / "missing.yaml")
+    assert config.runtime.local.cwd == "."
+
+
+def test_unsupported_cursor_agent_config_env_does_not_redirect_yaml_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Legacy flat CURSOR_AGENT_CONFIG must not replace the explicit config_path argument."""
+    alt_yaml = tmp_path / "alt.yaml"
+    alt_yaml.write_text("model: from-alt-yaml\n", encoding="utf-8")
+    explicit_yaml = tmp_path / "explicit.yaml"
+    explicit_yaml.write_text("model: from-explicit-yaml\n", encoding="utf-8")
+    monkeypatch.setenv("CURSOR_AGENT_CONFIG", str(alt_yaml))
+    config = load_config(config_path=explicit_yaml)
+    assert config.model == "from-explicit-yaml"
+
+
+def test_dotenv_runtime_local_cwd_is_canonical_workspace_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PRD-012: CWD .env uses CURSOR_AGENT__RUNTIME__LOCAL__CWD as workspace override."""
+    workspace = tmp_path / "dotenv-workspace"
+    workspace.mkdir()
+    (tmp_path / ".env").write_text(
+        f"CURSOR_AGENT__RUNTIME__LOCAL__CWD={workspace}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("CURSOR_AGENT__RUNTIME__LOCAL__CWD", raising=False)
+    monkeypatch.chdir(tmp_path)
+    load_cwd_dotenv()
+    config = load_config(config_path=tmp_path / "missing.yaml")
+    assert config.runtime.local.cwd == str(workspace)
+
+
+def test_dotenv_memory_root_applies_when_os_environ_unset(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PRD-012: CWD .env supplies CURSOR_AGENT__MEMORY_ROOT when shell env is unset."""
+    memory_root = tmp_path / "memory"
+    memory_root.mkdir()
+    (tmp_path / ".env").write_text(
+        f"CURSOR_AGENT__MEMORY_ROOT={memory_root}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("CURSOR_AGENT__MEMORY_ROOT", raising=False)
+    monkeypatch.chdir(tmp_path)
+    load_cwd_dotenv()
+    config = load_config(config_path=tmp_path / "missing.yaml")
+    assert config.memory_root == str(memory_root)
+
+
+def test_dotenv_precedence_over_yaml_and_defaults(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dotenv values beat YAML and defaults but lose to exported env and CLI."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("model: from-yaml\n", encoding="utf-8")
+    (tmp_path / ".env").write_text(
+        "CURSOR_AGENT__MODEL=from-dotenv\n", encoding="utf-8"
+    )
+    monkeypatch.delenv("CURSOR_AGENT__MODEL", raising=False)
+    monkeypatch.chdir(tmp_path)
+    load_cwd_dotenv()
+    config = load_config(config_path=config_file)
+    assert config.model == "from-dotenv"
+
+
+def test_dotenv_does_not_override_exported_os_environ(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exported shell env wins over CWD .env (python-dotenv override=False semantics)."""
+    (tmp_path / ".env").write_text(
+        "CURSOR_AGENT__MODEL=from-dotenv\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("CURSOR_AGENT__MODEL", "from-shell")
+    monkeypatch.chdir(tmp_path)
+    load_cwd_dotenv()
+    config = load_config(config_path=tmp_path / "missing.yaml")
+    assert config.model == "from-shell"
+
+
+def test_precedence_cli_over_dotenv_yaml_and_exported_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLI overrides beat exported env, dotenv, and YAML (ADR-007 + PRD-012)."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("model: from-yaml\n", encoding="utf-8")
+    (tmp_path / ".env").write_text(
+        "CURSOR_AGENT__MODEL=from-dotenv\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("CURSOR_AGENT__MODEL", "from-shell")
+    monkeypatch.chdir(tmp_path)
+    load_cwd_dotenv()
+    cli_overrides: dict[str, Any] = {"model": "from-cli"}
+    config = load_config(config_path=config_file, cli_overrides=cli_overrides)
+    assert config.model == "from-cli"

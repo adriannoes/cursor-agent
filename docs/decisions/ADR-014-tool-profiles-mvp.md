@@ -14,8 +14,10 @@ The SDK does not disable native tools. Real restriction requires hooks, MCP conf
 
 | Profile | MCP | Hooks | Use |
 |---------|-----|-------|-----|
-| `coding` | configurable (project `.cursor/mcp.json`) | optional dev template | CLI, trusted local dev |
-| `messaging` | `{}` (empty inline) | deny hooks deployed to workspace | Gateway, bots |
+| `coding` | project/user preserved | optional dev template | CLI, trusted local dev |
+| `messaging` | empty + sandbox | deny hooks deployed to workspace | Gateway, bots |
+
+MCP and sandbox policy on create and resume: [Architecture — MCP and sandbox by profile](../architecture.md#mcp-and-sandbox-by-profile-create-and-resume).
 
 Additional profiles (`minimal`, `full`) are deferred until MCP search and related integrations are promoted.
 

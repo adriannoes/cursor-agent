@@ -21,7 +21,12 @@ from cursor_agent.cli.first_run_marker import (
 )
 from cursor_agent.cli.repl_session import run_repl
 from cursor_agent.cli.rich_display import RichDisplay
-from cursor_agent.cli.startup import create_store, repl_runtime, session_key_for
+from cursor_agent.cli.startup import (
+    create_store,
+    load_cwd_dotenv,
+    repl_runtime,
+    session_key_for,
+)
 from cursor_agent.cli.stream_renderer import build_display_stream_callbacks
 from cursor_agent.cli.welcome import render_welcome
 from cursor_agent.config.loader import CursorAgentConfig, ToolProfile, load_config
@@ -194,6 +199,7 @@ def cli_entry(
     ] = False,
 ) -> None:
     """Interactive Cursor agent CLI."""
+    load_cwd_dotenv()
     if ctx.invoked_subcommand is not None:
         return
     try:
@@ -207,4 +213,5 @@ def cli_entry(
 
 def main() -> None:
     """Console-script entry point for the cursor-agent CLI."""
+    load_cwd_dotenv()
     app()  # pragma: no cover

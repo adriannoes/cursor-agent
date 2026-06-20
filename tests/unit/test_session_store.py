@@ -16,7 +16,7 @@ from cursor_agent.sessions.models import (
     build_cli_session_key,
     title_from_first_user_message,
 )
-from cursor_agent.sessions.store import SessionStore
+from cursor_agent.sessions.store import CURRENT_SCHEMA_VERSION, SessionStore
 
 
 def _expected_workspace_hash(cwd: Path | str) -> str:
@@ -103,6 +103,11 @@ _SESSIONS_COLUMNS = frozenset(
 )
 
 
+def _iso(dt: datetime) -> str:
+    """Format datetime as UTC ISO-8601."""
+    return dt.astimezone(UTC).isoformat()
+
+
 async def _fetch_table_info(db_path: Path, table: str) -> list[tuple[str, str]]:
     """Return (name, type) pairs from sqlite_master table_info."""
     async with aiosqlite.connect(db_path) as db:
@@ -122,6 +127,76 @@ async def _fetch_index_sql(db_path: Path, index_name: str) -> str | None:
     if row is None:
         return None
     return str(row[0])
+
+
+async def _fetch_user_version(db_path: Path) -> int:
+    """Return SQLite PRAGMA user_version for schema migration baseline checks."""
+    async with aiosqlite.connect(db_path) as db:
+        cursor = await db.execute("PRAGMA user_version")
+        row = await cursor.fetchone()
+    if row is None:
+        return 0
+    return int(row[0])
+
+
+_LEGACY_V0_SESSIONS_DDL = """
+CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    session_key TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    title TEXT,
+    workspace TEXT NOT NULL,
+    runtime TEXT NOT NULL,
+    tool_profile TEXT DEFAULT 'coding',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    metadata JSON
+)
+"""
+
+_LEGACY_V0_IDX_SESSIONS_KEY_DDL = """
+CREATE INDEX IF NOT EXISTS idx_sessions_key
+ON sessions(session_key, updated_at DESC)
+"""
+
+
+async def _seed_legacy_v0_database(
+    db_path: Path,
+    *,
+    session_key: str,
+    agent_id: str,
+    workspace: str,
+) -> str:
+    """Create a pre-version V0 database with one session row (user_version stays 0)."""
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    session_id = str(uuid.uuid4())
+    timestamp = _iso(datetime(2026, 6, 1, 8, 0, 0, tzinfo=UTC))
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(_LEGACY_V0_SESSIONS_DDL)
+        await db.execute(_LEGACY_V0_IDX_SESSIONS_KEY_DDL)
+        await db.execute(
+            """
+            INSERT INTO sessions (
+                id, session_key, agent_id, title, workspace, runtime,
+                tool_profile, created_at, updated_at, metadata
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session_id,
+                session_key,
+                agent_id,
+                "legacy session",
+                workspace,
+                "local",
+                "coding",
+                timestamp,
+                timestamp,
+                "{}",
+            ),
+        )
+        await db.commit()
+    assert await _fetch_user_version(db_path) == 0
+    return session_id
 
 
 @pytest.mark.asyncio
@@ -167,6 +242,98 @@ async def test_session_store_schema_initialize_is_idempotent(tmp_path: Path) -> 
     assert len(columns) == len(_SESSIONS_COLUMNS)
 
 
+@pytest.mark.asyncio
+async def test_session_store_schema_version_recorded_on_initialize(
+    tmp_path: Path,
+) -> None:
+    """initialize() records PRAGMA user_version at the V1 baseline."""
+    db_path = tmp_path / "sessions.db"
+    store = SessionStore(db_path)
+    await store.initialize()
+
+    assert await _fetch_user_version(db_path) == CURRENT_SCHEMA_VERSION
+    assert CURRENT_SCHEMA_VERSION == 1
+
+
+@pytest.mark.asyncio
+async def test_session_store_schema_reinitialize_preserves_version(
+    tmp_path: Path,
+) -> None:
+    """Calling initialize() twice keeps schema version at the V1 baseline."""
+    db_path = tmp_path / "sessions.db"
+    store = SessionStore(db_path)
+    await store.initialize()
+    await store.initialize()
+
+    assert await _fetch_user_version(db_path) == CURRENT_SCHEMA_VERSION
+
+
+@pytest.mark.asyncio
+async def test_session_store_schema_legacy_v0_upgrades_to_v1_baseline(
+    tmp_path: Path,
+) -> None:
+    """Legacy V0 databases without version metadata upgrade to V1 on initialize."""
+    db_path = tmp_path / "sessions.db"
+    session_key = build_cli_session_key(tmp_path)
+    await _seed_legacy_v0_database(
+        db_path,
+        session_key=session_key,
+        agent_id="agent-legacy",
+        workspace=str(tmp_path.resolve()),
+    )
+
+    store = SessionStore(db_path)
+    await store.initialize()
+
+    assert await _fetch_user_version(db_path) == CURRENT_SCHEMA_VERSION
+
+
+@pytest.mark.asyncio
+async def test_session_store_schema_legacy_v0_rows_remain_readable(
+    tmp_path: Path,
+) -> None:
+    """Baseline migration preserves existing session rows for public APIs."""
+    db_path = tmp_path / "sessions.db"
+    session_key = build_cli_session_key(tmp_path)
+    legacy_id = await _seed_legacy_v0_database(
+        db_path,
+        session_key=session_key,
+        agent_id="agent-legacy-readable",
+        workspace=str(tmp_path.resolve()),
+    )
+
+    store = SessionStore(db_path)
+    await store.initialize()
+
+    resolved = await store.resolve(session_key, legacy_id)
+    assert resolved is not None
+    assert resolved.id == legacy_id
+    assert resolved.agent_id == "agent-legacy-readable"
+    assert resolved.title == "legacy session"
+
+    rows = await store.list(session_key)
+    assert len(rows) == 1
+    assert rows[0].id == legacy_id
+
+
+@pytest.mark.asyncio
+async def test_session_store_schema_rejects_unsupported_future_version(
+    tmp_path: Path,
+) -> None:
+    """initialize() rejects databases with a user_version above the supported baseline."""
+    db_path = tmp_path / "sessions.db"
+    store = SessionStore(db_path)
+    await store.initialize()
+
+    unsupported_version = CURRENT_SCHEMA_VERSION + 1
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(f"PRAGMA user_version = {unsupported_version}")
+        await db.commit()
+
+    with pytest.raises(ValueError, match="unsupported schema version"):
+        await store.initialize()
+
+
 class _SteppingClock:
     """Return predetermined UTC timestamps for deterministic store tests."""
 
@@ -177,9 +344,14 @@ class _SteppingClock:
         return next(self._times)
 
 
-def _iso(dt: datetime) -> str:
-    """Format datetime as UTC ISO-8601."""
-    return dt.astimezone(UTC).isoformat()
+class _FrozenClock:
+    """Return the same UTC timestamp for every call (tie-breaker tests)."""
+
+    def __init__(self, moment: datetime) -> None:
+        self._moment = moment
+
+    def __call__(self) -> datetime:
+        return self._moment
 
 
 async def _initialized_store(
@@ -254,6 +426,39 @@ async def test_session_store_resolve_returns_latest_by_updated_at(
     assert resolved.id == newer.id
     assert resolved.agent_id == "agent-new"
     assert resolved.id != older.id
+
+
+@pytest.mark.asyncio
+async def test_session_store_resolve_tiebreaks_equal_updated_at_by_rowid(
+    tmp_path: Path,
+) -> None:
+    """resolve(session_key) picks the most recently inserted row when updated_at ties."""
+    frozen = datetime(2026, 6, 16, 10, 0, 0, tzinfo=UTC)
+    store = await _initialized_store(tmp_path, _FrozenClock(frozen))
+    session_key = build_cli_session_key(tmp_path)
+
+    first = await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id="agent-first",
+            workspace=str(tmp_path.resolve()),
+            runtime="local",
+        )
+    )
+    second = await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id="agent-second",
+            workspace=str(tmp_path.resolve()),
+            runtime="local",
+        )
+    )
+
+    resolved = await store.resolve(session_key)
+    assert resolved is not None
+    assert resolved.id == second.id
+    assert resolved.agent_id == "agent-second"
+    assert resolved.id != first.id
 
 
 @pytest.mark.asyncio

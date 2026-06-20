@@ -39,4 +39,29 @@ jobs:
         run: mypy --strict src
 
       - name: pytest
-        run: pytest --cov=cursor_agent --cov-report=term-missing --cov-fail-under=85 -m "not integration"
+        run: pytest --cov=cursor_agent --cov-report=term-missing --cov-fail-under=85 -m "not integration and not package_smoke"
+
+  package-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --group dev --frozen
+
+      - name: Add project venv to PATH
+        run: echo "${{ github.workspace }}/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Package smoke
+        run: pytest -m package_smoke -v

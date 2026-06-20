@@ -4,14 +4,27 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
+
+import pytest
 
 from cursor_agent.gateway.auth import (
     blocked_sender_response_text,
     is_allowed_sender,
     normalize_sender_id,
 )
+from cursor_agent.gateway.runner import gateway_runtime
+from cursor_agent.platforms.base import InboundMessage
+from cursor_agent.sdk_facade import FakeSdkFacade
 
-from tests.unit.gateway_fakes import gateway_config
+from tests.unit.gateway_fakes import (
+    FakePlatformAdapter,
+    NoopCronScheduler,
+    SendSpyPool,
+    _wait_for_condition,
+    gateway_config,
+    seed_session,
+)
 
 
 def test_is_allowed_sender_allows_listed_telegram_user() -> None:
@@ -190,3 +203,67 @@ def test_gateway_auth_blocked_log_excludes_inbound_message_text() -> None:
     assert "text" not in payload
     assert "message" not in payload
     assert "prompt" not in payload
+
+
+@pytest.fixture(autouse=True)
+def _isolate_gateway_cron_scheduler(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep gateway auth dispatch tests hermetic after cron startup wiring."""
+    monkeypatch.setattr("cursor_agent.gateway.runner.CronScheduler", NoopCronScheduler)
+
+
+async def test_dispatch_blocked_inbound_skips_pool_and_emits_auth_log(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Blocked inbound does not call the pool and emits gateway_auth_blocked."""
+    config = gateway_config()
+    adapter = FakePlatformAdapter(platform="telegram")
+    facade = FakeSdkFacade()
+    session_key = "telegram:999888777:deadbeef"
+    db_path = tmp_path / "sessions.db"
+
+    async with gateway_runtime(
+        gateway_config=config,
+        adapters=[adapter],
+        facade=facade,
+        store_path=db_path,
+        pool_factory=SendSpyPool,
+    ) as ctx:
+        await seed_session(
+            ctx.store,
+            facade,
+            session_key,
+            workspace=config.workspace,
+            tool_profile="messaging",
+        )
+        with caplog.at_level(logging.INFO, logger="cursor_agent.gateway.runner"):
+            await adapter.simulate_inbound(
+                InboundMessage(
+                    platform="telegram",
+                    sender_id="999888777",
+                    session_key=session_key,
+                    text="unauthorized",
+                )
+            )
+            await _wait_for_condition(
+                lambda: any(
+                    record.message.startswith("{")
+                    and "gateway_auth_blocked" in record.message
+                    for record in caplog.records
+                ),
+                description="blocked auth log",
+            )
+
+        assert ctx.pool.send_calls == []
+        assert adapter.outbound_messages == []
+
+    payloads = [
+        json.loads(record.message)
+        for record in caplog.records
+        if record.message.startswith("{")
+    ]
+    blocked = [p for p in payloads if p.get("event") == "gateway_auth_blocked"]
+    assert len(blocked) == 1
+    assert blocked[0]["platform"] == "telegram"
+    assert blocked[0]["sender_id"] == "999888777"
+    assert blocked[0]["session_key"] == session_key

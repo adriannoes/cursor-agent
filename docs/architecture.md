@@ -30,7 +30,7 @@ Reference projects may inform **behavior patterns** — reimplement in `cursor_a
 │  PlatformAdapter (Telegram, …)                               │
 └────────────────────────────┬─────────────────────────────────┘
                              ▼
-                    AsyncSdkFacade  ← sole cursor_sdk import
+                    AsyncSdkFacade  ← cursor_sdk via sdk_facade + sdk_error_mapping
                              ▼
                     Cursor SDK (Composer 2.5 + tools)
                              ▼
@@ -40,6 +40,10 @@ Reference projects may inform **behavior patterns** — reimplement in `cursor_a
 **CLI flow:** input → `CommandRouter` → `SessionStore.resolve(session_key)` → `SessionAgentPool.send` → `AsyncSdkFacade` → stream → display → `SessionStore.touch()`.
 
 User data lives under `~/.cursor-agent/` (`config.yaml`, `sessions.db`, `MEMORY.md`, `USER.md`, `gateway.yaml`, logs).
+
+### Session SQLite baseline (V1)
+
+Local session metadata is stored in SQLite at `~/.cursor-agent/sessions.db` by default (override with `CURSOR_AGENT_SESSIONS_DB`). New databases and legacy pre-version files are upgraded idempotently to **schema version 1** on `SessionStore.initialize()` via `PRAGMA user_version`. Existing rows are preserved across upgrades; future schema changes add migrations in `sessions/store.py` rather than manual SQL edits.
 
 ---
 
@@ -89,7 +93,7 @@ Cron and background jobs always use a **dedicated** `agent_id` — never shared 
 
 ## SDK facade boundary
 
-All `cursor_sdk` imports are confined to `src/cursor_agent/sdk_facade.py`. CLI, gateway, and cron share one **async-first** facade:
+All `cursor_sdk` imports are confined to `src/cursor_agent/sdk_facade.py` and `src/cursor_agent/sdk_error_mapping.py`. CLI, gateway, and cron share one **async-first** facade:
 
 - `AsyncSdkFacade` — real adapter over `AsyncClient.launch_bridge`
 - `FakeSdkFacade` — unit tests without `CURSOR_API_KEY`
@@ -105,10 +109,21 @@ The SDK does not disable native tools (`shell`, `edit`, …). Real control comes
 
 | Profile | Use case | Posture |
 |---------|----------|---------|
-| `coding` | Local development, trusted operator | SDK auto-approve; optional dev hooks |
+| `coding` | Local development, trusted operator | SDK auto-approve; optional dev hooks; project/user MCP preserved |
 | `messaging` | Gateways, bots, untrusted input | Read-only workspace; deny hooks; empty MCP; sandbox network off |
 
 MVP ships only `coding` and `messaging` ([ADR-014](decisions/ADR-014-tool-profiles-mvp.md)). Gateways **must** use `messaging` and refuse to start with `coding`.
+
+### MCP and sandbox by profile (create and resume)
+
+The SDK facade applies profile policy on **both** agent create and resume — not only on first launch.
+
+| Profile | Agent create | Agent resume |
+|---------|--------------|--------------|
+| `coding` | Omits `mcp_servers` so Cursor **project** (`.cursor/mcp.json`) and **user** MCP settings apply | Omits `mcp_servers` so persisted SDK/project MCP settings apply |
+| `messaging` | Passes `mcp_servers: {}` and enables sandbox (network off) | Re-injects `mcp_servers: {}` and sandbox for defense in depth |
+
+Local `coding` runs also pass `setting_sources: ["project", "user"]` so workspace and user-level Cursor settings load. `messaging` still deploys deny hooks to the workspace before the first pool use.
 
 Threat model, hook layout and acceptance probes: [SECURITY.md](../SECURITY.md).
 
@@ -119,8 +134,10 @@ Threat model, hook layout and acceptance probes: [SECURITY.md](../SECURITY.md).
 Typed models loaded via **pydantic-settings** with explicit precedence ([ADR-007](decisions/ADR-007-config-loader.md)):
 
 ```text
-CLI flags > env (CURSOR_AGENT__*) > ~/.cursor-agent/config.yaml > defaults
+CLI flags > env (including CWD .env) > ~/.cursor-agent/config.yaml > defaults
 ```
+
+At CLI startup, a gitignored `.env` in the current working directory is loaded with `override=False` (exported shell env wins). Pydantic reads `CURSOR_AGENT__*` from the environment; `CURSOR_API_KEY` is the SDK exception (no prefix). See [setup — Configuration](setup.md#configuration).
 
 `${VAR}` expansion uses `os.path.expandvars` after merge (12-factor style).
 

@@ -33,6 +33,8 @@ CREATE INDEX IF NOT EXISTS idx_sessions_key
 ON sessions(session_key, updated_at DESC)
 """
 
+CURRENT_SCHEMA_VERSION = 1
+
 _SELECT_COLUMNS = """
     id, session_key, agent_id, title, workspace, runtime,
     tool_profile, created_at, updated_at, metadata
@@ -99,6 +101,45 @@ def _row_to_session_record(row: aiosqlite.Row) -> SessionRecord:
     )
 
 
+async def _read_user_version(db: aiosqlite.Connection) -> int:
+    """Return SQLite PRAGMA user_version for migration baseline checks."""
+    cursor = await db.execute("PRAGMA user_version")
+    row = await cursor.fetchone()
+    if row is None:
+        return 0
+    return int(row[0])
+
+
+async def _write_user_version(db: aiosqlite.Connection, version: int) -> None:
+    """Persist schema version via PRAGMA user_version (integer literal only)."""
+    if version < 0:
+        raise ValueError(
+            f"invalid schema version: received {version!r}, expected non-negative integer"
+        )
+    await db.execute(f"PRAGMA user_version = {version}")
+
+
+async def _ensure_sessions_schema(db: aiosqlite.Connection) -> None:
+    """Create the sessions table and index idempotently."""
+    await db.execute(_SESSIONS_DDL)
+    await db.execute(_IDX_SESSIONS_KEY_DDL)
+
+
+async def _run_schema_migrations(db: aiosqlite.Connection) -> None:
+    """Upgrade local session SQLite to ``CURRENT_SCHEMA_VERSION`` idempotently."""
+    version = await _read_user_version(db)
+    if version > CURRENT_SCHEMA_VERSION:
+        raise ValueError(
+            f"unsupported schema version: received user_version={version!r}, "
+            f"expected 0..{CURRENT_SCHEMA_VERSION}"
+        )
+
+    await _ensure_sessions_schema(db)
+
+    if version < CURRENT_SCHEMA_VERSION:
+        await _write_user_version(db, CURRENT_SCHEMA_VERSION)
+
+
 class SessionStore:
     """Persist session metadata in a local SQLite database."""
 
@@ -118,11 +159,10 @@ class SessionStore:
         self._clock = clock or (lambda: datetime.now(tz=UTC))
 
     async def initialize(self) -> None:
-        """Create schema and indexes idempotently."""
+        """Create schema, run migrations, and record the V1 baseline idempotently."""
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         async with aiosqlite.connect(self._db_path) as db:
-            await db.execute(_SESSIONS_DDL)
-            await db.execute(_IDX_SESSIONS_KEY_DDL)
+            await _run_schema_migrations(db)
             await db.commit()
 
     async def create(self, params: SessionCreateParams) -> SessionRecord:
@@ -180,7 +220,7 @@ class SessionStore:
                 SELECT {_SELECT_COLUMNS}
                 FROM sessions
                 WHERE session_key = ?
-                ORDER BY updated_at DESC
+                ORDER BY updated_at DESC, rowid DESC
                 LIMIT 1
                 """
             query_params: tuple[Any, ...] = (session_key,)
