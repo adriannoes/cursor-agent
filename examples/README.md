@@ -2,7 +2,7 @@
 
 Product-facing examples for the orchestration layer. Use `cursor-agent` and its CLI — not raw `cursor_sdk` imports.
 
-Historical SDK investigation scripts live under [internal-docs/sdk-spikes/](../internal-docs/sdk-spikes/) and are not recommended for new integrations.
+Historical SDK investigation scripts are archived under [docs/archive/sdk-spikes/](../docs/archive/sdk-spikes/) and are not recommended for new integrations.
 
 ## Local CLI
 
@@ -80,7 +80,7 @@ Jobs are stored in `~/.cursor-agent/cron/jobs.yaml`. Full operator notes: [docs/
 
 Early bridge and tool-introspection probes are preserved for provenance only:
 
-- [internal-docs/sdk-spikes/async_repl.py](../internal-docs/sdk-spikes/async_repl.py)
-- [internal-docs/sdk-spikes/tools_list.py](../internal-docs/sdk-spikes/tools_list.py)
+- [docs/archive/sdk-spikes/async_repl.py](../docs/archive/sdk-spikes/async_repl.py)
+- [docs/archive/sdk-spikes/tools_list.py](../docs/archive/sdk-spikes/tools_list.py)
 
 Do not treat these as the public integration path. Application code should use `cursor_agent.sdk_facade` instead of importing `cursor_sdk` directly.
