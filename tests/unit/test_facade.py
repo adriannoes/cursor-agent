@@ -703,10 +703,9 @@ async def test_log_emit_send_start_and_end_ndjson() -> None:
 
 
 def test_resolve_mcp_servers_stub_profiles() -> None:
-    """MCP stub returns empty dict for coding and messaging profiles."""
+    """Legacy MCP API returns empty dict for coding and messaging profiles."""
     assert resolve_mcp_servers("coding") == {}
     assert resolve_mcp_servers("messaging") == {}
-    assert resolve_mcp_servers("unknown") == {}
 
 
 def test_facade_logging_redacts_api_key_patterns() -> None:

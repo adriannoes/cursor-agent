@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import pytest
+
 from cursor_agent.tool_profile_policy import (
     effective_tool_profile,
+    mcp_servers_override_for_profile,
     passes_mcp_servers_on_resume,
     requires_messaging_hooks,
     resolve_mcp_servers,
@@ -29,11 +32,32 @@ def test_requires_messaging_hooks_follows_effective_profile() -> None:
     assert requires_messaging_hooks("coding", "coding") is False
 
 
+def test_mcp_servers_override_for_profile_coding_preserves_sdk_settings() -> None:
+    """Coding create must omit mcp_servers so project/user MCP settings apply."""
+    assert mcp_servers_override_for_profile("coding") is None
+
+
+def test_mcp_servers_override_for_profile_messaging_forces_empty_map() -> None:
+    """Messaging create must pass an explicit empty MCP map."""
+    assert mcp_servers_override_for_profile("messaging") == {}
+
+
+def test_mcp_servers_override_for_profile_rejects_unknown() -> None:
+    """Unsupported profiles must fail fast instead of silently forcing empty MCP."""
+    with pytest.raises(ValueError, match="unsupported tool_profile"):
+        mcp_servers_override_for_profile("unknown")
+
+
 def test_resolve_mcp_servers_returns_empty_maps() -> None:
-    """Known and unknown profiles must resolve to empty MCP maps."""
+    """Legacy API collapses None (coding) and {} (messaging) to empty dict."""
     assert resolve_mcp_servers("coding") == {}
     assert resolve_mcp_servers("messaging") == {}
-    assert resolve_mcp_servers("unknown") == {}
+
+
+def test_resolve_mcp_servers_rejects_unknown_profile() -> None:
+    """Legacy API propagates unsupported profile errors from override helper."""
+    with pytest.raises(ValueError, match="unsupported tool_profile"):
+        resolve_mcp_servers("unknown")
 
 
 def test_sandbox_enabled_only_for_messaging() -> None:

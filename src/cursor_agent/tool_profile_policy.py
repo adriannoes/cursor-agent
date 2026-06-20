@@ -46,7 +46,10 @@ def mcp_servers_override_for_profile(tool_profile: str) -> dict[str, Any] | None
         return {}
     if tool_profile == "coding":
         return None
-    return {}
+    raise ValueError(
+        f"unsupported tool_profile for MCP override: received {tool_profile!r}, "
+        "expected 'coding' or 'messaging'"
+    )
 
 
 def passes_mcp_servers_on_resume(tool_profile: str) -> bool:

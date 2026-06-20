@@ -12,7 +12,7 @@ RETRY_MAX_ATTEMPTS = 3
 RETRY_BACKOFF_CAP_SECONDS = 30.0
 
 
-def is_retryable_error(exc: BaseException) -> bool:
+def is_retryable_error(exc: Exception) -> bool:
     """Return True when an exception advertises ADR-024 retry semantics."""
     return bool(getattr(exc, "is_retryable", False))
 
@@ -31,7 +31,7 @@ def parse_retry_after_seconds(value: object) -> float | None:
     return None
 
 
-def retry_after_seconds(exc: BaseException, attempt: int) -> float:
+def retry_after_seconds(exc: Exception, attempt: int) -> float:
     """Compute delay before the next retry attempt."""
     retry_after = parse_retry_after_seconds(getattr(exc, "retry_after", None))
     if retry_after is not None:
@@ -42,11 +42,11 @@ def retry_after_seconds(exc: BaseException, attempt: int) -> float:
 
 async def retry_sdk_call(operation: Callable[[], Awaitable[_T]]) -> _T:
     """Retry a pre-run SDK operation up to three times when retryable."""
-    last_error: BaseException | None = None
+    last_error: Exception | None = None
     for attempt in range(RETRY_MAX_ATTEMPTS):
         try:
             return await operation()
-        except BaseException as exc:
+        except Exception as exc:
             if not is_retryable_error(exc):
                 raise
             last_error = exc

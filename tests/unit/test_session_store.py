@@ -344,6 +344,16 @@ class _SteppingClock:
         return next(self._times)
 
 
+class _FrozenClock:
+    """Return the same UTC timestamp for every call (tie-breaker tests)."""
+
+    def __init__(self, moment: datetime) -> None:
+        self._moment = moment
+
+    def __call__(self) -> datetime:
+        return self._moment
+
+
 async def _initialized_store(
     tmp_path: Path,
     clock: _SteppingClock,
@@ -416,6 +426,39 @@ async def test_session_store_resolve_returns_latest_by_updated_at(
     assert resolved.id == newer.id
     assert resolved.agent_id == "agent-new"
     assert resolved.id != older.id
+
+
+@pytest.mark.asyncio
+async def test_session_store_resolve_tiebreaks_equal_updated_at_by_rowid(
+    tmp_path: Path,
+) -> None:
+    """resolve(session_key) picks the most recently inserted row when updated_at ties."""
+    frozen = datetime(2026, 6, 16, 10, 0, 0, tzinfo=UTC)
+    store = await _initialized_store(tmp_path, _FrozenClock(frozen))
+    session_key = build_cli_session_key(tmp_path)
+
+    first = await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id="agent-first",
+            workspace=str(tmp_path.resolve()),
+            runtime="local",
+        )
+    )
+    second = await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id="agent-second",
+            workspace=str(tmp_path.resolve()),
+            runtime="local",
+        )
+    )
+
+    resolved = await store.resolve(session_key)
+    assert resolved is not None
+    assert resolved.id == second.id
+    assert resolved.agent_id == "agent-second"
+    assert resolved.id != first.id
 
 
 @pytest.mark.asyncio
