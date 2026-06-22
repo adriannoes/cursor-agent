@@ -12,6 +12,7 @@ from cursor_agent.platforms.telegram_chunking import (
     escape_telegram_html,
     telegram_session_key,
 )
+from cursor_agent.platforms.telegram_delivery import parse_delivery_chat_id
 from cursor_agent.platforms.telegram_formatting import (
     TelegramFormattingError,
     prepare_telegram_assistant_reply_chunks,
@@ -457,3 +458,20 @@ async def test_telegram_send_plain_reply_logs_when_bot_unavailable(
     assert any(
         "telegram_plain_reply_dropped" in record.message for record in caplog.records
     )
+
+
+def test_parse_delivery_chat_id_accepts_numeric_strings() -> None:
+    """Cron delivery parses numeric Telegram chat ids as integers."""
+    assert parse_delivery_chat_id("444555666") == 444555666
+    assert parse_delivery_chat_id("  -1001234567890  ") == -1001234567890
+
+
+def test_parse_delivery_chat_id_preserves_non_numeric_channel_names() -> None:
+    """Cron delivery keeps @channel usernames as strings for the Telegram API."""
+    assert parse_delivery_chat_id("@my_channel") == "@my_channel"
+
+
+def test_parse_delivery_chat_id_rejects_empty_string() -> None:
+    """Cron delivery rejects blank chat ids with a descriptive error."""
+    with pytest.raises(ValueError, match="invalid telegram chat_id"):
+        parse_delivery_chat_id("   ")
