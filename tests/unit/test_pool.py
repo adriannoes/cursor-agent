@@ -277,6 +277,33 @@ async def test_get_re_resumes_when_model_override_changes(
 
 
 @pytest.mark.asyncio
+async def test_get_re_resumes_when_effective_tool_profile_changes(
+    store: SessionStore,
+) -> None:
+    """get() resumes again when the effective tool_profile changes on a warm agent."""
+    session_key = "cli:default:profchg1"
+    facade = ResumeTrackingFacade()
+    await _seed_session(store, facade, session_key, tool_profile="coding")
+
+    pool_coding = SessionAgentPool(
+        store=store,
+        facade=facade,
+        config=_config_with_tool_profile("coding"),
+    )
+    await pool_coding.get(session_key)
+
+    pool_messaging = SessionAgentPool(
+        store=store,
+        facade=facade,
+        config=_config_with_tool_profile("messaging"),
+    )
+    await pool_messaging.get(session_key)
+
+    assert len(facade.resume_calls) == 2
+    assert facade.resume_calls[1]["tool_profile"] == "messaging"
+
+
+@pytest.mark.asyncio
 async def test_send_uses_model_override_on_resume(
     store: SessionStore,
     config: CursorAgentConfig,

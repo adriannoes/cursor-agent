@@ -182,8 +182,13 @@ class AsyncSdkFacade:
         """Resume an SDK agent and re-inject MCP servers for the profile."""
         profile = tool_profile or self._agent_tool_profiles.get(agent_id, "coding")
         if agent_id in self._agents:
-            self._agent_tool_profiles[agent_id] = profile
-            return agent_id
+            current_profile = self._agent_tool_profiles.get(agent_id, "coding")
+            requested_profile = (
+                tool_profile if tool_profile is not None else current_profile
+            )
+            if requested_profile == current_profile:
+                return agent_id
+            profile = requested_profile
 
         client = self._require_client()
         local_setting_sources = (
