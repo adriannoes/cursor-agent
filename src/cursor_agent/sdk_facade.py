@@ -75,6 +75,15 @@ def _build_local_agent_options(
     )
 
 
+def _resume_cache_key(
+    *,
+    model: str | None,
+    tool_profile: str,
+) -> str:
+    """Build a stable key for in-memory resume short-circuit decisions."""
+    return f"{model}:{tool_profile}"
+
+
 class AsyncSdkFacade:
     """Production SdkFacade backed by the Cursor Python SDK bridge."""
 
@@ -93,6 +102,7 @@ class AsyncSdkFacade:
         self._client: AsyncClient | None = None
         self._agents: dict[str, Any] = {}
         self._agent_tool_profiles: dict[str, str] = {}
+        self._agent_models: dict[str, str | None] = {}
         self._active_runs: dict[str, Any] = {}
         self._cancelled_agents: set[str] = set()
         self._closed = False
@@ -163,6 +173,7 @@ class AsyncSdkFacade:
             await agent.__aenter__()
             self._agents[agent.agent_id] = agent
             self._agent_tool_profiles[agent.agent_id] = tool_profile
+            self._agent_models[agent.agent_id] = model
             return agent.agent_id
 
         try:
@@ -181,14 +192,18 @@ class AsyncSdkFacade:
     ) -> str:
         """Resume an SDK agent and re-inject MCP servers for the profile."""
         profile = tool_profile or self._agent_tool_profiles.get(agent_id, "coding")
+        effective_model = (
+            model if model is not None else self._agent_models.get(agent_id)
+        )
+        requested_key = _resume_cache_key(model=effective_model, tool_profile=profile)
         if agent_id in self._agents:
-            current_profile = self._agent_tool_profiles.get(agent_id, "coding")
-            requested_profile = (
-                tool_profile if tool_profile is not None else current_profile
+            cached_key = _resume_cache_key(
+                model=self._agent_models.get(agent_id),
+                tool_profile=self._agent_tool_profiles.get(agent_id, "coding"),
             )
-            if requested_profile == current_profile:
+            if cached_key == requested_key:
+                self._agent_tool_profiles[agent_id] = profile
                 return agent_id
-            profile = requested_profile
 
         client = self._require_client()
         local_setting_sources = (
@@ -216,6 +231,8 @@ class AsyncSdkFacade:
             await agent.__aenter__()
             self._agents[agent.agent_id] = agent
             self._agent_tool_profiles[agent.agent_id] = profile
+            if model is not None:
+                self._agent_models[agent.agent_id] = model
             return agent.agent_id
 
         try:

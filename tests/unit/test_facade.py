@@ -505,6 +505,39 @@ async def test_resume_agent_profile_change_invokes_sdk_with_mcp_override() -> No
 
 
 @pytest.mark.asyncio
+async def test_resume_agent_applies_model_change_when_agent_already_in_memory() -> None:
+    """resume_agent calls the SDK again when the effective model changes."""
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-in-memory"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.create = AsyncMock(return_value=mock_agent)
+    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(api_key="test-key")
+    facade._client = mock_client
+
+    agent_id = await facade.create_agent(
+        workspace="/repo",
+        model="composer-2.5",
+        tool_profile="coding",
+    )
+    resumed_id = await facade.resume_agent(
+        agent_id,
+        workspace="/repo",
+        model="composer-2.5-fast",
+        tool_profile="coding",
+    )
+
+    assert resumed_id == agent_id
+    mock_client.agents.resume.assert_called_once()
+    options = _resume_request_options(mock_client)
+    assert options.get("model") == {"id": "composer-2.5-fast"}
+
+
+@pytest.mark.asyncio
 async def test_async_send_drains_messages_and_wait() -> None:
     """send drains messages(), calls wait(), and never uses run.text()."""
     assistant_msg = SimpleNamespace(
