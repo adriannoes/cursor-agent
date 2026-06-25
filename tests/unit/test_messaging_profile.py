@@ -151,3 +151,46 @@ async def test_messaging_resume_agent_passes_sandbox_enabled(
     local_opts = options.get("local")
     assert isinstance(local_opts, dict)
     assert _sandbox_enabled(local_opts) is True
+
+
+@pytest.mark.asyncio
+async def test_resume_in_memory_profile_change_tracks_profile_without_sdk_call(
+    facade_with_client: tuple[AsyncSdkFacade, MagicMock],
+) -> None:
+    """In-memory resume updates tracked profile but skips SDK when agent is loaded."""
+    facade, mock_client = facade_with_client
+
+    agent_id = await facade.create_agent(
+        workspace="/repo/path",
+        tool_profile="coding",
+    )
+    resumed_id = await facade.resume_agent(
+        agent_id,
+        workspace="/repo/path",
+        tool_profile="messaging",
+    )
+
+    assert resumed_id == agent_id
+    assert facade._agent_tool_profiles[agent_id] == "messaging"
+    mock_client.agents.resume.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_messaging_create_then_resume_in_memory_skips_sdk_mcp_reinjection(
+    facade_with_client: tuple[AsyncSdkFacade, MagicMock],
+) -> None:
+    """Same-process create→resume messaging must still cold-call SDK for MCP injection."""
+    facade, mock_client = facade_with_client
+
+    agent_id = await facade.create_agent(
+        workspace="/repo/path",
+        tool_profile="messaging",
+    )
+    await facade.resume_agent(
+        agent_id,
+        workspace="/repo/path",
+        tool_profile="messaging",
+    )
+
+    mock_client.agents.create.assert_called_once()
+    mock_client.agents.resume.assert_not_called()
