@@ -300,6 +300,7 @@ async def test_get_re_resumes_when_effective_tool_profile_changes(
     await pool_messaging.get(session_key)
 
     assert len(facade.resume_calls) == 2
+    assert facade.resume_calls[0]["tool_profile"] == "coding"
     assert facade.resume_calls[1]["tool_profile"] == "messaging"
 
 
