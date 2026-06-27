@@ -447,6 +447,55 @@ async def test_messaging_resume_agent_passes_empty_mcp_servers_and_sandbox() -> 
 
 
 @pytest.mark.asyncio
+async def test_resume_agent_inherits_messaging_mcp_when_tool_profile_omitted() -> None:
+    """Cold resume without tool_profile must reuse stored messaging profile and empty MCP."""
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-messaging-inherit"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.create = AsyncMock(return_value=mock_agent)
+    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(api_key="test-key")
+    facade._client = mock_client
+
+    agent_id = await facade.create_agent(workspace="/repo/path", tool_profile="messaging")
+    facade._agents.clear()
+
+    resumed_id = await facade.resume_agent(agent_id, workspace="/repo/path")
+    assert resumed_id == agent_id
+
+    options = _resume_request_options(mock_client)
+    assert options.get("mcpServers") == {}
+    local_opts = options.get("local")
+    assert isinstance(local_opts, dict)
+    assert _sandbox_enabled(local_opts) is True
+
+
+@pytest.mark.asyncio
+async def test_resume_agent_defaults_to_coding_mcp_omission_for_unknown_agent() -> None:
+    """Cold resume for unknown agent_id without profile must omit MCP override (coding default)."""
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-unknown-cold"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(api_key="test-key")
+    facade._client = mock_client
+
+    await facade.resume_agent("agent-unknown-cold", workspace="/repo")
+
+    options = _resume_request_options(mock_client)
+    assert "mcpServers" not in options
+    assert "mcp_servers" not in options
+
+
+@pytest.mark.asyncio
 async def test_resume_agent_skips_sdk_call_when_agent_already_loaded() -> None:
     """resume_agent short-circuits when the agent is already in memory."""
     mock_agent = AsyncMock()
