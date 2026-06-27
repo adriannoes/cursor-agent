@@ -743,6 +743,67 @@ async def test_messaging_hook_deploy_uses_to_thread(
     assert ensure_messaging_hooks in to_thread_calls
 
 
+class CreateAgentTrackingColdStartFacade(FakeSdkFacade):
+    """Cold-start send failure facade that records create_agent on reattach."""
+
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(**kwargs)  # type: ignore[arg-type]
+        self._send_attempts = 0
+        self.create_agent_calls: list[dict[str, object]] = []
+
+    async def create_agent(
+        self,
+        *,
+        workspace: str,
+        model: str = "composer-2.5",
+        tool_profile: str = "coding",
+        runtime_mode: str = "local",
+    ) -> str:
+        self.create_agent_calls.append(
+            {
+                "workspace": workspace,
+                "model": model,
+                "tool_profile": tool_profile,
+                "runtime_mode": runtime_mode,
+            }
+        )
+        return await super().create_agent(
+            workspace=workspace,
+            model=model,
+            tool_profile=tool_profile,
+            runtime_mode=runtime_mode,
+        )
+
+    async def resume_agent(
+        self,
+        agent_id: str,
+        *,
+        workspace: str,
+        model: str | None = None,
+        tool_profile: str | None = None,
+        runtime_mode: str = "local",
+    ) -> str:
+        """Register a cold-resumed agent without requiring prior create."""
+        self._messages_by_agent.setdefault(agent_id, [])
+        return agent_id
+
+    async def send(
+        self,
+        agent_id: str,
+        message: str,
+        *,
+        callbacks: StreamCallbacks | None = None,
+        log_context: LogContext | None = None,
+    ) -> RunResult:
+        """Fail the first send with an internal SDK-style error."""
+        self._send_attempts += 1
+        if self._send_attempts == 1:
+            raise SdkInternalError("internal: internal error")
+        return await super().send(
+            agent_id, message, callbacks=callbacks, log_context=log_context
+        )
+
+
 class ColdStartSendFailFacade(FakeSdkFacade):
     """Simulates SDK internal failure on first send after cold resume."""
 
@@ -827,6 +888,34 @@ async def test_send_reattaches_agent_after_cold_resume_internal_error(
     assert row is not None
     assert row.agent_id != stale_agent_id
     assert row.agent_id.startswith("fake-")
+
+
+@pytest.mark.asyncio
+async def test_messaging_reattach_create_uses_messaging_tool_profile(
+    store: SessionStore,
+) -> None:
+    """Messaging session reattach must create a fresh agent with messaging profile."""
+    session_key = "cli:default:reattach-messaging"
+    stale_agent_id = "stale-agent-messaging"
+    await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id=stale_agent_id,
+            workspace="/tmp/workspace",
+            runtime="local",
+            tool_profile="messaging",
+        )
+    )
+
+    config = _config_with_tool_profile("messaging")
+    facade = CreateAgentTrackingColdStartFacade(default_reply="ok-after-messaging-reattach")
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    result = await pool.send(session_key, "hello messaging reattach")
+
+    assert result.status is RunStatus.FINISHED
+    assert facade._send_attempts == 2
+    assert len(facade.create_agent_calls) == 1
+    assert facade.create_agent_calls[0]["tool_profile"] == "messaging"
 
 
 @pytest.mark.asyncio
