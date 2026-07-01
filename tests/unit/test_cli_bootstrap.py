@@ -16,6 +16,7 @@ from cursor_agent.cli.startup import (
     resolve_sessions_db_path,
     session_key_for,
 )
+from cursor_agent.gateway.runner import gateway_runtime
 from cursor_agent.config.loader import CursorAgentConfig, load_config
 from cursor_agent.pool import SessionAgentPool
 from cursor_agent.sdk_facade import FakeSdkFacade
@@ -27,6 +28,7 @@ from tests.unit.cli_repl_helpers import (
     expected_session_key,
     seed_session,
 )
+from tests.unit.gateway_fakes import FakePlatformAdapter, gateway_config
 
 
 def test_session_key_for_returns_cli_default_hex(config: CursorAgentConfig) -> None:
@@ -361,6 +363,51 @@ async def test_repl_runtime_passes_dotenv_cursor_api_key_to_facade(
     monkeypatch.setattr("cursor_agent.cli.startup.AsyncSdkFacade", RecordingSdkFacade)
 
     async with repl_runtime(config):
+        pass
+
+    assert captured_api_keys == ["from-dotenv-key"]
+
+
+@pytest.mark.asyncio
+async def test_gateway_runtime_passes_dotenv_cursor_api_key_to_facade(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gateway facade bootstrap receives CURSOR_API_KEY from CWD .env when shell env is unset."""
+    captured_api_keys: list[str | None] = []
+
+    class RecordingSdkFacade:
+        """Capture api_key passed to the production AsyncSdkFacade constructor."""
+
+        def __init__(
+            self,
+            *,
+            api_key: str | None = None,
+            local_setting_sources: list[str] | None = None,
+            **kwargs: object,
+        ) -> None:
+            _ = (local_setting_sources, kwargs)
+            captured_api_keys.append(api_key)
+
+        async def __aenter__(self) -> RecordingSdkFacade:
+            return self
+
+        async def __aexit__(self, *_exc: object) -> None:
+            return None
+
+    (tmp_path / ".env").write_text("CURSOR_API_KEY=from-dotenv-key\n", encoding="utf-8")
+    monkeypatch.delenv("CURSOR_API_KEY", raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "cursor_agent.gateway.runner.AsyncSdkFacade", RecordingSdkFacade
+    )
+    load_cwd_dotenv()
+
+    async with gateway_runtime(
+        gateway_config(),
+        adapters=[FakePlatformAdapter()],
+        store_path=tmp_path / "gateway-sessions.db",
+    ):
         pass
 
     assert captured_api_keys == ["from-dotenv-key"]

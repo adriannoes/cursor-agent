@@ -36,6 +36,7 @@ from cursor_agent.sdk_facade import (
     StreamCallbacks,
     _map_sdk_exception,
 )
+from cursor_agent.sdk_retry import retry_sdk_call
 from cursor_agent.tool_profile_policy import resolve_mcp_servers
 
 
@@ -765,6 +766,17 @@ def test_map_sdk_exception_maps_type_error_to_config_error() -> None:
     )
     assert isinstance(mapped, ConfigError)
     assert "serialization failed" in str(mapped)
+
+
+@pytest.mark.asyncio
+async def test_retry_sdk_call_does_not_catch_cancelled_error() -> None:
+    """CancelledError must propagate without retry (PR #22 regression guard)."""
+
+    async def raise_cancelled() -> str:
+        raise asyncio.CancelledError()
+
+    with pytest.raises(asyncio.CancelledError):
+        await retry_sdk_call(raise_cancelled)
 
 
 @pytest.mark.asyncio
