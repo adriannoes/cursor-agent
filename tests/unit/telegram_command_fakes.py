@@ -71,6 +71,15 @@ class CancelTrackingFacade(FakeSdkFacade):
         await super().cancel(agent_id)
 
 
+class CancelRaisingFacade(CancelTrackingFacade):
+    """CancelTrackingFacade whose cancel raises for supersede failure tests."""
+
+    async def cancel(self, agent_id: str) -> None:
+        self.cancel_calls.append(agent_id)
+        _ = agent_id
+        raise RuntimeError("sdk cancel unavailable")
+
+
 def command_message(
     text: str,
     *,

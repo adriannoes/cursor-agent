@@ -18,6 +18,7 @@ from tests.unit.telegram_command_fakes import (
     DEFAULT_CHAT_ID,
     DEFAULT_WORKSPACE,
     OTHER_CHAT_ID,
+    CancelRaisingFacade,
     CancelTrackingFacade,
     CreateAgentTrackingFacade,
     command_message,
@@ -79,21 +80,13 @@ async def test_telegram_new_cancels_superseded_agent(tmp_path: object) -> None:
     await adapter.stop()
 
 
-class CancelFailingFacade(CancelTrackingFacade):
-    """FakeSdkFacade whose cancel raises to exercise best-effort supersede cleanup."""
-
-    async def cancel(self, agent_id: str) -> None:
-        self.cancel_calls.append(agent_id)
-        raise RuntimeError("sdk cancel failed")
-
-
 @pytest.mark.asyncio
 async def test_telegram_new_continues_when_supersede_cancel_fails(
     tmp_path: object,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """A failed supersede cancel must not block /new from creating a fresh session."""
-    facade = CancelFailingFacade()
+    facade = CancelRaisingFacade()
     adapter, fake_bot, fake_dispatcher, handles = make_command_adapter(
         tmp_path,
         facade=facade,
