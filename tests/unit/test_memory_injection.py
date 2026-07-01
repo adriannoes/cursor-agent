@@ -248,6 +248,68 @@ async def test_failed_first_turn_does_not_persist_memory_injected_metadata(
     assert row.metadata.get("memory_injected") is not True
 
 
+class ErrorStatusMemoryFacade(SendCapturingFacade):
+    """Fake facade that returns RunStatus.ERROR without raising."""
+
+    async def send(
+        self,
+        agent_id: str,
+        message: str,
+        *,
+        callbacks: StreamCallbacks | None = None,
+        log_context: LogContext | None = None,
+    ) -> RunResult:
+        """Record the composed message and return a terminal ERROR status."""
+        self.send_calls.append(
+            {
+                "agent_id": agent_id,
+                "message": message,
+                "callbacks": callbacks,
+                "log_context": log_context,
+            }
+        )
+        return RunResult(
+            run_id="error-run-1",
+            status=RunStatus.ERROR,
+            text=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_error_status_first_turn_does_not_persist_memory_injected_metadata(
+    store: SessionStore,
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """RunStatus.ERROR on the first send must leave memory eligible for retry."""
+    memory_root = tmp_path / "memory"
+    user_text = "prefer concise answers"
+    memory_text = "project uses uv"
+    _write_memory_files(memory_root, user_text=user_text, memory_text=memory_text)
+
+    session_key = "cli:default:memsenderr1"
+    facade = ErrorStatusMemoryFacade()
+    session_id = await _seed_session(store, facade, session_key)
+    pool = SessionAgentPool(
+        store=store,
+        facade=facade,
+        config=config,
+        memory_store=LocalMemoryStore(root=memory_root),
+    )
+
+    result = await pool.send(session_key, "first question")
+    assert result.status is RunStatus.ERROR
+
+    assert facade.send_calls[0]["message"] == _expected_injected_message(
+        user_text=user_text,
+        memory_text=memory_text,
+        user_message="first question",
+    )
+    row = await store.resolve(session_key, session_id=session_id)
+    assert row is not None
+    assert row.metadata.get("memory_injected") is not True
+
+
 @pytest.mark.asyncio
 async def test_invalid_utf8_memory_file_raises_config_error_before_send(
     store: SessionStore,
