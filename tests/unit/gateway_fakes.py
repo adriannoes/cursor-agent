@@ -26,6 +26,7 @@ from cursor_agent.platforms.base import (
 )
 from cursor_agent.pool import SessionAgentPool
 from cursor_agent.sdk_facade import FakeSdkFacade, SdkFacade
+from cursor_agent.sdk_facade_models import RunResult, RunStatus
 from cursor_agent.sessions.models import SessionCreateParams
 from cursor_agent.sessions.store import SessionStore
 
@@ -203,6 +204,39 @@ def memory_enabled_pool_factory(
         )
 
     return factory
+
+
+class NullTextPool(SessionAgentPool):
+    """Pool that simulates a successful SDK run with no assistant text."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+        self.send_completed = asyncio.Event()
+
+    async def send(
+        self,
+        session_key: str,
+        message: str,
+        *,
+        session_id: str | None = None,
+        session_row: object = None,
+        callbacks: object = None,
+        blocking: bool = True,
+        model_override: str | None = None,
+    ) -> RunResult:
+        _ = (
+            session_key,
+            message,
+            session_id,
+            session_row,
+            callbacks,
+            blocking,
+            model_override,
+        )
+        self.send_completed.set()
+        return RunResult(
+            run_id="run-empty", status=RunStatus.FINISHED, text=None, usage=None
+        )
 
 
 class SendSpyPool(SessionAgentPool):

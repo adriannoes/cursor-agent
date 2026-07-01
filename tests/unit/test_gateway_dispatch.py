@@ -16,6 +16,7 @@ from cursor_agent.sdk_facade import FakeSdkFacade
 from tests.unit.gateway_fakes import (
     FakePlatformAdapter,
     NoopCronScheduler,
+    NullTextPool,
     SendSpyPool,
     _expected_injected_message,
     _wait_for_condition,
@@ -279,3 +280,45 @@ async def test_telegram_first_message_memory_injected_through_shared_send_path(
         if call.get("text") == "hello after first turn"
     ]
     assert len(reply_calls) == 1
+
+
+async def test_dispatch_skips_outbound_when_pool_returns_none_text(
+    tmp_path: Path,
+) -> None:
+    """Successful pool runs without assistant text must not send an empty reply."""
+    config = gateway_config()
+    adapter = FakePlatformAdapter(platform="telegram")
+    facade = FakeSdkFacade()
+    session_key = "telegram:123456789:nulltext"
+    db_path = tmp_path / "sessions.db"
+
+    async with gateway_runtime(
+        gateway_config=config,
+        adapters=[adapter],
+        facade=facade,
+        store_path=db_path,
+        pool_factory=NullTextPool,
+    ) as ctx:
+        await seed_session(
+            ctx.store,
+            facade,
+            session_key,
+            workspace=config.workspace,
+            tool_profile="messaging",
+        )
+        pool = ctx.pool
+        assert isinstance(pool, NullTextPool)
+        await adapter.simulate_inbound(
+            InboundMessage(
+                platform="telegram",
+                sender_id="123456789",
+                session_key=session_key,
+                text="ping",
+            )
+        )
+        await _wait_for_condition(
+            lambda: pool.send_completed.is_set(),
+            description="null-text pool send completed",
+        )
+
+    assert adapter.outbound_messages == []
