@@ -17,9 +17,12 @@ from cursor_agent.sdk_facade import FakeSdkFacade
 from tests.unit.gateway_fakes import (
     FakePlatformAdapter,
     SendSpyPool,
+    _wait_for_condition,
     gateway_config,
     seed_session,
 )
+
+_BUSY_OUTBOUND_WAIT_ATTEMPTS = 100
 
 
 async def _wait_for_outbound_count(
@@ -27,13 +30,13 @@ async def _wait_for_outbound_count(
     expected_count: int,
 ) -> None:
     """Wait for background dispatch to publish enough outbound messages."""
-    for _attempt in range(20):
-        if len(adapter.outbound_messages) >= expected_count:
-            return
-        await asyncio.sleep(0.01)
-    raise AssertionError(
-        f"expected {expected_count} outbound messages, "
-        f"received {len(adapter.outbound_messages)}"
+    await _wait_for_condition(
+        lambda: len(adapter.outbound_messages) >= expected_count,
+        description=(
+            f"expected {expected_count} outbound messages, "
+            f"received {len(adapter.outbound_messages)}"
+        ),
+        attempts=_BUSY_OUTBOUND_WAIT_ATTEMPTS,
     )
 
 
