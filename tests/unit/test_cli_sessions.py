@@ -9,7 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 from cursor_agent.cli.app import app
-from cursor_agent.cli.startup import create_store, session_key_for
+from cursor_agent.cli.startup import create_store, load_cwd_dotenv, session_key_for
 from cursor_agent.config.loader import load_config
 from cursor_agent.sessions.models import SessionCreateParams
 from cursor_agent.sessions.store import SessionStore
@@ -119,3 +119,42 @@ def test_sessions_list_empty_store_message(
     result = CliRunner().invoke(app, ["sessions", "list"])
     assert result.exit_code == 0
     assert "No sessions" in result.stdout
+
+
+def test_sessions_list_uses_dotenv_workspace_for_session_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """sessions list honors CURSOR_AGENT__RUNTIME__LOCAL__CWD from CWD .env."""
+    workspace = tmp_path / "dotenv-workspace"
+    workspace.mkdir()
+    db_path = tmp_path / "sessions.db"
+    (tmp_path / ".env").write_text(
+        f"CURSOR_AGENT__RUNTIME__LOCAL__CWD={workspace}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("CURSOR_AGENT__RUNTIME__LOCAL__CWD", raising=False)
+    monkeypatch.chdir(tmp_path)
+    load_cwd_dotenv()
+
+    config = load_config(config_path=Path("/nonexistent/config.yaml"))
+    session_key = session_key_for(config)
+
+    store = SessionStore(db_path)
+    ids = asyncio.run(
+        _seed_sessions(store, session_key, titles=["Dotenv workspace session"])
+    )
+
+    def stub_create_store(
+        _config: object,
+        *,
+        store_path: Path | None = None,
+    ) -> SessionStore:
+        return SessionStore(db_path)
+
+    monkeypatch.setattr("cursor_agent.cli.app.create_store", stub_create_store)
+
+    result = CliRunner().invoke(app, ["sessions", "list"])
+    assert result.exit_code == 0
+    assert ids[0] in result.stdout
+    assert "Dotenv workspace session" in result.stdout

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -75,6 +76,46 @@ async def test_telegram_new_cancels_superseded_agent(tmp_path: object) -> None:
     row = await store.resolve(telegram_session_key(DEFAULT_CHAT_ID, DEFAULT_WORKSPACE))
     assert row is not None
     assert row.agent_id != old_agent_id
+    await adapter.stop()
+
+
+class CancelFailingFacade(CancelTrackingFacade):
+    """FakeSdkFacade whose cancel raises to exercise best-effort supersede cleanup."""
+
+    async def cancel(self, agent_id: str) -> None:
+        self.cancel_calls.append(agent_id)
+        raise RuntimeError("sdk cancel failed")
+
+
+@pytest.mark.asyncio
+async def test_telegram_new_continues_when_supersede_cancel_fails(
+    tmp_path: object,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A failed supersede cancel must not block /new from creating a fresh session."""
+    facade = CancelFailingFacade()
+    adapter, fake_bot, fake_dispatcher, handles = make_command_adapter(
+        tmp_path,
+        facade=facade,
+    )
+    _record_id, old_agent_id = await seed_chat_session(handles)
+    await adapter.start(track_inbound([]))
+
+    handler = await registered_handler(fake_dispatcher)
+    with caplog.at_level(logging.WARNING):
+        await handler(command_message("/new"))
+
+    assert facade.cancel_calls == [old_agent_id]
+    store = handles["store"]
+    assert isinstance(store, SessionStore)
+    row = await store.resolve(telegram_session_key(DEFAULT_CHAT_ID, DEFAULT_WORKSPACE))
+    assert row is not None
+    assert row.agent_id != old_agent_id
+    assert fake_bot.send_message_calls
+    assert any(
+        "telegram_new_supersede_cancel_failed" in record.message
+        for record in caplog.records
+    )
     await adapter.stop()
 
 

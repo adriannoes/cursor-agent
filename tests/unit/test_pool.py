@@ -858,3 +858,65 @@ async def test_send_reattaches_agent_after_invalid_agent_cold_resume(
     assert row is not None
     assert row.agent_id != stale_agent_id
     assert row.agent_id.startswith("fake-")
+
+
+class ReattachTrackingFacade(ColdStartSendFailFacade):
+    """Cold-start send failure facade that records create_agent keyword arguments."""
+
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(**kwargs)  # type: ignore[arg-type]
+        self.create_agent_calls: list[dict[str, object]] = []
+
+    async def create_agent(
+        self,
+        *,
+        workspace: str,
+        model: str = "composer-2.5",
+        tool_profile: str = "coding",
+        runtime_mode: str = "local",
+    ) -> str:
+        self.create_agent_calls.append(
+            {
+                "workspace": workspace,
+                "model": model,
+                "tool_profile": tool_profile,
+                "runtime_mode": runtime_mode,
+            }
+        )
+        return await super().create_agent(
+            workspace=workspace,
+            model=model,
+            tool_profile=tool_profile,
+            runtime_mode=runtime_mode,
+        )
+
+
+@pytest.mark.asyncio
+async def test_send_reattach_uses_messaging_tool_profile_on_create(
+    store: SessionStore,
+    tmp_path: Path,
+) -> None:
+    """Reattach after SDK failure must recreate agents with the session messaging profile."""
+    session_key = "cli:default:reattach-messaging"
+    workspace = tmp_path / "gateway-workspace"
+    workspace.mkdir()
+    stale_agent_id = "stale-agent-messaging"
+    await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id=stale_agent_id,
+            workspace=str(workspace),
+            runtime="local",
+            tool_profile="messaging",
+        )
+    )
+
+    facade = ReattachTrackingFacade(default_reply="ok-after-messaging-reattach")
+    config = _config_with_tool_profile("messaging")
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    result = await pool.send(session_key, "hello after messaging reattach")
+
+    assert result.status is RunStatus.FINISHED
+    assert facade.create_agent_calls
+    assert facade.create_agent_calls[-1]["tool_profile"] == "messaging"
+    assert facade.create_agent_calls[-1]["workspace"] == str(workspace)
