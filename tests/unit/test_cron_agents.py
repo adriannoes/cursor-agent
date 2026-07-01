@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from pathlib import Path
 
@@ -326,6 +327,36 @@ class _SessionCreateFailingStore(SessionStore):
 
     async def create(self, params: object) -> object:  # type: ignore[override]
         raise RuntimeError("simulated session store failure")
+
+
+class _SessionCreateCancelledStore(SessionStore):
+    """SessionStore whose ``create`` raises CancelledError during shutdown."""
+
+    async def create(self, params: object) -> object:  # type: ignore[override]
+        raise asyncio.CancelledError()
+
+
+@pytest.mark.asyncio
+async def test_create_cron_run_session_cancels_agent_when_store_create_cancelled(
+    cron_job: CronJob,
+    config: object,
+    tmp_path: Path,
+) -> None:
+    """CancelledError during persist must cancel the orphaned SDK agent."""
+    cancelled_store = _SessionCreateCancelledStore(tmp_path / "sessions.db")
+    await cancelled_store.initialize()
+    facade = CancelRecordingFacade()
+
+    with pytest.raises(asyncio.CancelledError):
+        await create_cron_run_session(
+            cron_job,
+            store=cancelled_store,
+            facade=facade,
+            config=config,  # type: ignore[arg-type]
+            run_id="run-cancel",
+        )
+
+    assert len(facade.cancelled_agents) == 1
 
 
 @pytest.mark.asyncio

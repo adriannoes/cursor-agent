@@ -125,6 +125,9 @@ async def create_cron_run_session(
                 metadata=build_cron_session_metadata(job.id, effective_run_id),
             )
         )
+    except asyncio.CancelledError:
+        await _cancel_agent_quietly(facade, agent_id)
+        raise
     except Exception:
         await _cancel_agent_quietly(facade, agent_id)
         raise
