@@ -92,6 +92,7 @@ class AsyncSdkFacade:
         self._logger = logger or _MODULE_LOGGER
         self._client: AsyncClient | None = None
         self._agents: dict[str, Any] = {}
+        self._agent_models: dict[str, str] = {}
         self._agent_tool_profiles: dict[str, str] = {}
         self._active_runs: dict[str, Any] = {}
         self._cancelled_agents: set[str] = set()
@@ -162,6 +163,7 @@ class AsyncSdkFacade:
                 )
             await agent.__aenter__()
             self._agents[agent.agent_id] = agent
+            self._agent_models[agent.agent_id] = model
             self._agent_tool_profiles[agent.agent_id] = tool_profile
             return agent.agent_id
 
@@ -182,8 +184,13 @@ class AsyncSdkFacade:
         """Resume an SDK agent and re-inject MCP servers for the profile."""
         profile = tool_profile or self._agent_tool_profiles.get(agent_id, "coding")
         if agent_id in self._agents:
-            self._agent_tool_profiles[agent_id] = profile
-            return agent_id
+            cached_model = self._agent_models.get(agent_id)
+            cached_profile = self._agent_tool_profiles.get(agent_id, "coding")
+            model_unchanged = model is None or model == cached_model
+            profile_unchanged = profile == cached_profile
+            if model_unchanged and profile_unchanged:
+                self._agent_tool_profiles[agent_id] = profile
+                return agent_id
 
         client = self._require_client()
         local_setting_sources = (
@@ -210,6 +217,8 @@ class AsyncSdkFacade:
             agent = await client.agents.resume(agent_id, request_options)
             await agent.__aenter__()
             self._agents[agent.agent_id] = agent
+            if model is not None:
+                self._agent_models[agent.agent_id] = model
             self._agent_tool_profiles[agent.agent_id] = profile
             return agent.agent_id
 

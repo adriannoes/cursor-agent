@@ -474,6 +474,37 @@ async def test_resume_agent_skips_sdk_call_when_agent_already_loaded() -> None:
 
 
 @pytest.mark.asyncio
+async def test_resume_agent_calls_sdk_when_warm_agent_model_changes() -> None:
+    """resume_agent must call SDK resume when the effective model changes."""
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-in-memory"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.create = AsyncMock(return_value=mock_agent)
+    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(api_key="test-key")
+    facade._client = mock_client
+
+    agent_id = await facade.create_agent(
+        workspace="/repo",
+        model="composer-2.5",
+        tool_profile="coding",
+    )
+    resumed_id = await facade.resume_agent(
+        agent_id,
+        workspace="/repo",
+        model="composer-2.5-fast",
+        tool_profile="coding",
+    )
+
+    assert resumed_id == agent_id
+    mock_client.agents.resume.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_async_send_drains_messages_and_wait() -> None:
     """send drains messages(), calls wait(), and never uses run.text()."""
     assistant_msg = SimpleNamespace(
