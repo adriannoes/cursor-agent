@@ -8,6 +8,8 @@ import signal
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from cursor_agent.gateway.runner import (
     gateway_runtime,
     register_shutdown_signals,
@@ -98,6 +100,66 @@ async def test_shutdown_cancels_active_agent_via_facade(tmp_path: Path) -> None:
 
     await dispatch_task
     assert agent_id in facade.cancel_calls
+
+
+class CancelFailingFacade(CancelTrackingFacade):
+    """FakeSdkFacade whose cancel raises to exercise best-effort shutdown cleanup."""
+
+    async def cancel(self, agent_id: str) -> None:
+        self.cancel_calls.append(agent_id)
+        raise RuntimeError("sdk cancel failed")
+
+
+async def test_shutdown_continues_when_facade_cancel_raises(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A failed facade.cancel during shutdown must not block facade.close."""
+    config = gateway_config()
+    adapter = FakePlatformAdapter(platform="telegram")
+    send_release = asyncio.Event()
+    facade = CancelFailingFacade(send_release=send_release, default_reply="reply")
+    session_key = "telegram:123456789:cancel-failure"
+    db_path = tmp_path / "sessions.db"
+
+    with patch("cursor_agent.gateway.runner.bootstrap_messaging_hooks"):
+        async with gateway_runtime(
+            gateway_config=config,
+            adapters=[adapter],
+            facade=facade,
+            store_path=db_path,
+            shutdown_timeout_seconds=0.05,
+            register_signals=False,
+        ) as ctx:
+            _session_id, agent_id = await seed_session_with_agent(
+                ctx.store,
+                facade,
+                session_key,
+                workspace=config.workspace,
+            )
+
+            dispatch_task = asyncio.create_task(
+                adapter.simulate_inbound(
+                    InboundMessage(
+                        platform="telegram",
+                        sender_id="123456789",
+                        session_key=session_key,
+                        text="long running",
+                    )
+                )
+            )
+            await facade.send_in_progress.wait()
+            with caplog.at_level(logging.WARNING):
+                exit_code = await ctx.shutdown_coordinator.shutdown(ctx)
+
+    await dispatch_task
+    assert agent_id in facade.cancel_calls
+    assert facade.close_calls == 1
+    assert exit_code == 0
+    assert any(
+        "gateway shutdown: facade cancel failed" in record.message
+        for record in caplog.records
+    )
 
 
 async def test_shutdown_cancels_stuck_dispatch_tasks_on_timeout(
