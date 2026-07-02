@@ -201,7 +201,9 @@ class AsyncSdkFacade:
                 model=self._agent_models.get(agent_id),
                 tool_profile=self._agent_tool_profiles.get(agent_id, "coding"),
             )
-            if cached_key == requested_key:
+            if cached_key == requested_key and not passes_mcp_servers_on_resume(
+                profile
+            ):
                 self._agent_tool_profiles[agent_id] = profile
                 return agent_id
 

@@ -448,6 +448,66 @@ async def test_messaging_resume_agent_passes_empty_mcp_servers_and_sandbox() -> 
 
 
 @pytest.mark.asyncio
+async def test_messaging_resume_after_warm_coding_agent_calls_sdk_with_empty_mcp() -> (
+    None
+):
+    """Warm coding agent resumed as messaging must re-inject empty MCP servers."""
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-warm-profile-switch"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.create = AsyncMock(return_value=mock_agent)
+    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(api_key="test-key")
+    facade._client = mock_client
+
+    agent_id = await facade.create_agent(workspace="/repo", tool_profile="coding")
+    await facade.resume_agent(
+        agent_id,
+        workspace="/repo",
+        tool_profile="messaging",
+    )
+
+    options = _resume_request_options(mock_client)
+    assert options.get("mcpServers") == {}
+    local_opts = options.get("local")
+    assert isinstance(local_opts, dict)
+    assert _sandbox_enabled(local_opts) is True
+
+
+@pytest.mark.asyncio
+async def test_messaging_warm_resume_reinjects_empty_mcp_servers() -> None:
+    """Messaging warm resume still calls SDK to enforce empty MCP servers."""
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-warm-messaging"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.create = AsyncMock(return_value=mock_agent)
+    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(api_key="test-key")
+    facade._client = mock_client
+
+    agent_id = await facade.create_agent(workspace="/repo", tool_profile="messaging")
+    mock_client.agents.resume.reset_mock()
+
+    await facade.resume_agent(
+        agent_id,
+        workspace="/repo",
+        tool_profile="messaging",
+    )
+
+    mock_client.agents.resume.assert_called_once()
+    options = _resume_request_options(mock_client)
+    assert options.get("mcpServers") == {}
+
+
+@pytest.mark.asyncio
 async def test_resume_agent_skips_sdk_call_when_agent_already_loaded() -> None:
     """resume_agent short-circuits when the agent is already in memory."""
     mock_agent = AsyncMock()
