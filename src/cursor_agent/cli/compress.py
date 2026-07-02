@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 
+from cursor_agent.agent_cleanup import cancel_agent_quietly
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.errors import ConfigError
 from cursor_agent.sdk_facade import RunStatus, SdkFacade
@@ -112,6 +113,7 @@ async def run_compress_session(
 
     previous_agent_id = row.agent_id
     prompt = load_compress_prompt()
+    orphaned_agent_id: str | None = None
 
     try:
         await store.update_metadata(
@@ -150,6 +152,7 @@ async def run_compress_session(
             tool_profile=row.tool_profile,
             runtime_mode=row.runtime,
         )
+        orphaned_agent_id = new_agent_id
 
         await store.update_agent_id(session_id, new_agent_id)
 
@@ -170,6 +173,7 @@ async def run_compress_session(
             raise ConfigError(msg)
 
         await _clear_compressing_status(store, session_key, session_id)
+        orphaned_agent_id = None
 
         return CompressResult(
             session_id=session_id,
@@ -177,6 +181,8 @@ async def run_compress_session(
             new_agent_id=new_agent_id,
         )
     except ConfigError:
+        if orphaned_agent_id is not None:
+            await cancel_agent_quietly(facade, orphaned_agent_id)
         await _rollback_compress_state(
             store,
             session_key,
@@ -185,6 +191,8 @@ async def run_compress_session(
         )
         raise
     except Exception as exc:
+        if orphaned_agent_id is not None:
+            await cancel_agent_quietly(facade, orphaned_agent_id)
         await _rollback_compress_state(
             store,
             session_key,

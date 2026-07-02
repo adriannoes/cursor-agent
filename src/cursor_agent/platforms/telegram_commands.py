@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Final
 
+from cursor_agent.agent_cleanup import cancel_agent_quietly
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.gateway.config import GatewayConfig
 from cursor_agent.product_copy import TELEGRAM_NO_SESSION_HINT
@@ -129,16 +130,20 @@ class TelegramCommandRouter:
             tool_profile=self._config.tool_profile,
             runtime_mode=self._config.runtime.mode,
         )
-        await self._store.create(
-            SessionCreateParams(
-                session_key=session_key,
-                agent_id=agent_id,
-                workspace=workspace,
-                runtime=self._config.runtime.mode,
-                tool_profile=self._config.tool_profile,
-                title=None,
-            ),
-        )
+        try:
+            await self._store.create(
+                SessionCreateParams(
+                    session_key=session_key,
+                    agent_id=agent_id,
+                    workspace=workspace,
+                    runtime=self._config.runtime.mode,
+                    tool_profile=self._config.tool_profile,
+                    title=None,
+                ),
+            )
+        except BaseException:
+            await cancel_agent_quietly(self._facade, agent_id)
+            raise
         if previous is not None and previous.agent_id != agent_id:
             await self._cancel_superseded_agent(session_key, previous.agent_id)
         self._logger.info(

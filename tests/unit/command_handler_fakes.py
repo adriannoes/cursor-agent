@@ -211,6 +211,7 @@ class _CompressSendSpyFacade(FakeSdkFacade):
         self._status_session_id = session_id
         self.send_calls: list[dict[str, str]] = []
         self.create_agent_calls: list[dict[str, object]] = []
+        self.cancel_calls: list[str] = []
         self.metadata_at_send: list[dict[str, object]] = []
         self._summary_generated = False
 
@@ -237,6 +238,11 @@ class _CompressSendSpyFacade(FakeSdkFacade):
             tool_profile=tool_profile,
             runtime_mode=runtime_mode,
         )
+
+    async def cancel(self, agent_id: str) -> None:
+        """Record cancel invocations and delegate to the parent fake."""
+        self.cancel_calls.append(agent_id)
+        await super().cancel(agent_id)
 
     async def send(
         self,

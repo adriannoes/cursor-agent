@@ -4,15 +4,22 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
+from cursor_agent.config.loader import load_config
 from cursor_agent.platforms.base import InboundMessage
 from cursor_agent.platforms.telegram_chunking import telegram_session_key
+from cursor_agent.platforms.telegram_commands import TelegramCommandRouter
 from cursor_agent.sessions.models import SessionCreateParams
 from cursor_agent.sessions.store import SessionStore
 
-from tests.unit.gateway_fakes import seed_session_with_agent, track_inbound
+from tests.unit.gateway_fakes import (
+    gateway_config,
+    seed_session_with_agent,
+    track_inbound,
+)
 from tests.unit.telegram_adapter_fakes import registered_handler
 from tests.unit.telegram_command_fakes import (
     DEFAULT_CHAT_ID,
@@ -26,6 +33,13 @@ from tests.unit.telegram_command_fakes import (
     seed_chat_session,
     start_command_adapter,
 )
+
+
+class _SessionCreateFailingStore(SessionStore):
+    """SessionStore whose ``create`` always fails to simulate a persist error."""
+
+    async def create(self, params: object) -> object:  # type: ignore[override]
+        raise RuntimeError("simulated session store failure")
 
 
 @pytest.mark.asyncio
@@ -55,6 +69,33 @@ async def test_telegram_new_creates_session_row_and_agent(tmp_path: object) -> N
     assert fake_bot.send_message_calls
     assert received == []
     await adapter.stop()
+
+
+@pytest.mark.asyncio
+async def test_telegram_new_cancels_agent_when_store_create_fails(
+    tmp_path: Path,
+) -> None:
+    """Persist failure after create_agent must cancel the orphaned SDK agent."""
+    facade = CancelTrackingFacade()
+    store = _SessionCreateFailingStore(tmp_path / "sessions-fail.db")
+    await store.initialize()
+    config = load_config(config_path=tmp_path / "missing.yaml")
+    workspace = str(tmp_path / "workspace")
+    gateway_config_obj = gateway_config(workspace=workspace)
+    session_key = telegram_session_key(DEFAULT_CHAT_ID, workspace)
+    router = TelegramCommandRouter(
+        gateway_config=gateway_config_obj,
+        config=config,
+        store=store,
+        facade=facade,
+        logger=logging.getLogger("test.telegram.new.cleanup"),
+        send_plain_reply=AsyncMock(),
+    )
+
+    with pytest.raises(RuntimeError, match="simulated session store failure"):
+        await router.dispatch("new", chat_id=DEFAULT_CHAT_ID, session_key=session_key)
+
+    assert len(facade.cancel_calls) == 1
 
 
 @pytest.mark.asyncio
