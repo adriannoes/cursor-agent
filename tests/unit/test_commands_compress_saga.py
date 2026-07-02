@@ -203,6 +203,8 @@ async def test_compress_session_rollback_on_summary_delivery_failure(
 
     assert len(facade.create_agent_calls) == 2
     assert len(facade.send_calls) == 2
+    assert len(facade.cancel_calls) == 1
+    assert facade.cancel_calls[0] != previous_agent_id
 
 
 async def test_compress_session_preserves_memory_injected_metadata(
