@@ -13,6 +13,7 @@ from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.cron.models import CronJob
 from cursor_agent.errors import AgentBusyError, CursorAgentError
 from cursor_agent.pool import SessionAgentPool
+from cursor_agent.agent_cleanup import cancel_agent_quietly
 from cursor_agent.sdk_facade import RunResult, RunStatus, SdkFacade
 from cursor_agent.sessions.models import SessionCreateParams, SessionRecord
 from cursor_agent.sessions.store import SessionStore
@@ -78,18 +79,6 @@ def build_cron_session_metadata(job_id: str, run_id: str) -> dict[str, object]:
     }
 
 
-async def _cancel_agent_quietly(facade: SdkFacade, agent_id: str) -> None:
-    """Best-effort cancel of an SDK agent; never raises to the caller."""
-    try:
-        await facade.cancel(agent_id)
-    except Exception:
-        _MODULE_LOGGER.warning(
-            "cron cleanup: failed to cancel orphaned agent_id=%s",
-            agent_id,
-            exc_info=True,
-        )
-
-
 async def create_cron_run_session(
     job: CronJob,
     *,
@@ -125,8 +114,8 @@ async def create_cron_run_session(
                 metadata=build_cron_session_metadata(job.id, effective_run_id),
             )
         )
-    except Exception:
-        await _cancel_agent_quietly(facade, agent_id)
+    except BaseException:
+        await cancel_agent_quietly(facade, agent_id)
         raise
 
 
@@ -193,7 +182,7 @@ async def run_cron_job(
             run_id=effective_run_id,
         )
     except asyncio.CancelledError:
-        await _cancel_agent_quietly(facade, row.agent_id)
+        await cancel_agent_quietly(facade, row.agent_id)
         raise
     await _prune_cron_sessions(store, facade, job.id, keep_last=keep_sessions)
     return outcome
@@ -215,7 +204,7 @@ async def _prune_cron_sessions(
         )
         return
     for agent_id in pruned_agent_ids:
-        await _cancel_agent_quietly(facade, agent_id)
+        await cancel_agent_quietly(facade, agent_id)
 
 
 async def _send_cron_prompt(
