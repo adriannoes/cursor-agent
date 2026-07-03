@@ -78,13 +78,13 @@ def build_cron_session_metadata(job_id: str, run_id: str) -> dict[str, object]:
     }
 
 
-async def _cancel_agent_quietly(facade: SdkFacade, agent_id: str) -> None:
-    """Best-effort cancel of an SDK agent; never raises to the caller."""
+async def _dispose_agent_quietly(facade: SdkFacade, agent_id: str) -> None:
+    """Best-effort dispose of an SDK agent; never raises to the caller."""
     try:
-        await facade.cancel(agent_id)
+        await facade.dispose_agent(agent_id)
     except Exception:
         _MODULE_LOGGER.warning(
-            "cron cleanup: failed to cancel orphaned agent_id=%s",
+            "cron cleanup: failed to dispose orphaned agent_id=%s",
             agent_id,
             exc_info=True,
         )
@@ -101,7 +101,7 @@ async def create_cron_run_session(
     """Create a dedicated SDK agent and session row for one cron execution.
 
     If persisting the session row fails after the SDK agent is created, the
-    agent is cancelled before re-raising so it does not leak without a backing
+    agent is disposed before re-raising so it does not leak without a backing
     session record.
     """
     effective_run_id = run_id if run_id is not None else uuid.uuid4().hex
@@ -126,10 +126,10 @@ async def create_cron_run_session(
             )
         )
     except asyncio.CancelledError:
-        await _cancel_agent_quietly(facade, agent_id)
+        await _dispose_agent_quietly(facade, agent_id)
         raise
     except Exception:
-        await _cancel_agent_quietly(facade, agent_id)
+        await _dispose_agent_quietly(facade, agent_id)
         raise
 
 
@@ -158,9 +158,9 @@ async def run_cron_job(
     delivery layer. Prompt bodies and assistant output are never logged here.
 
     After the run, cron session rows for the job beyond the most recent
-    ``keep_sessions`` are pruned and their SDK agents cancelled, bounding
+    ``keep_sessions`` are pruned and their SDK agents disposed, bounding
     accumulation. If the run task is cancelled (ADR-021 gateway shutdown drain
-    timeout), the per-run SDK agent is cancelled before the cancellation
+    timeout), the per-run SDK agent is disposed before the cancellation
     propagates so it does not keep running after the gateway stops.
     """
     effective_run_id = run_id if run_id is not None else uuid.uuid4().hex
@@ -196,7 +196,7 @@ async def run_cron_job(
             run_id=effective_run_id,
         )
     except asyncio.CancelledError:
-        await _cancel_agent_quietly(facade, row.agent_id)
+        await _dispose_agent_quietly(facade, row.agent_id)
         raise
     await _prune_cron_sessions(store, facade, job.id, keep_last=keep_sessions)
     return outcome
@@ -209,7 +209,7 @@ async def _prune_cron_sessions(
     *,
     keep_last: int,
 ) -> None:
-    """Prune stale cron session rows for a job and cancel their SDK agents."""
+    """Prune stale cron session rows for a job and dispose their SDK agents."""
     try:
         pruned_agent_ids = await store.prune_cron_sessions(job_id, keep_last=keep_last)
     except Exception:
@@ -218,7 +218,7 @@ async def _prune_cron_sessions(
         )
         return
     for agent_id in pruned_agent_ids:
-        await _cancel_agent_quietly(facade, agent_id)
+        await _dispose_agent_quietly(facade, agent_id)
 
 
 async def _send_cron_prompt(

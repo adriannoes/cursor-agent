@@ -49,6 +49,10 @@ class SdkFacade(Protocol):
         """Cancel an in-flight run for the agent."""
         ...
 
+    async def dispose_agent(self, agent_id: str) -> None:
+        """Cancel any active run and release the SDK agent handle."""
+        ...
+
     async def close(self) -> None:
         """Release bridge and internal state."""
         ...

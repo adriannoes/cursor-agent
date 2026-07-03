@@ -135,6 +135,12 @@ class FakeSdkFacade:
         """No-op cancel for fake runs without an active bridge."""
         _ = agent_id
 
+    async def dispose_agent(self, agent_id: str) -> None:
+        """Remove a fake agent from the in-memory facade."""
+        await self.cancel(agent_id)
+        self._messages_by_agent.pop(agent_id, None)
+        self._agent_profiles.pop(agent_id, None)
+
     def has_agent(self, agent_id: str) -> bool:
         """Return True when the fake facade tracks the agent in memory."""
         return agent_id in self._messages_by_agent
