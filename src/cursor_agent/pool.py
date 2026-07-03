@@ -24,7 +24,7 @@ from cursor_agent.messaging_hooks import (
     ensure_messaging_hooks,
     messaging_hook_source_fingerprint,
 )
-from cursor_agent.sdk_facade import RunResult, SdkFacade, StreamCallbacks
+from cursor_agent.sdk_facade import RunResult, RunStatus, SdkFacade, StreamCallbacks
 from cursor_agent.tool_profile_policy import (
     effective_tool_profile,
     requires_messaging_hooks,
@@ -366,7 +366,7 @@ class SessionAgentPool:
                 "last_run_id": result.run_id,
                 "last_status": result.status.value,
             }
-            if memory_not_yet_injected:
+            if memory_not_yet_injected and result.status is RunStatus.FINISHED:
                 metadata_update["memory_injected"] = True
             await self._store.update_metadata(
                 row.id,
