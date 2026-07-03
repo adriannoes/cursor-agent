@@ -309,17 +309,17 @@ async def test_combined_prompt_budget_cron_first_send_injects_memory_before_job_
     assert row.metadata.get("memory_injected") is True
 
 
-class CancelRecordingFacade(FakeSdkFacade):
-    """FakeSdkFacade that records which agent ids were cancelled."""
+class DisposeRecordingFacade(FakeSdkFacade):
+    """FakeSdkFacade that records which agent ids were disposed."""
 
     def __init__(self, **kwargs: object) -> None:
         super().__init__(**kwargs)  # type: ignore[arg-type]
-        self.cancelled_agents: list[str] = []
+        self.disposed_agents: list[str] = []
 
-    async def cancel(self, agent_id: str) -> None:
-        """Record the cancelled agent id and delegate to the parent fake."""
-        self.cancelled_agents.append(agent_id)
-        await super().cancel(agent_id)
+    async def dispose_agent(self, agent_id: str) -> None:
+        """Record disposal and remove the agent from the fake facade."""
+        self.disposed_agents.append(agent_id)
+        await super().dispose_agent(agent_id)
 
 
 class _SessionCreateFailingStore(SessionStore):
@@ -337,15 +337,15 @@ class _SessionCreateCancelledStore(SessionStore):
 
 
 @pytest.mark.asyncio
-async def test_create_cron_run_session_cancels_agent_when_store_create_cancelled(
+async def test_create_cron_run_session_disposes_agent_when_store_create_cancelled(
     cron_job: CronJob,
     config: object,
     tmp_path: Path,
 ) -> None:
-    """CancelledError during persist must cancel the orphaned SDK agent."""
+    """CancelledError during persist must dispose the orphaned SDK agent."""
     cancelled_store = _SessionCreateCancelledStore(tmp_path / "sessions.db")
     await cancelled_store.initialize()
-    facade = CancelRecordingFacade()
+    facade = DisposeRecordingFacade()
 
     with pytest.raises(asyncio.CancelledError):
         await create_cron_run_session(
@@ -356,19 +356,20 @@ async def test_create_cron_run_session_cancels_agent_when_store_create_cancelled
             run_id="run-cancel",
         )
 
-    assert len(facade.cancelled_agents) == 1
+    assert len(facade.disposed_agents) == 1
+    assert facade.has_agent(facade.disposed_agents[0]) is False
 
 
 @pytest.mark.asyncio
-async def test_create_cron_run_session_cancels_agent_when_store_create_fails(
+async def test_create_cron_run_session_disposes_agent_when_store_create_fails(
     cron_job: CronJob,
     config: object,
     tmp_path: Path,
 ) -> None:
-    """A persist failure after create_agent must cancel the orphaned SDK agent."""
+    """A persist failure after create_agent must dispose the orphaned SDK agent."""
     failing_store = _SessionCreateFailingStore(tmp_path / "sessions.db")
     await failing_store.initialize()
-    facade = CancelRecordingFacade()
+    facade = DisposeRecordingFacade()
 
     with pytest.raises(RuntimeError, match="simulated session store failure"):
         await create_cron_run_session(
@@ -379,7 +380,8 @@ async def test_create_cron_run_session_cancels_agent_when_store_create_fails(
             run_id="run-leak",
         )
 
-    assert len(facade.cancelled_agents) == 1
+    assert len(facade.disposed_agents) == 1
+    assert facade.has_agent(facade.disposed_agents[0]) is False
 
 
 @pytest.mark.asyncio
@@ -388,10 +390,10 @@ async def test_run_cron_job_returns_error_when_session_setup_fails(
     config: object,
     tmp_path: Path,
 ) -> None:
-    """run_cron_job reports ERROR (not raise) and cancels the agent on setup failure."""
+    """run_cron_job reports ERROR (not raise) and disposes the agent on setup failure."""
     failing_store = _SessionCreateFailingStore(tmp_path / "sessions.db")
     await failing_store.initialize()
-    facade = CancelRecordingFacade()
+    facade = DisposeRecordingFacade()
     pool = SessionAgentPool(store=failing_store, facade=facade, config=config)  # type: ignore[arg-type]
 
     outcome = await run_cron_job(
@@ -406,7 +408,8 @@ async def test_run_cron_job_returns_error_when_session_setup_fails(
     assert outcome.status is outcome.status.ERROR
     assert outcome.session_key == build_cron_session_key(cron_job.id, "run-error")
     assert outcome.session_id == ""
-    assert len(facade.cancelled_agents) == 1
+    assert len(facade.disposed_agents) == 1
+    assert facade.has_agent(facade.disposed_agents[0]) is False
 
 
 async def _create_cron_session_row(
@@ -497,7 +500,7 @@ async def test_run_cron_job_prunes_old_sessions_beyond_retention(
     config: object,
 ) -> None:
     """Repeated runs keep at most ``keep_sessions`` cron rows for the job."""
-    facade = CancelRecordingFacade(default_reply="done")
+    facade = DisposeRecordingFacade(default_reply="done")
     pool = SessionAgentPool(store=store, facade=facade, config=config)  # type: ignore[arg-type]
 
     for index in range(5):
@@ -511,8 +514,10 @@ async def test_run_cron_job_prunes_old_sessions_beyond_retention(
             keep_sessions=2,
         )
 
-    # Three oldest per-run agents were cancelled during pruning across the runs.
-    assert len(facade.cancelled_agents) == 3
+    # Three oldest per-run agents were disposed during pruning across the runs.
+    assert len(facade.disposed_agents) == 3
+    for agent_id in facade.disposed_agents:
+        assert facade.has_agent(agent_id) is False
     # Exactly the two most recent rows survived (keep_sessions=2).
     remaining = await store.prune_cron_sessions(cron_job.id, keep_last=0)
     assert len(remaining) == 2

@@ -963,6 +963,16 @@ async def test_fake_resume_unknown_agent_raises() -> None:
 
 
 @pytest.mark.asyncio
+async def test_fake_dispose_agent_removes_handle() -> None:
+    """FakeSdkFacade.dispose_agent drops the agent from has_agent tracking."""
+    facade = FakeSdkFacade()
+    agent_id = await facade.create_agent(workspace="/tmp")
+    assert facade.has_agent(agent_id) is True
+    await facade.dispose_agent(agent_id)
+    assert facade.has_agent(agent_id) is False
+
+
+@pytest.mark.asyncio
 async def test_fake_has_agent_tracks_create_and_resume() -> None:
     """FakeSdkFacade.has_agent reflects create_agent and resume_agent state."""
     facade = FakeSdkFacade()

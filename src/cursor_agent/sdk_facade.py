@@ -231,6 +231,16 @@ class AsyncSdkFacade:
         async def _resume() -> str:
             agent = await client.agents.resume(agent_id, request_options)
             await agent.__aenter__()
+            previous = self._agents.get(agent.agent_id)
+            if previous is not None and previous is not agent:
+                try:
+                    await previous.__aexit__(None, None, None)
+                except Exception:
+                    self._logger.debug(
+                        "agent dispose failed during resume for agent_id=%s",
+                        agent.agent_id,
+                        exc_info=True,
+                    )
             self._agents[agent.agent_id] = agent
             self._agent_tool_profiles[agent.agent_id] = profile
             if model is not None:
@@ -309,6 +319,24 @@ class AsyncSdkFacade:
         active_run = self._active_runs.get(agent_id)
         if active_run is not None:
             active_run.cancel()
+
+    async def dispose_agent(self, agent_id: str) -> None:
+        """Cancel any active run and release the SDK agent handle from memory."""
+        await self.cancel(agent_id)
+        agent = self._agents.pop(agent_id, None)
+        self._agent_tool_profiles.pop(agent_id, None)
+        self._agent_models.pop(agent_id, None)
+        self._cancelled_agents.discard(agent_id)
+        if agent is None:
+            return
+        try:
+            await agent.__aexit__(None, None, None)
+        except Exception:
+            self._logger.debug(
+                "agent dispose failed for agent_id=%s",
+                agent_id,
+                exc_info=True,
+            )
 
     async def close(self) -> None:
         """Close registered agents and dispose the SDK bridge."""

@@ -246,7 +246,7 @@ class SessionStore:
 
         Cron sessions use the per-run key ``cron:{job_id}:{run_id}`` and are never
         resumed, so without pruning they accumulate without bound. Returns the
-        ``agent_id`` of every pruned row so the caller can cancel the matching
+        ``agent_id`` of every pruned row so the caller can dispose the matching
         SDK agents.
 
         Defined before ``list`` so the return annotation resolves to builtin
