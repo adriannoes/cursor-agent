@@ -973,6 +973,60 @@ async def test_fake_dispose_agent_removes_handle() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dispose_agent_cancels_active_run_and_exits_handle() -> None:
+    """AsyncSdkFacade.dispose_agent cancels in-flight runs and releases SDK handles."""
+    agent_id = "agent-dispose-active"
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = agent_id
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_run = MagicMock()
+    facade = AsyncSdkFacade(api_key="test-key")
+    facade._agents[agent_id] = mock_agent
+    facade._active_runs[agent_id] = mock_run
+
+    await facade.dispose_agent(agent_id)
+
+    mock_run.cancel.assert_called_once()
+    mock_agent.__aexit__.assert_awaited_once()
+    assert agent_id not in facade._agents
+
+
+@pytest.mark.asyncio
+async def test_resume_agent_disposes_previous_handle_when_sdk_returns_new_instance() -> (
+    None
+):
+    """resume_agent must dispose the superseded SDK handle to prevent gateway leaks."""
+    agent_id = "agent-resume-dispose"
+    previous_agent = AsyncMock()
+    previous_agent.agent_id = agent_id
+    previous_agent.__aexit__ = AsyncMock(return_value=None)
+
+    new_agent = AsyncMock()
+    new_agent.agent_id = agent_id
+    new_agent.__aenter__ = AsyncMock(return_value=new_agent)
+    new_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.resume = AsyncMock(return_value=new_agent)
+
+    facade = AsyncSdkFacade(api_key="test-key")
+    facade._client = mock_client
+    facade._agents[agent_id] = previous_agent
+    facade._agent_tool_profiles[agent_id] = "coding"
+
+    resumed_id = await facade.resume_agent(
+        agent_id,
+        workspace="/repo",
+        tool_profile="messaging",
+    )
+
+    assert resumed_id == agent_id
+    previous_agent.__aexit__.assert_awaited_once()
+    assert facade._agents[agent_id] is new_agent
+
+
+@pytest.mark.asyncio
 async def test_fake_has_agent_tracks_create_and_resume() -> None:
     """FakeSdkFacade.has_agent reflects create_agent and resume_agent state."""
     facade = FakeSdkFacade()

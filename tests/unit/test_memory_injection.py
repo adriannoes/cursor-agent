@@ -248,6 +248,45 @@ async def test_failed_first_turn_does_not_persist_memory_injected_metadata(
     assert row.metadata.get("memory_injected") is not True
 
 
+class ErrorThenFinishedFacade(SendCapturingFacade):
+    """Fake facade that returns ERROR once, then FINISHED on retry."""
+
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(**kwargs)  # type: ignore[arg-type]
+        self._fail_once = True
+
+    async def send(
+        self,
+        agent_id: str,
+        message: str,
+        *,
+        callbacks: StreamCallbacks | None = None,
+        log_context: LogContext | None = None,
+    ) -> RunResult:
+        """Return ERROR on first send, then delegate to the parent fake."""
+        if self._fail_once:
+            self._fail_once = False
+            self.send_calls.append(
+                {
+                    "agent_id": agent_id,
+                    "message": message,
+                    "callbacks": callbacks,
+                    "log_context": log_context,
+                }
+            )
+            return RunResult(
+                run_id="error-run-1",
+                status=RunStatus.ERROR,
+                text=None,
+            )
+        return await super().send(
+            agent_id,
+            message,
+            callbacks=callbacks,
+            log_context=log_context,
+        )
+
+
 class ErrorStatusMemoryFacade(SendCapturingFacade):
     """Fake facade that returns RunStatus.ERROR without raising."""
 
@@ -308,6 +347,59 @@ async def test_error_status_first_turn_does_not_persist_memory_injected_metadata
     row = await store.resolve(session_key, session_id=session_id)
     assert row is not None
     assert row.metadata.get("memory_injected") is not True
+
+
+@pytest.mark.asyncio
+async def test_error_status_then_finished_retry_injects_memory_and_persists_flag(
+    store: SessionStore,
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """ERROR on first send must not set memory_injected; FINISHED retry must re-inject."""
+    memory_root = tmp_path / "memory"
+    user_text = "prefer concise answers"
+    memory_text = "project uses uv"
+    _write_memory_files(memory_root, user_text=user_text, memory_text=memory_text)
+
+    session_key = "cli:default:memretry1"
+    facade = ErrorThenFinishedFacade()
+    session_id = await _seed_session(store, facade, session_key)
+    pool = SessionAgentPool(
+        store=store,
+        facade=facade,
+        config=config,
+        memory_store=LocalMemoryStore(root=memory_root),
+    )
+
+    first_result = await pool.send(session_key, "first question")
+    assert first_result.status is RunStatus.ERROR
+    assert facade.send_calls[0]["message"] == _expected_injected_message(
+        user_text=user_text,
+        memory_text=memory_text,
+        user_message="first question",
+    )
+
+    row_after_error = await store.resolve(session_key, session_id=session_id)
+    assert row_after_error is not None
+    assert row_after_error.metadata.get("memory_injected") is not True
+
+    second_result = await pool.send(session_key, "first question")
+    assert second_result.status is RunStatus.FINISHED
+    assert len(facade.send_calls) == 2
+    assert facade.send_calls[1]["message"] == _expected_injected_message(
+        user_text=user_text,
+        memory_text=memory_text,
+        user_message="first question",
+    )
+
+    row_after_success = await store.resolve(session_key, session_id=session_id)
+    assert row_after_success is not None
+    assert row_after_success.metadata.get("memory_injected") is True
+
+    third_result = await pool.send(session_key, "follow-up")
+    assert third_result.status is RunStatus.FINISHED
+    assert facade.send_calls[2]["message"] == "follow-up"
+    assert USER_MEMORY_SECTION_MARKER not in facade.send_calls[2]["message"]
 
 
 @pytest.mark.asyncio
