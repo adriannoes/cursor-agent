@@ -22,6 +22,7 @@ from cursor_agent.cli.rich_display import (
     format_memory_show_output,
     format_skills_list_output,
 )
+from cursor_agent.agent_cleanup import cancel_agent_quietly
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.errors import ConfigError, CursorAgentError
 from cursor_agent.product_copy import FIRST_COMMANDS_HINT
@@ -96,16 +97,20 @@ async def handle_new(
         tool_profile=config.tool_profile,
         runtime_mode=config.runtime.mode,
     )
-    row = await store.create(
-        SessionCreateParams(
-            session_key=session_key,
-            agent_id=agent_id,
-            workspace=workspace,
-            runtime=config.runtime.mode,
-            tool_profile=config.tool_profile,
-            title=None,
+    try:
+        row = await store.create(
+            SessionCreateParams(
+                session_key=session_key,
+                agent_id=agent_id,
+                workspace=workspace,
+                runtime=config.runtime.mode,
+                tool_profile=config.tool_profile,
+                title=None,
+            )
         )
-    )
+    except BaseException:
+        await cancel_agent_quietly(facade, agent_id)
+        raise
     writer(f"Created session {row.id}")
     return row.id
 

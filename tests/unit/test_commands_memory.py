@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from cursor_agent.cli.command_router import BuiltinMatch
-from cursor_agent.cli.slash_commands import build_repl_command_router
+from cursor_agent.cli.slash_commands import build_repl_command_router, handle_new
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.memory import (
     TOTAL_MEMORY_BUDGET_BYTES,
@@ -26,7 +28,14 @@ from tests.unit.cli_repl_helpers import (
     drive_repl,
     seed_session,
 )
-from tests.unit.command_handler_fakes import SendCapturingFacade
+from tests.unit.command_handler_fakes import CancelTrackingFacade, SendCapturingFacade
+
+
+class _SessionCreateFailingStore(SessionStore):
+    """SessionStore whose ``create`` always fails to simulate a persist error."""
+
+    async def create(self, params: object) -> object:  # type: ignore[override]
+        raise RuntimeError("simulated session store failure")
 
 
 def _write_bytes(path: Path, byte_count: int, fill: str = "a") -> None:
@@ -309,6 +318,28 @@ async def test_new_session_row_has_no_stale_memory_injected_metadata(
     rows = await store.list(session_key)
     assert len(rows) == 1
     assert rows[0].metadata.get("memory_injected") is not True
+
+
+async def test_handle_new_cancels_agent_when_store_create_fails(
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """Persist failure after create_agent must cancel the orphaned SDK agent."""
+    facade = CancelTrackingFacade()
+    store = _SessionCreateFailingStore(tmp_path / "sessions.db")
+    await store.initialize()
+    session_key = session_key_for(config)
+
+    with pytest.raises(RuntimeError, match="simulated session store failure"):
+        await handle_new(
+            facade=facade,
+            store=store,
+            config=config,
+            session_key=session_key,
+            writer=lambda _line: None,
+        )
+
+    assert len(facade.cancel_calls) == 1
 
 
 async def test_new_creates_fresh_session_eligible_for_memory_injection(
