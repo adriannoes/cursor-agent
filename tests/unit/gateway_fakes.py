@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from cursor_agent.config.loader import CursorAgentConfig
+from cursor_agent.errors import SupersededSessionError
 from cursor_agent.gateway.config import (
     GatewayConfig,
     PlatformsConfig,
@@ -236,6 +237,40 @@ class NullTextPool(SessionAgentPool):
         self.send_completed.set()
         return RunResult(
             run_id="run-empty", status=RunStatus.FINISHED, text=None, usage=None
+        )
+
+
+class SupersededSessionPool(SessionAgentPool):
+    """Pool that simulates a stale dispatch superseded by /new."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+        self.send_completed = asyncio.Event()
+
+    async def send(
+        self,
+        session_key: str,
+        message: str,
+        *,
+        session_id: str | None = None,
+        session_row: object = None,
+        callbacks: object = None,
+        blocking: bool = True,
+        model_override: str | None = None,
+    ) -> RunResult:
+        _ = (
+            session_key,
+            message,
+            session_id,
+            session_row,
+            callbacks,
+            blocking,
+            model_override,
+        )
+        self.send_completed.set()
+        raise SupersededSessionError(
+            f"superseded session: received session_key={session_key!r}, "
+            "expected latest row"
         )
 
 

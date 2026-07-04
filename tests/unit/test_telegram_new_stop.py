@@ -25,9 +25,10 @@ from tests.unit.telegram_command_fakes import (
     DEFAULT_CHAT_ID,
     DEFAULT_WORKSPACE,
     OTHER_CHAT_ID,
-    CancelRaisingFacade,
     CancelTrackingFacade,
     CreateAgentTrackingFacade,
+    DisposeRaisingFacade,
+    DisposeTrackingFacade,
     command_message,
     make_command_adapter,
     seed_chat_session,
@@ -99,9 +100,9 @@ async def test_telegram_new_cancels_agent_when_store_create_fails(
 
 
 @pytest.mark.asyncio
-async def test_telegram_new_cancels_superseded_agent(tmp_path: object) -> None:
-    """A second /new cancels the prior agent to avoid leaking SDK agents."""
-    facade = CancelTrackingFacade()
+async def test_telegram_new_disposes_superseded_agent(tmp_path: object) -> None:
+    """A second /new disposes the prior agent to avoid leaking SDK agents."""
+    facade = DisposeTrackingFacade()
     adapter, _fake_bot, fake_dispatcher, handles = make_command_adapter(
         tmp_path,
         facade=facade,
@@ -112,7 +113,7 @@ async def test_telegram_new_cancels_superseded_agent(tmp_path: object) -> None:
     handler = await registered_handler(fake_dispatcher)
     await handler(command_message("/new"))
 
-    assert facade.cancel_calls == [old_agent_id]
+    assert facade.dispose_calls == [old_agent_id]
     store = handles["store"]
     assert isinstance(store, SessionStore)
     row = await store.resolve(telegram_session_key(DEFAULT_CHAT_ID, DEFAULT_WORKSPACE))
@@ -122,12 +123,12 @@ async def test_telegram_new_cancels_superseded_agent(tmp_path: object) -> None:
 
 
 @pytest.mark.asyncio
-async def test_telegram_new_continues_when_supersede_cancel_fails(
+async def test_telegram_new_continues_when_supersede_dispose_fails(
     tmp_path: object,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """A failed supersede cancel must not block /new from creating a fresh session."""
-    facade = CancelRaisingFacade()
+    """A failed supersede dispose must not block /new from creating a fresh session."""
+    facade = DisposeRaisingFacade()
     adapter, fake_bot, fake_dispatcher, handles = make_command_adapter(
         tmp_path,
         facade=facade,
@@ -139,7 +140,7 @@ async def test_telegram_new_continues_when_supersede_cancel_fails(
     with caplog.at_level(logging.WARNING):
         await handler(command_message("/new"))
 
-    assert facade.cancel_calls == [old_agent_id]
+    assert facade.dispose_calls == [old_agent_id]
     store = handles["store"]
     assert isinstance(store, SessionStore)
     row = await store.resolve(telegram_session_key(DEFAULT_CHAT_ID, DEFAULT_WORKSPACE))
@@ -147,18 +148,18 @@ async def test_telegram_new_continues_when_supersede_cancel_fails(
     assert row.agent_id != old_agent_id
     assert fake_bot.send_message_calls
     assert any(
-        "telegram_new_supersede_cancel_failed" in record.message
+        "telegram_new_supersede_dispose_failed" in record.message
         for record in caplog.records
     )
     await adapter.stop()
 
 
 @pytest.mark.asyncio
-async def test_telegram_new_without_previous_session_does_not_cancel(
+async def test_telegram_new_without_previous_session_does_not_dispose(
     tmp_path: object,
 ) -> None:
-    """First /new for a chat has no prior agent to cancel."""
-    facade = CancelTrackingFacade()
+    """First /new for a chat has no prior agent to dispose."""
+    facade = DisposeTrackingFacade()
     adapter, _fake_bot, fake_dispatcher, handles = make_command_adapter(
         tmp_path,
         facade=facade,
@@ -168,7 +169,7 @@ async def test_telegram_new_without_previous_session_does_not_cancel(
     handler = await registered_handler(fake_dispatcher)
     await handler(command_message("/new"))
 
-    assert facade.cancel_calls == []
+    assert facade.dispose_calls == []
     await adapter.stop()
 
 

@@ -80,3 +80,11 @@ class AgentBusyError(Exception):
     ``AsyncSdkFacade`` must never raise this type (ADR-008). Gateway adapters
     catch it and send a friendly busy message to the user.
     """
+
+
+class SupersededSessionError(Exception):
+    """Pinned session row is no longer latest for ``session_key``.
+
+    Raised when ``/new`` or another session swap occurs while a gateway dispatch
+    still references an older row. Callers should drop the stale run quietly.
+    """

@@ -15,6 +15,7 @@ from cursor_agent.errors import (
     CursorAgentError,
     InvalidAgentError,
     SdkInternalError,
+    SupersededSessionError,
 )
 from cursor_agent.facade_logging import LogContext
 from cursor_agent.messaging_hooks import ensure_messaging_hooks
@@ -948,3 +949,105 @@ async def test_send_reattach_uses_messaging_tool_profile_on_create(
     assert facade.create_agent_calls
     assert facade.create_agent_calls[-1]["tool_profile"] == "messaging"
     assert facade.create_agent_calls[-1]["workspace"] == str(workspace)
+
+
+@pytest.mark.asyncio
+async def test_send_raises_when_pinned_session_row_superseded(
+    store: SessionStore,
+    config: CursorAgentConfig,
+) -> None:
+    """Gateway dispatches that pin an old row must abort before SDK send."""
+    session_key = "telegram:123:superseded"
+    facade = FakeSdkFacade()
+    workspace = "/tmp/workspace"
+    first_agent = await facade.create_agent(workspace=workspace)
+    row_a = await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id=first_agent,
+            workspace=workspace,
+            runtime="local",
+            tool_profile="messaging",
+        ),
+    )
+    second_agent = await facade.create_agent(workspace=workspace)
+    await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id=second_agent,
+            workspace=workspace,
+            runtime="local",
+            tool_profile="messaging",
+        ),
+    )
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+
+    with pytest.raises(SupersededSessionError, match="superseded session"):
+        await pool.send(session_key, "hello", session_row=row_a)
+
+
+@pytest.mark.asyncio
+async def test_send_returns_result_when_post_send_persist_fails(
+    store: SessionStore,
+    config: CursorAgentConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Completed SDK runs must return even when SQLite side effects fail."""
+    session_key = "cli:default:persist-fail"
+    facade = FakeSdkFacade(default_reply="persist-fail-ok")
+    session_id = await _seed_session(store, facade, session_key)
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+
+    async def failing_touch(_session_id: str) -> None:
+        raise OSError("database is locked")
+
+    monkeypatch.setattr(store, "touch", failing_touch)
+
+    result = await pool.send(session_key, "hello after sdk")
+
+    assert result.status is RunStatus.FINISHED
+    assert result.text == "persist-fail-ok"
+    row = await store.resolve(session_key, session_id=session_id)
+    assert row is not None
+    assert row.metadata.get("last_run_id") is None
+
+
+class DisposeTrackingFacade(ColdStartSendFailFacade):
+    """Cold-start send failure facade that records dispose_agent calls."""
+
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(**kwargs)  # type: ignore[arg-type]
+        self.dispose_calls: list[str] = []
+
+    async def dispose_agent(self, agent_id: str) -> None:
+        self.dispose_calls.append(agent_id)
+        await super().dispose_agent(agent_id)
+
+
+@pytest.mark.asyncio
+async def test_send_reattach_disposes_previous_agent(
+    store: SessionStore,
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """Reattach after SDK failure must dispose the stale SDK agent handle."""
+    session_key = "cli:default:reattach-dispose"
+    workspace = tmp_path / "gateway-workspace"
+    workspace.mkdir()
+    stale_agent_id = "stale-agent-dispose"
+    await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id=stale_agent_id,
+            workspace=str(workspace),
+            runtime="local",
+            tool_profile="coding",
+        )
+    )
+    facade = DisposeTrackingFacade(default_reply="ok-after-dispose-reattach")
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+
+    result = await pool.send(session_key, "hello after dispose reattach")
+
+    assert result.status is RunStatus.FINISHED
+    assert stale_agent_id in facade.dispose_calls

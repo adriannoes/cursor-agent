@@ -18,6 +18,7 @@ from cursor_agent.errors import (
     CursorAgentError,
     InvalidAgentError,
     SdkInternalError,
+    SupersededSessionError,
 )
 from cursor_agent.facade_logging import LogContext, emit_pool_agent_reattach
 from cursor_agent.messaging_hooks import (
@@ -31,6 +32,14 @@ from cursor_agent.tool_profile_policy import (
 )
 from cursor_agent.sessions.models import SessionRecord, title_from_first_user_message
 from cursor_agent.sessions.store import SessionStore
+
+_CRON_SESSION_PREFIX = "cron:"
+
+
+def _session_key_supports_supersede_guard(session_key: str) -> bool:
+    """Return whether ``session_key`` can be reset by /new while a send is in flight."""
+    return not session_key.startswith(_CRON_SESSION_PREFIX)
+
 
 _MODULE_LOGGER = logging.getLogger(__name__)
 
@@ -225,6 +234,7 @@ class SessionAgentPool:
             runtime_mode=row.runtime,
         )
         updated = await self._store.update_agent_id(row.id, new_agent_id)
+        await self._dispose_superseded_agent(previous_agent_id)
         self.forget_resumed_agent(previous_agent_id)
         self._cold_resumed_agent_ids.discard(previous_agent_id)
         resume_key = f"{model}:{tool_profile}"
@@ -243,12 +253,33 @@ class SessionAgentPool:
         self._resumed_models.pop(agent_id, None)
         self._cold_resumed_agent_ids.discard(agent_id)
 
+    async def _dispose_superseded_agent(self, agent_id: str) -> None:
+        """Best-effort dispose of a replaced SDK agent; never raises."""
+        try:
+            await self._facade.dispose_agent(agent_id)
+        except Exception:
+            _MODULE_LOGGER.warning(
+                "pool supersede dispose failed agent_id=%s",
+                agent_id,
+                exc_info=True,
+            )
+
     async def _resolve_row_for_send(self, row: SessionRecord) -> SessionRecord:
         """Return the latest persisted row immediately before SDK send."""
         refreshed = await self._store.resolve(row.session_key, session_id=row.id)
         if refreshed is None:
             raise ConfigError(_session_not_found_message(row.session_key, row.id))
         return refreshed
+
+    async def _require_latest_session_row(self, row: SessionRecord) -> SessionRecord:
+        """Raise when ``row`` is not the newest session for ``session_key``."""
+        latest = await self._store.resolve(row.session_key, session_id=None)
+        if latest is None or latest.id != row.id:
+            raise SupersededSessionError(
+                f"superseded session: received session_id={row.id!r}, "
+                f"expected latest row for session_key={row.session_key!r}"
+            )
+        return latest
 
     async def _compose_outgoing_message(
         self,
@@ -316,6 +347,8 @@ class SessionAgentPool:
         try:
             row = await self._ensure_resumed(row, model_override=model_override)
             row = await self._resolve_row_for_send(row)
+            if _session_key_supports_supersede_guard(row.session_key):
+                row = await self._require_latest_session_row(row)
             memory_not_yet_injected = row.metadata.get("memory_injected") is not True
             outgoing_message = await self._compose_outgoing_message(row, message)
             log_context = LogContext(
@@ -357,21 +390,31 @@ class SessionAgentPool:
                     )
                 else:
                     raise
+            if _session_key_supports_supersede_guard(row.session_key):
+                await self._require_latest_session_row(row)
             self._cold_resumed_agent_ids.discard(row.agent_id)
-            if not row.title:
-                title = title_from_first_user_message(message)
-                await self._store.update_title(row.id, title)
-            await self._store.touch(row.id)
-            metadata_update: dict[str, object] = {
-                "last_run_id": result.run_id,
-                "last_status": result.status.value,
-            }
-            if memory_not_yet_injected and result.status is RunStatus.FINISHED:
-                metadata_update["memory_injected"] = True
-            await self._store.update_metadata(
-                row.id,
-                metadata_update,
-            )
+            try:
+                if not row.title:
+                    title = title_from_first_user_message(message)
+                    await self._store.update_title(row.id, title)
+                await self._store.touch(row.id)
+                metadata_update: dict[str, object] = {
+                    "last_run_id": result.run_id,
+                    "last_status": result.status.value,
+                }
+                if memory_not_yet_injected and result.status is RunStatus.FINISHED:
+                    metadata_update["memory_injected"] = True
+                await self._store.update_metadata(
+                    row.id,
+                    metadata_update,
+                )
+            except Exception:
+                _MODULE_LOGGER.warning(
+                    "pool post-send persist failed session_id=%s session_key=%s",
+                    row.id,
+                    row.session_key,
+                    exc_info=True,
+                )
             return result
         finally:
             if acquired:
