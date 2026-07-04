@@ -336,6 +336,34 @@ class _SessionCreateCancelledStore(SessionStore):
         raise asyncio.CancelledError()
 
 
+class _CancelOnSendPool(SessionAgentPool):
+    """Pool that simulates gateway shutdown cancelling an in-flight cron send."""
+
+    async def send(
+        self,
+        session_key: str,
+        message: str,
+        *,
+        session_id: str | None = None,
+        session_row: object = None,
+        callbacks: object = None,
+        blocking: bool = True,
+        model_override: str | None = None,
+        skip_runtime_guard: bool = False,
+    ) -> RunResult:
+        _ = (
+            session_key,
+            message,
+            session_id,
+            session_row,
+            callbacks,
+            blocking,
+            model_override,
+            skip_runtime_guard,
+        )
+        raise asyncio.CancelledError()
+
+
 @pytest.mark.asyncio
 async def test_create_cron_run_session_disposes_agent_when_store_create_cancelled(
     cron_job: CronJob,
@@ -378,6 +406,30 @@ async def test_create_cron_run_session_disposes_agent_when_store_create_fails(
             facade=facade,
             config=config,  # type: ignore[arg-type]
             run_id="run-leak",
+        )
+
+    assert len(facade.disposed_agents) == 1
+    assert facade.has_agent(facade.disposed_agents[0]) is False
+
+
+@pytest.mark.asyncio
+async def test_run_cron_job_disposes_agent_when_send_cancelled(
+    cron_job: CronJob,
+    store: SessionStore,
+    config: object,
+) -> None:
+    """CancelledError during pool.send must dispose the per-run SDK agent."""
+    facade = DisposeRecordingFacade()
+    pool = _CancelOnSendPool(store=store, facade=facade, config=config)  # type: ignore[arg-type]
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_cron_job(
+            cron_job,
+            pool=pool,
+            store=store,
+            facade=facade,
+            config=config,  # type: ignore[arg-type]
+            run_id="run-send-cancel",
         )
 
     assert len(facade.disposed_agents) == 1
