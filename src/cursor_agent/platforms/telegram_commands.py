@@ -145,7 +145,7 @@ class TelegramCommandRouter:
             await cancel_agent_quietly(self._facade, agent_id)
             raise
         if previous is not None and previous.agent_id != agent_id:
-            await self._cancel_superseded_agent(session_key, previous.agent_id)
+            await self._dispose_superseded_agent(session_key, previous.agent_id)
         self._logger.info(
             "telegram_command_new platform=telegram chat_id=%s session_key=%s",
             chat_id,
@@ -153,24 +153,24 @@ class TelegramCommandRouter:
         )
         await self._send_plain_reply(chat_id, TELEGRAM_NEW_CONFIRMATION)
 
-    async def _cancel_superseded_agent(self, session_key: str, agent_id: str) -> None:
-        """Best-effort cancel of the agent replaced by ``/new``.
+    async def _dispose_superseded_agent(self, session_key: str, agent_id: str) -> None:
+        """Best-effort dispose of the agent replaced by ``/new``.
 
         Long-running gateways would otherwise leak superseded SDK agents on every
-        ``/new``. Cancellation is best-effort: a failure must not break ``/new``.
+        ``/new``. Disposal is best-effort: a failure must not break ``/new``.
         """
         try:
-            await self._facade.cancel(agent_id)
+            await self._facade.dispose_agent(agent_id)
         except Exception as exc:
             self._logger.warning(
-                "telegram_new_supersede_cancel_failed platform=telegram "
+                "telegram_new_supersede_dispose_failed platform=telegram "
                 "session_key=%s exception_class=%s",
                 session_key,
                 exc.__class__.__name__,
             )
             return
         self._logger.info(
-            "telegram_new_superseded_agent_cancelled platform=telegram session_key=%s",
+            "telegram_new_superseded_agent_disposed platform=telegram session_key=%s",
             session_key,
         )
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cursor_agent.errors import AgentBusyError
+from cursor_agent.errors import AgentBusyError, SupersededSessionError
 from cursor_agent.facade_logging import emit_gateway_auth_blocked
 from cursor_agent.gateway.auth import blocked_sender_response_text, is_allowed_sender
 from cursor_agent.gateway.context import GatewayContext
@@ -63,6 +63,12 @@ async def dispatch_inbound(ctx: GatewayContext, message: InboundMessage) -> None
             )
         except AgentBusyError:
             await adapter.send_message(outbound_reply(message, GATEWAY_BUSY_MESSAGE))
+            return
+        except SupersededSessionError:
+            ctx._logger.info(
+                "gateway dispatch: dropped stale reply for superseded session_key=%s",
+                message.session_key,
+            )
             return
 
         if result.text is None:

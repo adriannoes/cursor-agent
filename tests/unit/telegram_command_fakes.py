@@ -71,13 +71,25 @@ class CancelTrackingFacade(FakeSdkFacade):
         await super().cancel(agent_id)
 
 
-class CancelRaisingFacade(CancelTrackingFacade):
-    """CancelTrackingFacade whose cancel raises for supersede failure tests."""
+class DisposeTrackingFacade(FakeSdkFacade):
+    """FakeSdkFacade that records dispose_agent invocations for command tests."""
 
-    async def cancel(self, agent_id: str) -> None:
-        self.cancel_calls.append(agent_id)
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(**kwargs)  # type: ignore[arg-type]
+        self.dispose_calls: list[str] = []
+
+    async def dispose_agent(self, agent_id: str) -> None:
+        self.dispose_calls.append(agent_id)
+        await super().dispose_agent(agent_id)
+
+
+class DisposeRaisingFacade(DisposeTrackingFacade):
+    """DisposeTrackingFacade whose dispose_agent raises for supersede failure tests."""
+
+    async def dispose_agent(self, agent_id: str) -> None:
+        self.dispose_calls.append(agent_id)
         _ = agent_id
-        raise RuntimeError("sdk cancel unavailable")
+        raise RuntimeError("sdk dispose unavailable")
 
 
 def command_message(
