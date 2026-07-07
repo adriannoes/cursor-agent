@@ -23,6 +23,44 @@ At startup the CLI loads a gitignored `.env` file from the **current working dir
 
 Legacy flat names `CURSOR_AGENT_WORKSPACE` and `CURSOR_AGENT_CONFIG` are **not supported** — use `CURSOR_AGENT__RUNTIME__LOCAL__CWD` and `~/.cursor-agent/config.yaml` instead.
 
+## Interactive setup
+
+`cursor-agent setup` writes local configuration (API key in `.env`, non-secrets in `~/.cursor-agent/config.yaml`) without changing ADR-007 precedence. Shell exports still win over CWD `.env`, which wins over YAML, which wins over defaults.
+
+Setup does **not** export variables into the current shell. After apply, run `source .env` (or open a new terminal) so `CURSOR_API_KEY` and other env keys are visible to the next process.
+
+### Humans (interactive)
+
+On a TTY, run without value-bearing flags:
+
+```bash
+cursor-agent setup
+```
+
+This command walks through API key (hidden input), workspace, and optional paths, then writes configuration after confirmation.
+
+Verify and inspect:
+
+```bash
+cursor-agent setup check
+cursor-agent setup show
+```
+
+These commands validate offline readiness and print effective settings with the API key redacted.
+
+### AI agents (headless)
+
+Non-interactive apply (no prompts; use placeholders, never commit real keys):
+
+```bash
+cursor-agent setup \
+  --api-key "your-cursor-api-key" \
+  --workspace "/path/to/your/project" \
+  --yes
+```
+
+This command writes the same artifacts as the interactive path. Follow with `cursor-agent setup check` before starting the REPL or gateway.
+
 ### Workspace override
 
 Set the agent workspace without editing YAML:
