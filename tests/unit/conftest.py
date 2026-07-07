@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from cursor_agent.cli import startup as startup_mod
 from cursor_agent.config.loader import CursorAgentConfig, load_config
 
 _CURSOR_FLAT_ENV_KEYS = frozenset(
@@ -34,14 +35,17 @@ def isolated_cursor_agent_process_env() -> Iterator[None]:
 
     ``python-dotenv`` mutates ``os.environ`` directly; without this, dotenv tests
     leak ``CURSOR_AGENT__*`` into unrelated config-default assertions.
+    Also clears the pre-dotenv environ snapshot used by ``setup show`` attribution.
     """
     snapshot = {key: os.environ[key] for key in _cursor_agent_env_keys()}
+    startup_mod._PRE_DOTENV_PROCESS_ENVIRON = None
     yield
     for key in _cursor_agent_env_keys():
         if key not in snapshot:
             os.environ.pop(key, None)
     for key, value in snapshot.items():
         os.environ[key] = value
+    startup_mod._PRE_DOTENV_PROCESS_ENVIRON = None
 
 
 @pytest.fixture(autouse=True)
