@@ -21,6 +21,7 @@ from cursor_agent.cli.first_run_marker import (
 )
 from cursor_agent.cli.repl_session import run_repl
 from cursor_agent.cli.rich_display import RichDisplay
+from cursor_agent.cli.setup_commands import setup_app
 from cursor_agent.cli.startup import (
     create_store,
     load_cwd_dotenv,
@@ -40,6 +41,7 @@ app = typer.Typer()
 sessions_app = typer.Typer(help="Manage sessions")
 app.add_typer(sessions_app, name="sessions")
 app.add_typer(cron_app, name="cron")
+app.add_typer(setup_app, name="setup")
 
 _EMPTY_SESSIONS_MESSAGE = "No sessions found for this workspace."
 _UNTITLED_PLACEHOLDER = "(untitled)"

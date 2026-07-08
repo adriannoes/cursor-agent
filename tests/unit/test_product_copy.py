@@ -119,3 +119,95 @@ def test_cursor_api_key_setup_hint_points_to_setup_docs_without_secrets() -> Non
     _assert_no_secret_like_values(CURSOR_API_KEY_SETUP_HINT)
     _assert_cli_hint_exclusions(CURSOR_API_KEY_SETUP_HINT)
     assert _max_rendered_line_width(CURSOR_API_KEY_SETUP_HINT) <= PRD_MAX_LINE_WIDTH
+
+
+def test_setup_hint_mentions_command_before_docs() -> None:
+    """AuthError hint recommends ``cursor-agent setup`` before doc links (FR-21)."""
+    hint = CURSOR_API_KEY_SETUP_HINT
+    setup_command = "cursor-agent setup"
+    assert setup_command in hint, f"hint must mention {setup_command!r}: {hint!r}"
+    command_index = hint.index(setup_command)
+    docs_markers = ("docs/setup.md", "docs/cursor-api-key-onboarding.md")
+    for marker in docs_markers:
+        assert marker in hint, f"hint must still mention {marker!r}: {hint!r}"
+        assert command_index < hint.index(marker), (
+            f"{setup_command!r} must appear before {marker!r} in hint: {hint!r}"
+        )
+    _assert_no_secret_like_values(hint)
+    assert _max_rendered_line_width(hint) <= PRD_MAX_LINE_WIDTH
+
+
+def test_first_commands_hint_has_no_setup_command_bullet() -> None:
+    """Q7 Accept B: MVP does not add a ``cursor-agent setup`` banner bullet."""
+    assert "cursor-agent setup" not in FIRST_COMMANDS_HINT
+    assert "cursor-agent setup" not in FIRST_RUN_GETTING_STARTED
+
+
+# --- Task 5.1 / 5.2: SETUP_* wizard + apply success copy (FR-11) -------------
+
+_SETUP_COPY_NAMES: tuple[str, ...] = (
+    "SETUP_INTRO",
+    "SETUP_PROMPT_API_KEY",
+    "SETUP_PROMPT_WORKSPACE",
+    "SETUP_PROMPT_MEMORY_ROOT",
+    "SETUP_PROMPT_SESSIONS_DB",
+    "SETUP_PROMPT_MODEL",
+    "SETUP_PROMPT_TOOL_PROFILE",
+    "SETUP_SUMMARY_HEADER",
+    "SETUP_CONFIRM",
+    "SETUP_SUCCESS",
+    "SETUP_ALREADY_CONFIGURED",
+)
+
+
+def test_setup_copy_constants_exist_english_first_without_secrets() -> None:
+    """SETUP_* wizard/apply constants are non-empty English Final[str] without secrets."""
+    import cursor_agent.product_copy as product_copy
+
+    for name in _SETUP_COPY_NAMES:
+        assert hasattr(product_copy, name), f"missing product_copy.{name}"
+        value = getattr(product_copy, name)
+        assert isinstance(value, str), f"{name} must be str, got {type(value)!r}"
+        assert value.strip(), f"{name} must be non-empty"
+        assert name in product_copy.__all__, f"{name} must be exported in __all__"
+        _assert_no_secret_like_values(value)
+
+
+def test_setup_intro_points_to_docs_setup() -> None:
+    """Wizard intro mentions docs/setup.md for cold-start discoverability."""
+    from cursor_agent.product_copy import SETUP_INTRO
+
+    assert "docs/setup.md" in SETUP_INTRO
+    assert _max_rendered_line_width(SETUP_INTRO) <= PRD_MAX_LINE_WIDTH
+
+
+def test_setup_success_suggests_setup_check() -> None:
+    """Apply/wizard success copy points operators to ``cursor-agent setup check``."""
+    from cursor_agent.product_copy import SETUP_SUCCESS
+
+    assert "cursor-agent setup check" in SETUP_SUCCESS
+    _assert_no_secret_like_values(SETUP_SUCCESS)
+
+
+def test_setup_already_configured_is_idempotent_message() -> None:
+    """Idempotent apply uses a clear already-configured success string."""
+    from cursor_agent.product_copy import SETUP_ALREADY_CONFIGURED
+
+    lowered = SETUP_ALREADY_CONFIGURED.lower()
+    assert "already" in lowered and "configur" in lowered
+
+
+def test_setup_banner_adjacent_prompts_respect_prd_width() -> None:
+    """Short wizard prompts stay within PRD ≤60 column budget where applicable."""
+    import cursor_agent.product_copy as product_copy
+
+    for name in (
+        "SETUP_PROMPT_API_KEY",
+        "SETUP_PROMPT_WORKSPACE",
+        "SETUP_CONFIRM",
+        "SETUP_SUMMARY_HEADER",
+        "SETUP_SUCCESS",
+        "SETUP_ALREADY_CONFIGURED",
+    ):
+        value = getattr(product_copy, name)
+        assert _max_rendered_line_width(value) <= PRD_MAX_LINE_WIDTH, name

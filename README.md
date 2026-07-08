@@ -137,9 +137,8 @@ For bots and gateways, use `tool_profile: messaging` as specified in [SECURITY.m
 
 ## What's next
 
-**v1.0** ships the first-run welcome banner, one-time getting-started hints, and a [setup docs index](docs/setup.md). Post-1.0 roadmap:
+**v1.0** ships the first-run welcome banner, one-time getting-started hints, and a [setup docs index](docs/setup.md). On this branch, interactive local configuration is available via `cursor-agent setup` — see [Interactive setup](docs/setup.md#interactive-setup). Subsequent roadmap items:
 
-- Interactive `cursor-agent setup` wizard for API keys and local configuration.
 - Discord and Slack gateway onboarding at the same bar as the Telegram guides.
 - `full` tool profile with MCP-backed web search (GitHub + Brave Search).
 - Terminal output fallback when the locale cannot render Unicode symbols (for example, replacing checkmarks with ASCII).

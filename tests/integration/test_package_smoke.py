@@ -98,6 +98,17 @@ def _verify_console_help(console_script: Path) -> None:
     )
 
 
+def _verify_setup_help(console_script: Path) -> None:
+    """Installed package must expose ``cursor-agent setup --help`` (FR-26)."""
+    help_result = _run_command([str(console_script), "setup", "--help"])
+    _assert_success(help_result, step="cursor-agent setup --help")
+    combined = f"{help_result.stdout}\n{help_result.stderr}"
+    assert "Examples" in combined, (
+        "cursor-agent setup --help did not include Examples epilog: "
+        f"stdout={help_result.stdout!r}, stderr={help_result.stderr!r}"
+    )
+
+
 def _verify_packaged_hooks(python_bin: Path) -> None:
     """Installed package must ship complete messaging hook sources."""
     probe = "\n".join(
@@ -120,10 +131,11 @@ def _verify_packaged_hooks(python_bin: Path) -> None:
 
 
 def test_installed_wheel_exposes_cli_and_hooks(tmp_path: Path) -> None:
-    """Wheel install smoke: CLI help and messaging hooks are present."""
+    """Wheel install smoke: CLI help, setup help, and messaging hooks are present."""
     wheel_path = _build_wheel()
     python_bin = _create_smoke_venv(tmp_path / "smoke-venv")
     console_script = _install_wheel(python_bin, wheel_path)
     _verify_console_help(console_script)
+    _verify_setup_help(console_script)
     _verify_packaged_hooks(python_bin)
     assert MESSAGING_HOOK_FILENAMES, "expected non-empty hook filename manifest"

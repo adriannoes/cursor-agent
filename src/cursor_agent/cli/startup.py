@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -12,15 +12,36 @@ from dotenv import load_dotenv
 
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.messaging_hooks import ensure_messaging_hooks
-from cursor_agent.tool_profile_policy import requires_messaging_hooks
 from cursor_agent.pool import SessionAgentPool
 from cursor_agent.sdk_facade import AsyncSdkFacade, SdkFacade
 from cursor_agent.sessions.models import build_cli_session_key
 from cursor_agent.sessions.store import SessionStore
+from cursor_agent.tool_profile_policy import requires_messaging_hooks
 
 DEFAULT_DB_PATH = Path.home() / ".cursor-agent" / "sessions.db"
 _MODULE_LOGGER = logging.getLogger(__name__)
 _CWD_DOTENV_FILENAME = ".env"
+
+# Captured once before the first dotenv load so ``setup show`` can attribute
+# keys present only in ``.env`` as ``env`` rather than ``shell`` (FR-4).
+_PRE_DOTENV_PROCESS_ENVIRON: dict[str, str] | None = None
+
+
+def snapshot_process_environ_before_dotenv() -> Mapping[str, str]:
+    """Return (and lazily capture) process env before any CWD dotenv merge.
+
+    The first call freezes the mapping; later dotenv loads must not change it.
+    Callers that never touch dotenv get a snapshot of the current environ.
+
+    Example:
+        >>> # snapshot_process_environ_before_dotenv()
+    """
+    global _PRE_DOTENV_PROCESS_ENVIRON
+    if _PRE_DOTENV_PROCESS_ENVIRON is None:
+        _PRE_DOTENV_PROCESS_ENVIRON = {
+            str(key): str(value) for key, value in os.environ.items()
+        }
+    return _PRE_DOTENV_PROCESS_ENVIRON
 
 
 def load_cwd_dotenv() -> None:
@@ -28,10 +49,12 @@ def load_cwd_dotenv() -> None:
 
     Called during CLI bootstrap so values like ``CURSOR_API_KEY`` are visible to the
     SDK facade via ``os.environ`` (Pydantic ``env_file`` alone does not populate it).
+    Snapshots process environ once before the first load for ``setup show`` provenance.
 
     Example:
         >>> load_cwd_dotenv()  # doctest: +SKIP
     """
+    snapshot_process_environ_before_dotenv()
     env_path = Path.cwd() / _CWD_DOTENV_FILENAME
     if env_path.is_file():
         load_dotenv(env_path, override=False)

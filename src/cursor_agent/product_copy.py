@@ -48,15 +48,57 @@ FIRST_RUN_GETTING_STARTED: Final[str] = (
 )
 
 CURSOR_API_KEY_SETUP_HINT: Final[str] = (
+    "Run: cursor-agent setup\n"
     "Set CURSOR_API_KEY before starting.\n"
     "See docs/setup.md and docs/cursor-api-key-onboarding.md."
 )
+
+# --- PRD-013 setup wizard / apply success (FR-11) ---
+
+SETUP_INTRO: Final[str] = (
+    "Configure local cursor-agent settings.\n"
+    "This will set your API key, workspace, and optional paths.\n"
+    "Details: docs/setup.md"
+)
+
+SETUP_PROMPT_API_KEY: Final[str] = "CURSOR_API_KEY (input hidden): "
+
+SETUP_PROMPT_WORKSPACE: Final[str] = "Workspace directory [{default}]: "
+
+SETUP_PROMPT_MEMORY_ROOT: Final[str] = "Memory root (Enter to skip): "
+
+SETUP_PROMPT_SESSIONS_DB: Final[str] = "Sessions DB path (Enter to skip): "
+
+SETUP_PROMPT_MODEL: Final[str] = "Model id (Enter to skip): "
+
+SETUP_PROMPT_TOOL_PROFILE: Final[str] = (
+    "Tool profile coding|messaging (Enter to skip): "
+)
+
+SETUP_SUMMARY_HEADER: Final[str] = "Summary (review before write):"
+
+SETUP_CONFIRM: Final[str] = "Write configuration? [y/N]: "
+
+SETUP_SUCCESS: Final[str] = "Configuration written.\nNext: cursor-agent setup check"
+
+SETUP_ALREADY_CONFIGURED: Final[str] = "Already configured (no changes needed)."
 
 __all__ = [
     "CURSOR_API_KEY_SETUP_HINT",
     "FIRST_COMMANDS_HINT",
     "FIRST_RUN_GETTING_STARTED",
     "GATEWAY_BUSY_MESSAGE",
+    "SETUP_ALREADY_CONFIGURED",
+    "SETUP_CONFIRM",
+    "SETUP_INTRO",
+    "SETUP_PROMPT_API_KEY",
+    "SETUP_PROMPT_MEMORY_ROOT",
+    "SETUP_PROMPT_MODEL",
+    "SETUP_PROMPT_SESSIONS_DB",
+    "SETUP_PROMPT_TOOL_PROFILE",
+    "SETUP_PROMPT_WORKSPACE",
+    "SETUP_SUCCESS",
+    "SETUP_SUMMARY_HEADER",
     "TELEGRAM_NO_SESSION_HINT",
     "WELCOME_LOGO",
     "WELCOME_READY_LINE",
