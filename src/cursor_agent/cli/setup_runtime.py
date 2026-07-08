@@ -319,6 +319,8 @@ def print_apply_outcome(
     typer.echo(header)
     typer.echo(f"  env:  {env_file}")
     typer.echo(f"  yaml: {config_path}")
+    if env_result.backup_path is not None:
+        typer.echo(f"  backup: {env_result.backup_path}")
     if separator and next_hint:
         typer.echo(next_hint)
 

@@ -577,6 +577,48 @@ def test_wizard_with_optional_fields_writes_all(
     assert _PLACEHOLDER_API_KEY not in f"{result.stdout}\n{result.output}"
 
 
+def test_wizard_invalid_tool_profile_fails_before_confirm(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Invalid wizard tool_profile fails at prompt time with no writes (before confirm)."""
+    _patch_tty_not_ci(monkeypatch)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    config_path = tmp_path / "home" / "config.yaml"
+    env_file = tmp_path / "project" / ".env"
+    env_file.parent.mkdir()
+
+    _patch_wizard_io(
+        monkeypatch,
+        api_key=_PLACEHOLDER_API_KEY,
+        input_answers=[
+            str(workspace),
+            "",
+            "",
+            "",
+            "foo",  # invalid tool_profile — must fail before confirm
+        ],
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "setup",
+            "--config-path",
+            str(config_path),
+            "--env-file",
+            str(env_file),
+        ],
+    )
+    assert result.exit_code != 0
+    combined = f"{result.stdout}\n{result.stderr}\n{result.output}".lower()
+    assert "tool" in combined and ("coding" in combined or "messaging" in combined)
+    assert "foo" in combined
+    assert not config_path.exists()
+    assert not env_file.exists()
+
+
 # --- Task 4.5 / 4.10: check and show ------------------------------------------
 
 
@@ -1100,3 +1142,35 @@ def test_invalid_tool_profile_exits_nonzero_without_write(
     assert "tool" in combined and ("coding" in combined or "messaging" in combined)
     assert not config_path.exists()
     assert not env_file.exists()
+
+
+def test_force_overwrite_surfaces_backup_path_in_success_output(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """``--force`` creating ``.env.bak.*`` prints the backup path on success."""
+    _patch_non_interactive(monkeypatch)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    config_path = tmp_path / "home" / "config.yaml"
+    env_file = tmp_path / "project" / ".env"
+    env_file.parent.mkdir()
+    env_file.write_text("CURSOR_API_KEY=sk-existing-other\n", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        app,
+        _apply_args(
+            workspace=workspace,
+            config_path=config_path,
+            env_file=env_file,
+            extra=["--force"],
+        ),
+    )
+    assert result.exit_code == 0, result.output
+    combined = f"{result.stdout}\n{result.output}"
+    assert "backup:" in combined
+    assert ".bak." in combined
+    backups = list(env_file.parent.glob(f"{env_file.name}.bak.*"))
+    assert len(backups) == 1
+    assert str(backups[0]) in combined
+    assert _PLACEHOLDER_API_KEY in env_file.read_text(encoding="utf-8")

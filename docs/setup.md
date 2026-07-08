@@ -50,7 +50,9 @@ These commands validate offline readiness and print effective settings with the 
 
 ### AI agents (headless)
 
-Non-interactive apply (no prompts; use placeholders, never commit real keys):
+Non-interactive apply uses value-bearing flags and never prompts. `--yes` is
+recommended: it skips the interactive wizard when stdout is a TTY (value flags
+already imply a non-wizard path; `--yes` documents agent intent explicitly).
 
 ```bash
 cursor-agent setup \

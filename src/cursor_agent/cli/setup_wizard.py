@@ -14,6 +14,7 @@ from pathlib import Path
 
 import typer
 
+from cursor_agent.config.writer import validate_tool_profile
 from cursor_agent.errors import ConfigError
 from cursor_agent.product_copy import (
     SETUP_CONFIRM,
@@ -72,7 +73,7 @@ def run_interactive_wizard() -> WizardCollectedValues:
     memory_root = _optional_path_from_prompt(SETUP_PROMPT_MEMORY_ROOT)
     sessions_db = _optional_path_from_prompt(SETUP_PROMPT_SESSIONS_DB)
     model = _optional_str_from_prompt(SETUP_PROMPT_MODEL)
-    tool_profile = _optional_str_from_prompt(SETUP_PROMPT_TOOL_PROFILE)
+    tool_profile = _optional_tool_profile_from_prompt(SETUP_PROMPT_TOOL_PROFILE)
 
     print_wizard_summary(
         workspace=workspace,
@@ -107,6 +108,14 @@ def _optional_str_from_prompt(prompt: str) -> str | None:
     """Prompt for an optional string; empty Enter skips."""
     raw = _input_fn(prompt).strip()
     return raw if raw else None
+
+
+def _optional_tool_profile_from_prompt(prompt: str) -> str | None:
+    """Prompt for optional tool profile; validate before confirm when provided."""
+    raw = _optional_str_from_prompt(prompt)
+    if raw is None:
+        return None
+    return validate_tool_profile(raw)
 
 
 def print_wizard_summary(

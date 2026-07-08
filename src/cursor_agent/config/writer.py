@@ -227,14 +227,24 @@ def _validate_runtime_update(value: object) -> dict[str, object]:
     return {"local": {"cwd": str(cwd_path)}}
 
 
-def _validate_tool_profile(value: object) -> ToolProfile:
-    """Accept only ``coding`` or ``messaging``."""
+def validate_tool_profile(value: object) -> ToolProfile:
+    """Accept only ``coding`` or ``messaging`` (public for wizard early checks).
+
+    Example:
+        >>> validate_tool_profile("coding")
+        'coding'
+    """
     if not isinstance(value, str) or value not in _VALID_TOOL_PROFILES:
         raise ConfigError(
             f"invalid tool_profile: received {value!r}, "
             "expected 'coding' or 'messaging'",
         )
     return value  # type: ignore[return-value]
+
+
+def _validate_tool_profile(value: object) -> ToolProfile:
+    """Accept only ``coding`` or ``messaging``."""
+    return validate_tool_profile(value)
 
 
 def _require_non_empty_str(value: object, *, field_name: str) -> str:
