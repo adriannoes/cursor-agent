@@ -537,6 +537,208 @@ async def test_messaging_warm_resume_reinjects_empty_mcp_servers() -> None:
     assert options.get("mcpServers") == {}
 
 
+def _create_mcp_servers(mock_client: MagicMock) -> dict[str, Any] | None:
+    """Extract mcp_servers from client.agents.create positional options or kwargs."""
+    call = mock_client.agents.create.await_args
+    options = call.args[0] if call.args else None
+    if isinstance(options, dict) and "mcp_servers" in options:
+        mcp_servers = options["mcp_servers"]
+        return mcp_servers if isinstance(mcp_servers, dict) else None
+    kwarg_value = call.kwargs.get("mcp_servers")
+    return kwarg_value if isinstance(kwarg_value, dict) else None
+
+
+_FAKE_FULL_GITHUB_TOKEN = "ghp_fake_facade_token_DO_NOT_LEAK"
+_FAKE_FULL_BRAVE_KEY = "BSA_fake_facade_key_DO_NOT_LEAK"
+
+
+@pytest.mark.asyncio
+async def test_full_create_agent_passes_curated_mcp_servers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Full create must inject curated mcp_servers (at least playwright)."""
+    monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", _FAKE_FULL_GITHUB_TOKEN)
+    monkeypatch.setenv("BRAVE_API_KEY", _FAKE_FULL_BRAVE_KEY)
+
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-full-create"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.create = AsyncMock(return_value=mock_agent)
+
+    logger = logging.getLogger("test.facade.full.create")
+    records: list[str] = []
+
+    class _ListHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record.getMessage())
+
+    handler = _ListHandler()
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
+    facade = AsyncSdkFacade(api_key="test-key", logger=logger)
+    facade._client = mock_client
+
+    await facade.create_agent(workspace="/repo/path", tool_profile="full")
+
+    logger.removeHandler(handler)
+    mcp_servers = _create_mcp_servers(mock_client)
+    assert mcp_servers is not None
+    assert "playwright" in mcp_servers
+    assert "github" in mcp_servers
+    assert "brave-search" in mcp_servers
+    assert mcp_servers["playwright"]["command"] == "npx"
+    local_opts = mock_client.agents.create.await_args.kwargs["local"]
+    assert _sandbox_enabled(local_opts) is None
+
+    injected = [json.loads(line) for line in records if "mcp_servers_injected" in line]
+    assert len(injected) == 1
+    assert injected[0]["event"] == "mcp_servers_injected"
+    assert injected[0]["tool_profile"] == "full"
+    assert injected[0]["server_names"] == ["brave-search", "github", "playwright"]
+    joined = "\n".join(records)
+    assert _FAKE_FULL_GITHUB_TOKEN not in joined
+    assert _FAKE_FULL_BRAVE_KEY not in joined
+
+
+@pytest.mark.asyncio
+async def test_full_resume_agent_reinjects_curated_mcp_servers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Full warm resume must call SDK and re-inject curated mcp_servers."""
+    monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", _FAKE_FULL_GITHUB_TOKEN)
+    monkeypatch.setenv("BRAVE_API_KEY", _FAKE_FULL_BRAVE_KEY)
+
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-full-warm"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.create = AsyncMock(return_value=mock_agent)
+    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(api_key="test-key")
+    facade._client = mock_client
+
+    agent_id = await facade.create_agent(workspace="/repo", tool_profile="full")
+    mock_client.agents.resume.reset_mock()
+
+    await facade.resume_agent(
+        agent_id,
+        workspace="/repo",
+        tool_profile="full",
+    )
+
+    mock_client.agents.resume.assert_called_once()
+    options = _resume_request_options(mock_client)
+    mcp_servers = options.get("mcpServers")
+    assert isinstance(mcp_servers, dict)
+    assert "playwright" in mcp_servers
+    assert "github" in mcp_servers
+    local_opts = options.get("local")
+    assert isinstance(local_opts, dict)
+    assert _sandbox_enabled(local_opts) is None
+
+
+@pytest.mark.asyncio
+async def test_coding_to_full_resume_reinjects_mcp_servers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Warm coding agent resumed as full must re-resume with curated MCP."""
+    monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", _FAKE_FULL_GITHUB_TOKEN)
+    monkeypatch.setenv("BRAVE_API_KEY", _FAKE_FULL_BRAVE_KEY)
+
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-coding-to-full"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.create = AsyncMock(return_value=mock_agent)
+    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(api_key="test-key")
+    facade._client = mock_client
+
+    agent_id = await facade.create_agent(workspace="/repo", tool_profile="coding")
+    await facade.resume_agent(
+        agent_id,
+        workspace="/repo",
+        tool_profile="full",
+    )
+
+    mock_client.agents.resume.assert_called_once()
+    options = _resume_request_options(mock_client)
+    mcp_servers = options.get("mcpServers")
+    assert isinstance(mcp_servers, dict)
+    assert "playwright" in mcp_servers
+    assert facade._agent_tool_profiles[agent_id] == "full"
+
+
+@pytest.mark.asyncio
+async def test_full_create_respects_mcp_full_servers_allowlist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Facade must honor mcp.full.servers allowlist from constructor (config wiring)."""
+    monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", _FAKE_FULL_GITHUB_TOKEN)
+    monkeypatch.setenv("BRAVE_API_KEY", _FAKE_FULL_BRAVE_KEY)
+
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-full-allowlist"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.create = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(
+        api_key="test-key",
+        mcp_full_servers=["playwright"],
+    )
+    facade._client = mock_client
+
+    await facade.create_agent(workspace="/repo/path", tool_profile="full")
+
+    mcp_servers = _create_mcp_servers(mock_client)
+    assert mcp_servers is not None
+    assert set(mcp_servers) == {"playwright"}
+    assert "github" not in mcp_servers
+    assert "brave-search" not in mcp_servers
+
+
+@pytest.mark.asyncio
+async def test_messaging_warm_resume_still_empty_after_full_support() -> None:
+    """Messaging warm-resume regression: still injects explicit empty MCP map."""
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-messaging-regression"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.create = AsyncMock(return_value=mock_agent)
+    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(api_key="test-key")
+    facade._client = mock_client
+
+    agent_id = await facade.create_agent(workspace="/repo", tool_profile="messaging")
+    mock_client.agents.resume.reset_mock()
+
+    await facade.resume_agent(
+        agent_id,
+        workspace="/repo",
+        tool_profile="messaging",
+    )
+
+    mock_client.agents.resume.assert_called_once()
+    options = _resume_request_options(mock_client)
+    assert options.get("mcpServers") == {}
+
+
 @pytest.mark.asyncio
 async def test_resume_agent_defaults_to_coding_mcp_omission_for_unknown_agent() -> None:
     """Cold resume for unknown agent_id without profile must omit MCP override (coding default)."""
@@ -882,6 +1084,35 @@ def test_resolve_mcp_servers_stub_profiles() -> None:
     """Legacy MCP API returns empty dict for coding and messaging profiles."""
     assert resolve_mcp_servers("coding") == {}
     assert resolve_mcp_servers("messaging") == {}
+
+
+def test_emit_mcp_servers_injected_logs_names_only() -> None:
+    """mcp_servers_injected NDJSON includes tool_profile and sorted server names."""
+    from cursor_agent.facade_logging import emit_mcp_servers_injected
+
+    logger = logging.getLogger("test.facade.mcp_injected")
+    records: list[str] = []
+
+    class _ListHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record.getMessage())
+
+    handler = _ListHandler()
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
+    emit_mcp_servers_injected(
+        logger,
+        tool_profile="full",
+        server_names=["playwright", "github"],
+    )
+
+    logger.removeHandler(handler)
+    payload = json.loads(records[0])
+    assert payload["v"] == 1
+    assert payload["event"] == "mcp_servers_injected"
+    assert payload["tool_profile"] == "full"
+    assert payload["server_names"] == ["playwright", "github"]
 
 
 def test_facade_logging_redacts_api_key_patterns() -> None:
