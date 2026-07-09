@@ -740,6 +740,142 @@ async def test_messaging_warm_resume_still_empty_after_full_support() -> None:
 
 
 @pytest.mark.asyncio
+async def test_full_to_messaging_resume_injects_empty_mcp_servers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Switching warm full → messaging must re-resume with explicit empty MCP."""
+    monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", _FAKE_FULL_GITHUB_TOKEN)
+    monkeypatch.setenv("BRAVE_API_KEY", _FAKE_FULL_BRAVE_KEY)
+
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-full-to-messaging"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.create = AsyncMock(return_value=mock_agent)
+    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(api_key="test-key")
+    facade._client = mock_client
+
+    agent_id = await facade.create_agent(workspace="/repo", tool_profile="full")
+    await facade.resume_agent(
+        agent_id,
+        workspace="/repo",
+        tool_profile="messaging",
+    )
+
+    mock_client.agents.resume.assert_called_once()
+    options = _resume_request_options(mock_client)
+    assert options.get("mcpServers") == {}
+    assert facade._agent_tool_profiles[agent_id] == "messaging"
+
+
+@pytest.mark.asyncio
+async def test_full_to_coding_resume_omits_mcp_servers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Switching warm full → coding must re-resume and omit mcpServers."""
+    monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", _FAKE_FULL_GITHUB_TOKEN)
+    monkeypatch.setenv("BRAVE_API_KEY", _FAKE_FULL_BRAVE_KEY)
+
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-full-to-coding"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.create = AsyncMock(return_value=mock_agent)
+    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(api_key="test-key")
+    facade._client = mock_client
+
+    agent_id = await facade.create_agent(workspace="/repo", tool_profile="full")
+    await facade.resume_agent(
+        agent_id,
+        workspace="/repo",
+        tool_profile="coding",
+    )
+
+    mock_client.agents.resume.assert_called_once()
+    options = _resume_request_options(mock_client)
+    assert "mcpServers" not in options
+    assert "mcp_servers" not in options
+    assert facade._agent_tool_profiles[agent_id] == "coding"
+
+
+@pytest.mark.asyncio
+async def test_full_cold_resume_reinjects_curated_mcp_servers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cold resume with tool_profile=full must inject curated mcp_servers."""
+    monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", _FAKE_FULL_GITHUB_TOKEN)
+    monkeypatch.setenv("BRAVE_API_KEY", _FAKE_FULL_BRAVE_KEY)
+
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-full-cold"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(api_key="test-key")
+    facade._client = mock_client
+
+    await facade.resume_agent(
+        "agent-full-cold",
+        workspace="/repo",
+        tool_profile="full",
+    )
+
+    options = _resume_request_options(mock_client)
+    mcp_servers = options.get("mcpServers")
+    assert isinstance(mcp_servers, dict)
+    assert "playwright" in mcp_servers
+    assert "github" in mcp_servers
+
+
+@pytest.mark.asyncio
+async def test_full_empty_allowlist_does_not_emit_mcp_servers_injected() -> None:
+    """Empty curated map must not emit mcp_servers_injected (names-only observability)."""
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-full-empty-log"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.create = AsyncMock(return_value=mock_agent)
+
+    logger = logging.getLogger("test.facade.full.empty.log")
+    records: list[str] = []
+
+    class _ListHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record.getMessage())
+
+    handler = _ListHandler()
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
+    facade = AsyncSdkFacade(
+        api_key="test-key",
+        mcp_full_servers=[],
+        logger=logger,
+    )
+    facade._client = mock_client
+
+    await facade.create_agent(workspace="/repo", tool_profile="full")
+    logger.removeHandler(handler)
+
+    mcp_servers = _create_mcp_servers(mock_client)
+    assert mcp_servers == {}
+    assert not any("mcp_servers_injected" in line for line in records)
+
+
+@pytest.mark.asyncio
 async def test_resume_agent_defaults_to_coding_mcp_omission_for_unknown_agent() -> None:
     """Cold resume for unknown agent_id without profile must omit MCP override (coding default)."""
     mock_agent = AsyncMock()

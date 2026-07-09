@@ -260,6 +260,49 @@ async def test_lazy_resume_get_is_idempotent_per_agent_and_model(
 
 
 @pytest.mark.asyncio
+async def test_full_profile_get_re_resumes_for_mcp_reinjection(
+    store: SessionStore,
+) -> None:
+    """full must re-call resume_agent on repeated get so MCP/environ re-apply."""
+    session_key = "cli:default:fullmcp1"
+    facade = ResumeTrackingFacade()
+    await _seed_session(store, facade, session_key, tool_profile="full")
+
+    pool = SessionAgentPool(
+        store=store,
+        facade=facade,
+        config=_config_with_tool_profile("full"),
+    )
+    await pool.get(session_key)
+    await pool.get(session_key)
+
+    assert len(facade.resume_calls) == 2
+    assert facade.resume_calls[0]["tool_profile"] == "full"
+    assert facade.resume_calls[1]["tool_profile"] == "full"
+
+
+@pytest.mark.asyncio
+async def test_messaging_profile_get_re_resumes_for_empty_mcp_reinjection(
+    store: SessionStore,
+) -> None:
+    """messaging must re-call resume_agent on repeated get (empty MCP defense)."""
+    session_key = "cli:default:msgmcp1"
+    facade = ResumeTrackingFacade()
+    await _seed_session(store, facade, session_key, tool_profile="messaging")
+
+    pool = SessionAgentPool(
+        store=store,
+        facade=facade,
+        config=_config_with_tool_profile("messaging"),
+    )
+    await pool.get(session_key)
+    await pool.get(session_key)
+
+    assert len(facade.resume_calls) == 2
+    assert all(call["tool_profile"] == "messaging" for call in facade.resume_calls)
+
+
+@pytest.mark.asyncio
 async def test_get_re_resumes_when_model_override_changes(
     store: SessionStore,
     config: CursorAgentConfig,

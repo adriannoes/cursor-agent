@@ -96,8 +96,12 @@ def _emit_full_mcp_injection(
     tool_profile: str,
     mcp_override: dict[str, Any] | None,
 ) -> None:
-    """Emit mcp_servers_injected for full when an override map is present."""
-    if tool_profile != "full" or mcp_override is None:
+    """Emit mcp_servers_injected for full when servers were actually injected.
+
+    Empty maps (explicit empty allowlist or every server omitted) stay silent —
+    ADR-029 observability is about injected server names, not empty payloads.
+    """
+    if tool_profile != "full" or not mcp_override:
         return
     emit_mcp_servers_injected(
         logger,

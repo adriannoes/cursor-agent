@@ -28,6 +28,7 @@ from cursor_agent.messaging_hooks import (
 from cursor_agent.sdk_facade import RunResult, RunStatus, SdkFacade, StreamCallbacks
 from cursor_agent.tool_profile_policy import (
     effective_tool_profile,
+    passes_mcp_servers_on_resume,
     requires_messaging_hooks,
 )
 from cursor_agent.sessions.models import SessionRecord, title_from_first_user_message
@@ -180,13 +181,20 @@ class SessionAgentPool:
         *,
         model_override: str | None = None,
     ) -> SessionRecord:
-        """Resume the SDK agent when missing or when the effective resume key changed."""
+        """Resume when missing, resume-key changed, or profile requires MCP re-inject.
+
+        Coding short-circuits when ``model:tool_profile`` is unchanged. Messaging
+        and ``full`` always call ``facade.resume_agent`` so empty/curated MCP is
+        re-applied (and ``full`` re-reads process environ for omit+warn).
+        """
         model = self._resolve_model(model_override)
         tool_profile = effective_tool_profile(
             self._config.tool_profile, row.tool_profile
         )
         resume_key = f"{model}:{tool_profile}"
-        if self._resumed_models.get(row.agent_id) == resume_key:
+        if self._resumed_models.get(
+            row.agent_id
+        ) == resume_key and not passes_mcp_servers_on_resume(tool_profile):
             return row
         cold_start = not self._facade.has_agent(row.agent_id)
         await self._ensure_messaging_hooks_for_row(row)
