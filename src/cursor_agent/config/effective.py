@@ -16,7 +16,7 @@ from typing import Final, Iterator, Literal
 
 from dotenv import dotenv_values
 
-from cursor_agent.config.loader import ToolProfile, load_config
+from cursor_agent.config.loader import GithubTransport, ToolProfile, load_config
 from cursor_agent.config.yaml_io import load_yaml_dict
 
 ConfigSourceLabel = Literal["shell", "env", "yaml", "default"]
@@ -29,6 +29,9 @@ _ENV_KEY_TOOL_PROFILE: Final[str] = "CURSOR_AGENT__TOOL_PROFILE"
 _ENV_KEY_MEMORY_ROOT: Final[str] = "CURSOR_AGENT__MEMORY_ROOT"
 _ENV_KEY_WORKSPACE: Final[str] = "CURSOR_AGENT__RUNTIME__LOCAL__CWD"
 _ENV_KEY_MCP_FULL_SERVERS: Final[str] = "CURSOR_AGENT__MCP__FULL__SERVERS"
+_ENV_KEY_MCP_FULL_GITHUB_TRANSPORT: Final[str] = (
+    "CURSOR_AGENT__MCP__FULL__GITHUB_TRANSPORT"
+)
 _ENV_KEY_API_KEY: Final[str] = "CURSOR_API_KEY"
 _ENV_KEY_SESSIONS_DB: Final[str] = "CURSOR_AGENT_SESSIONS_DB"
 
@@ -51,6 +54,7 @@ class EffectiveConfigView:
     memory_root: str | None
     sessions_db: str
     mcp_full_servers: list[str] | None
+    mcp_full_github_transport: GithubTransport
     sources: Mapping[str, ConfigSourceLabel]
 
 
@@ -135,6 +139,12 @@ def build_effective_config(
             process_environ=process_environ,
             dotenv_keys=dotenv_map,
         ),
+        "mcp_full_github_transport": _attribute_agent_field_source(
+            env_key=_ENV_KEY_MCP_FULL_GITHUB_TRANSPORT,
+            yaml_has=_yaml_has_mcp_full_github_transport(yaml_data),
+            process_environ=process_environ,
+            dotenv_keys=dotenv_map,
+        ),
     }
 
     return EffectiveConfigView(
@@ -146,6 +156,7 @@ def build_effective_config(
         memory_root=config.memory_root,
         sessions_db=sessions_db,
         mcp_full_servers=config.mcp.full.servers,
+        mcp_full_github_transport=config.mcp.full.github_transport,
         sources=sources,
     )
 
@@ -182,6 +193,10 @@ def render_effective_config_redacted(view: EffectiveConfigView) -> str:
         (
             f"  mcp.full.servers: {mcp_servers_display} "
             f"(source: {view.sources['mcp_full_servers']})"
+        ),
+        (
+            f"  mcp.full.github_transport: {view.mcp_full_github_transport} "
+            f"(source: {view.sources['mcp_full_github_transport']})"
         ),
     ]
     return "\n".join(lines) + "\n"
@@ -237,13 +252,23 @@ def _yaml_has_runtime_local_cwd(yaml_data: Mapping[str, object]) -> bool:
 
 def _yaml_has_mcp_full_servers(yaml_data: Mapping[str, object]) -> bool:
     """Return True when YAML defines ``mcp.full.servers``."""
+    return _yaml_has_mcp_full_field(yaml_data, "servers")
+
+
+def _yaml_has_mcp_full_github_transport(yaml_data: Mapping[str, object]) -> bool:
+    """Return True when YAML defines ``mcp.full.github_transport``."""
+    return _yaml_has_mcp_full_field(yaml_data, "github_transport")
+
+
+def _yaml_has_mcp_full_field(yaml_data: Mapping[str, object], field_name: str) -> bool:
+    """Return True when YAML defines ``mcp.full.<field_name>``."""
     mcp = yaml_data.get("mcp")
     if not isinstance(mcp, dict):
         return False
     full = mcp.get("full")
     if not isinstance(full, dict):
         return False
-    return "servers" in full
+    return field_name in full
 
 
 def _attribute_agent_field_source(

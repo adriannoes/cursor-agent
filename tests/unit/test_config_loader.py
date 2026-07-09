@@ -346,6 +346,50 @@ def test_defaults_mcp_full_servers_is_none(tmp_path: Path) -> None:
     assert config.mcp.full.servers is None
 
 
+def test_defaults_mcp_full_github_transport_is_http(tmp_path: Path) -> None:
+    """Wave 5: omitted mcp.full.github_transport defaults to http (never Docker)."""
+    config = load_config(config_path=tmp_path / "missing.yaml")
+    assert config.mcp.full.github_transport == "http"
+
+
+def test_yaml_mcp_full_github_transport_stdio_round_trip(tmp_path: Path) -> None:
+    """Wave 5: mcp.full.github_transport: stdio loads as operator Docker choice."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        "mcp:\n  full:\n    github_transport: stdio\n",
+        encoding="utf-8",
+    )
+    config = load_config(config_path=config_file)
+    assert config.mcp.full.github_transport == "stdio"
+
+
+def test_yaml_mcp_full_github_transport_invalid_raises_config_error(
+    tmp_path: Path,
+) -> None:
+    """Invalid github_transport raises ConfigError with received value and allowed set."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        "mcp:\n  full:\n    github_transport: websocket\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError) as exc_info:
+        load_config(config_path=config_file)
+    message = str(exc_info.value)
+    assert "websocket" in message
+    assert "http" in message
+    assert "stdio" in message
+
+
+def test_env_mcp_full_github_transport_stdio_loads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CURSOR_AGENT__MCP__FULL__GITHUB_TRANSPORT=stdio loads as stdio."""
+    monkeypatch.setenv("CURSOR_AGENT__MCP__FULL__GITHUB_TRANSPORT", "stdio")
+    config = load_config(config_path=tmp_path / "missing.yaml")
+    assert config.mcp.full.github_transport == "stdio"
+
+
 def test_yaml_mcp_full_servers_allowlist_round_trip(tmp_path: Path) -> None:
     """FR-9 / Q3: mcp.full.servers allowlist loads as a curated id list."""
     config_file = tmp_path / "config.yaml"

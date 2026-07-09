@@ -12,7 +12,7 @@ import os
 from collections.abc import Mapping, Sequence
 from typing import Any, Final
 
-from cursor_agent.mcp_registry import build_mcp_servers_for_full
+from cursor_agent.mcp_registry import GithubTransport, build_mcp_servers_for_full
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -66,6 +66,7 @@ def mcp_servers_override_for_profile(
     *,
     allowlist: Sequence[str] | None = None,
     environ: Mapping[str, str] | None = None,
+    github_transport: GithubTransport | None = None,
 ) -> dict[str, Any] | None:
     """Return MCP override for agent create; None preserves SDK/project settings.
 
@@ -86,7 +87,11 @@ def mcp_servers_override_for_profile(
     if tool_profile == "coding":
         return None
     if tool_profile == "full":
-        return _mcp_servers_for_full(allowlist=allowlist, environ=environ)
+        return _mcp_servers_for_full(
+            allowlist=allowlist,
+            environ=environ,
+            github_transport=github_transport,
+        )
     allowed = ", ".join(sorted(_SUPPORTED_TOOL_PROFILES))
     raise ValueError(
         f"unsupported tool_profile for MCP override: received {tool_profile!r}, "
@@ -98,12 +103,14 @@ def _mcp_servers_for_full(
     *,
     allowlist: Sequence[str] | None,
     environ: Mapping[str, str] | None,
+    github_transport: GithubTransport | None,
 ) -> dict[str, Any]:
     """Build curated MCP servers for ``full``; warn once per omit reason (Q2)."""
     env_map: Mapping[str, str] = os.environ if environ is None else environ
     servers, warnings = build_mcp_servers_for_full(
         allowlist=allowlist,
         environ=env_map,
+        github_transport=github_transport,
     )
     for warning in warnings:
         if warning in _emitted_mcp_omit_warnings:
@@ -135,6 +142,7 @@ def resolve_mcp_servers(
     *,
     allowlist: Sequence[str] | None = None,
     environ: Mapping[str, str] | None = None,
+    github_transport: GithubTransport | None = None,
 ) -> dict[str, Any]:
     """Return MCP server config for a tool profile (legacy empty-map API).
 
@@ -150,6 +158,7 @@ def resolve_mcp_servers(
         tool_profile,
         allowlist=allowlist,
         environ=environ,
+        github_transport=github_transport,
     )
     return override if override is not None else {}
 
