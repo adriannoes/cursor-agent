@@ -8,7 +8,7 @@
 
 > **Humans:** quick start below. **AI Agents:** start at **[AGENTS.md](AGENTS.md)**.
 
-Clean-room agent inspired by [Hermes Agent](https://github.com/NousResearch/hermes-agent) behavior and [OpenClaw](https://github.com/openclaw/openclaw) gateway patterns, powered by the [Cursor Python SDK](https://cursor.com/docs/sdk/python) and **Composer 2.5**.
+Clean-room agent inspired by [Hermes Agent](https://github.com/NousResearch/hermes-agent) behavior and [OpenClaw](https://github.com/openclaw/openclaw) gateway patterns, powered by the [Cursor Python SDK](https://cursor.com/docs/sdk/python). First-party models include **Composer 2.5** and **Grok 4.5** (set via config / `CURSOR_AGENT__MODEL` / `/model`).
 
 Orchestration layer only — the SDK owns the agent loop, tools, and inference. **Cursor Agent** adds sessions, configuration, CLI UX, concurrency and security policy (tool profiles, hooks, allowlists).
 
@@ -19,7 +19,7 @@ Orchestration layer only — the SDK owns the agent loop, tools, and inference. 
 - Long-running messaging gateway, including Telegram (`cursor-agent gateway`)
 - Local Memory v1 from `~/.cursor-agent/USER.md` and `~/.cursor-agent/MEMORY.md`
 - Embedded cron scheduler managed by `cursor-agent cron list|add|remove`
-- `coding` and `messaging` tool profiles for trusted dev vs untrusted input
+- `coding`, `messaging`, and `full` tool profiles for trusted dev, untrusted input, and curated MCP
 
 ## Documentation
 
@@ -137,10 +137,13 @@ For bots and gateways, use `tool_profile: messaging` as specified in [SECURITY.m
 
 ## What's next
 
-**v1.0** ships the first-run welcome banner, one-time getting-started hints, and a [setup docs index](docs/setup.md). On this branch, interactive local configuration is available via `cursor-agent setup` — see [Interactive setup](docs/setup.md#interactive-setup). Subsequent roadmap items:
+**v1.0** (tagged) ships the first-run welcome banner, one-time getting-started hints, and a [setup docs index](docs/setup.md). Interactive local configuration is available via `cursor-agent setup` — see [Interactive setup](docs/setup.md#interactive-setup).
 
-- Discord and Slack gateway onboarding at the same bar as the Telegram guides.
-- `full` tool profile with MCP-backed web search (GitHub + Brave Search).
+**v1.1.0 train** (not tagged yet — package version remains `1.0.0` until the tag): the **`full`** tool profile (curated MCP: GitHub, Brave Search, Playwright) is implemented on this train — enable it via [Setup](docs/setup.md); see [SECURITY.md](SECURITY.md) and [Architecture](docs/architecture.md) for the three-profile matrix. **Grok 4.5** is already selectable as a model id; remaining on this train is flipping the *unset* default from Composer 2.5 → Grok 4.5, then the `v1.1.0` tag.
+
+Further roadmap:
+
+- Discord and Slack gateway onboarding at the same bar as the Telegram guides (PRD-014).
 - Terminal output fallback when the locale cannot render Unicode symbols (for example, replacing checkmarks with ASCII).
 - Session search, gateway queueing, and a Textual-based TUI — promoted when demand justifies scope.
 

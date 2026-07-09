@@ -1,8 +1,8 @@
 # ADR-029: MCP registry and full tool profile
 
-**Status:** Proposed
+**Status:** Accepted
 
-> Design lock for PRD-012 Wave 0. Promote to **Accepted** when `tool_profile: full` and `mcp_registry` are implemented in the codebase (PRD-012 closeout). Until then, `ToolProfile` remains `coding` | `messaging` only.
+> Shipped with PRD-012 closeout. Runtime `ToolProfile` is `coding` | `messaging` | `full`.
 
 ## Context
 
@@ -48,4 +48,4 @@ The Cursor SDK is already the MCP host via `mcp_servers` on create/resume. This 
 - [Architecture — MCP and sandbox by profile](../architecture.md#mcp-and-sandbox-by-profile-create-and-resume)
 - [SECURITY.md](../../SECURITY.md) — messaging threat model
 - [ADR-007](ADR-007-config-loader.md) — config precedence
-- [docs/setup.md](../setup.md) — enabling `full` (to be updated in the PRD-012 docs wave)
+- [docs/setup.md](../setup.md) — enabling `full`

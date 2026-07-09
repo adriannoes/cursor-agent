@@ -38,7 +38,7 @@ For threat model, hook layout, and acceptance probes, see [SECURITY.md](../../SE
 
 - `coding` auto-approve is a dev convenience, not a security boundary for untrusted input.
 
-**Supersession note:** The deferred-`full` consequence of this MVP ADR is superseded by [ADR-029](ADR-029-mcp-registry-full-profile.md) (Proposed until implemented). Messaging empty-MCP and gateway refuse remain in effect.
+**Supersession note:** The deferred-`full` consequence of this MVP ADR is superseded by [ADR-029](ADR-029-mcp-registry-full-profile.md) (**Accepted**). Messaging empty-MCP and gateway refuse remain in effect.
 
 ## See also
 

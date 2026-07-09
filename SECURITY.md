@@ -8,11 +8,12 @@ Threat model and capability matrix for gateway bots (Telegram and future channel
 
 | Context | Posture |
 |---------|---------|
-| CLI `coding` | SDK auto-approve; trusted local operator only |
-| Gateway `messaging` | Allowlist + deny hooks + sandbox (network off) + empty MCP |
+| CLI `coding` | SDK auto-approve; trusted local operator only; project/user MCP preserved |
+| CLI `full` | SDK auto-approve; curated MCP allowlist (`mcp_registry`); **local-only** — never on gateway |
+| Gateway `messaging` | Allowlist + deny hooks + sandbox (network off) + empty MCP (`{}`) |
 | Cron `cloud` | Isolated VM; secrets via `env_vars` |
 
-**Principle:** `messaging` is **read-only over the workspace** — Q&A about code, no mutation.
+**Principle:** `messaging` is **read-only over the workspace** — Q&A about code, no mutation. Curated MCP under `full` never reaches the gateway; messaging empty-MCP policy is unchanged ([ADR-029](docs/decisions/ADR-029-mcp-registry-full-profile.md)).
 
 ---
 
@@ -81,7 +82,7 @@ hooks/messaging/                          # repo source of truth
 
 Profile policy applies on **both** agent create and resume — see [Architecture — MCP and sandbox by profile](docs/architecture.md#mcp-and-sandbox-by-profile-create-and-resume).
 
-`coding` is not gateway-safe even when MCP is preserved; `messaging` layers empty MCP, sandbox, and deny hooks together.
+`coding` is not gateway-safe even when MCP is preserved. `full` injects a curated allowlist (`github`, `brave-search`, `playwright`) and is **local-only** — the gateway refuses any `tool_profile != messaging` (including `full`). `messaging` keeps empty MCP (`{}`), sandbox, and deny hooks; curated MCP never reaches gateway or messaging sessions ([ADR-029](docs/decisions/ADR-029-mcp-registry-full-profile.md)).
 
 ---
 
@@ -105,7 +106,7 @@ Minimum gate uses **hook-level probes** with representative JSON stdin (exit cod
 | 2 | Edit `README.md` via `preToolUse` | Deny (rc 2) | `pre-tool-deny-write.sh` |
 | 3 | `git status` via `beforeShellExecution` | Allow (rc 0) | `shell-gate.sh` allow |
 | 4 | Read `.env` via `beforeReadFile` | Deny (rc 2); secret not echoed | `read-sensitive-deny.sh` |
-| 5 | Gateway with `tool_profile: coding` | Process refuses to start | PRD-006 enforcement |
+| 5 | Gateway with `tool_profile: coding` or `full` | Process refuses to start | PRD-006 / ADR-029 — any profile other than `messaging` |
 
 **Supplemental probes (denied):** MCP execution; standalone `curl` / `wget` / `nc`; pipe-to-shell; `Task` subagent; shell chaining (`git status && curl …`); command substitution (`$(curl …)`, backticks); unsafe `find` (`-delete`, `-exec`); sensitive shell reads (`cat .env`, `head -n 1 .env`, `cat ~/.ssh/id_rsa`, `cat deploy.pem`); broad or sensitive `grep` / `rg` probes; git history/diff reads (`git show`, `git log`, `git diff`); pre-tool empty or lowercase mutation tool names (`write`).
 

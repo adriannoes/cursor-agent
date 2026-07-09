@@ -109,10 +109,11 @@ The SDK does not disable native tools (`shell`, `edit`, …). Real control comes
 
 | Profile | Use case | Posture |
 |---------|----------|---------|
-| `coding` | Local development, trusted operator | SDK auto-approve; optional dev hooks; project/user MCP preserved |
+| `coding` | Local development, trusted operator | SDK auto-approve; optional dev hooks; project/user MCP preserved; sandbox off |
 | `messaging` | Gateways, bots, untrusted input | Read-only workspace; deny hooks; empty MCP; sandbox network off |
+| `full` | Trusted local operator with curated MCP | SDK auto-approve; curated allowlist from `mcp_registry`; sandbox off; **local-only** |
 
-v1.0 ships `coding` and `messaging` ([ADR-014](decisions/ADR-014-tool-profiles-mvp.md)). A third profile, `full` (curated local MCP allowlist), is the design lock in [ADR-029](decisions/ADR-029-mcp-registry-full-profile.md) (**Proposed** until implemented). Gateways **must** use `messaging` and refuse to start with any other profile (including `full` once shipped).
+Three profiles are available: `coding` and `messaging` ([ADR-014](decisions/ADR-014-tool-profiles-mvp.md)), plus `full` (curated local MCP allowlist) per [ADR-029](decisions/ADR-029-mcp-registry-full-profile.md). Curated MVP servers: `github`, `brave-search`, `playwright`. Gateways **must** use `messaging` and refuse to start with any other profile (including `full`).
 
 ### MCP and sandbox by profile (create and resume)
 
@@ -120,12 +121,13 @@ The SDK facade applies profile policy on **both** agent create and resume — no
 
 | Profile | Agent create | Agent resume |
 |---------|--------------|--------------|
-| `coding` | Omits `mcp_servers` so Cursor **project** (`.cursor/mcp.json`) and **user** MCP settings apply | Omits `mcp_servers` so persisted SDK/project MCP settings apply |
+| `coding` | Omits `mcp_servers` (`None`) so Cursor **project** (`.cursor/mcp.json`) and **user** MCP settings apply | Omits `mcp_servers` so persisted SDK/project MCP settings apply |
 | `messaging` | Passes `mcp_servers: {}` and enables sandbox (network off) | Re-injects `mcp_servers: {}` and sandbox for defense in depth |
+| `full` | Passes curated allowlist map from `mcp_registry` (sandbox off) | Re-injects the curated allowlist map (sandbox off) |
 
-The `full` create/resume row lands with PRD-012 implementation; until then see [ADR-029](decisions/ADR-029-mcp-registry-full-profile.md).
+See [ADR-029](decisions/ADR-029-mcp-registry-full-profile.md) for registry path, secrets, and gateway refuse rules.
 
-Local `coding` runs also pass `setting_sources: ["project", "user"]` so workspace and user-level Cursor settings load. `messaging` still deploys deny hooks to the workspace before the first pool use.
+Local `coding` runs also pass `setting_sources: ["project", "user"]` so workspace and user-level Cursor settings load. `messaging` still deploys deny hooks to the workspace before the first pool use. `full` is local-only and never used on the gateway.
 
 Threat model, hook layout and acceptance probes: [SECURITY.md](../SECURITY.md).
 
