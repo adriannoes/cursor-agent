@@ -418,6 +418,8 @@ def test_wizard_applies_on_confirm_y_and_never_echoes_api_key(
     assert "memory_root: (skipped → ~/.cursor-agent)" in combined
     assert "sessions_db: (skipped → ~/.cursor-agent/sessions.db)" in combined
     assert "cursor-agent setup check" in combined and len(prompts) <= 7
+    assert f"│  env: {env_file}" in combined
+    assert f"│  yaml: {config_path}" in combined
     assert env_file.is_file()
     assert secret in env_file.read_text(encoding="utf-8")
     assert config_path.is_file()
@@ -459,7 +461,12 @@ def test_wizard_force_overwrite_surfaces_backup_path_in_success_output(
     assert result.exit_code == 0, result.output
     backups = list(env_file.parent.glob(f"{env_file.name}.bak.*"))
     assert len(backups) == 1
-    assert f"✓  Configuration written.\n│  backup: {backups[0]}" in result.output
+    assert (
+        f"✓  Configuration written.\n"
+        f"│  env: {env_file}\n"
+        f"│  yaml: {config_path}\n"
+        f"│  backup: {backups[0]}"
+    ) in result.output
     assert "│  Next: cursor-agent setup check" in result.output
 
 

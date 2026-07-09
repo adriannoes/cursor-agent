@@ -325,16 +325,15 @@ def print_apply_outcome(
     # on the terse non-interactive path. Interactive wizard uses format_success.
     header, separator, next_hint = SETUP_SUCCESS.partition("\n")
     if wizard_success_chrome:
-        backup_details = (
-            [f"backup: {env_result.backup_path}"]
-            if env_result.backup_path is not None
-            else []
-        )
         typer.echo(
             format_success(
                 header,
                 next_hint if separator else "",
-                detail_lines=backup_details,
+                detail_lines=_wizard_success_detail_lines(
+                    env_file=env_file,
+                    config_path=config_path,
+                    backup_path=env_result.backup_path,
+                ),
             )
         )
         return
@@ -345,6 +344,19 @@ def print_apply_outcome(
         typer.echo(f"  backup: {env_result.backup_path}")
     if separator and next_hint:
         typer.echo(next_hint)
+
+
+def _wizard_success_detail_lines(
+    *,
+    env_file: Path,
+    config_path: Path,
+    backup_path: Path | None,
+) -> list[str]:
+    """Return interactive success details while keeping chrome formatting pure."""
+    details = [f"env: {env_file}", f"yaml: {config_path}"]
+    if backup_path is not None:
+        details.append(f"backup: {backup_path}")
+    return details
 
 
 def run_setup_check(*, config_path: Path, env_file: Path) -> None:
