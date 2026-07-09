@@ -16,6 +16,7 @@ from cursor_agent.cli.setup_wizard_chrome import (
     GLYPH_TRUNK,
     format_radio_option,
     format_step,
+    format_success,
     format_summary,
 )
 
@@ -52,10 +53,10 @@ def test_format_step_inserts_blank_line_before_prompt_when_body_present() -> Non
     """Breathing room: blank line between │ body and └ prompt when body exists."""
     rendered = format_step("Workspace", ["Path under home."], "Enter path:")
     lines = rendered.splitlines()
-    assert lines[0].startswith(f"{GLYPH_STEP} ")
-    assert lines[1].startswith(f"{GLYPH_TRUNK} ")
+    assert lines[0] == f"{GLYPH_STEP}  Workspace"
+    assert lines[1] == f"{GLYPH_TRUNK}  Path under home."
     assert lines[2] == ""
-    assert lines[3].startswith(f"{GLYPH_PROMPT} ")
+    assert lines[3] == f"{GLYPH_PROMPT}  Enter path:"
 
 
 def test_format_step_allows_empty_prompt_for_intro_blocks() -> None:
@@ -66,9 +67,10 @@ def test_format_step_allows_empty_prompt_for_intro_blocks() -> None:
         "",
     )
     lines = rendered.splitlines()
-    assert lines[0].startswith(f"{GLYPH_STEP} ")
-    assert "Welcome" in lines[0]
-    assert lines[1].startswith(f"{GLYPH_TRUNK} ")
+    assert lines[0] == f"{GLYPH_STEP}  Welcome"
+    assert lines[1] == (
+        f"{GLYPH_TRUNK}  This guided setup writes ~/.cursor-agent/config.yaml."
+    )
     assert GLYPH_PROMPT not in rendered
 
 
@@ -76,11 +78,18 @@ def test_format_step_with_empty_body_still_emits_title_and_prompt() -> None:
     """Empty body_lines still renders ◆ title and └ prompt without trunk rows."""
     rendered = format_step("API key", [], "Paste key:")
     lines = rendered.splitlines()
-    assert lines[0].startswith(f"{GLYPH_STEP} ")
-    assert "API key" in lines[0]
-    assert not any(line.startswith(f"{GLYPH_TRUNK} ") for line in lines)
-    assert lines[-1].startswith(f"{GLYPH_PROMPT} ")
-    assert "Paste key:" in lines[-1]
+    assert lines[0] == f"{GLYPH_STEP}  API key"
+    assert not any(line.startswith(f"{GLYPH_TRUNK}  ") for line in lines)
+    assert lines[-1] == f"{GLYPH_PROMPT}  Paste key:"
+
+
+def test_format_step_whitespace_only_prompt_omits_leaf() -> None:
+    """Whitespace-only prompt is treated as empty (no └ line)."""
+    rendered = format_step("Intro", ["Guidance."], "   ")
+    lines = rendered.splitlines()
+    assert lines[0] == f"{GLYPH_STEP}  Intro"
+    assert lines[1] == f"{GLYPH_TRUNK}  Guidance."
+    assert GLYPH_PROMPT not in rendered
 
 
 def test_format_radio_option_selected_uses_filled_bullet() -> None:
@@ -111,14 +120,44 @@ def test_format_summary_uses_open_diamond_and_trunk_rows() -> None:
     assert lines[2] == f"{GLYPH_TRUNK}  Tool profile: (default: coding)"
 
 
-def test_formatters_return_plain_strings_without_tty_dependency() -> None:
-    """Formatters are pure: str in, str out — no interactive I/O side effects."""
+def test_format_summary_accepts_explicit_title() -> None:
+    """Callers can override the short summary title (avoids product_copy drift)."""
+    rendered = format_summary([("workspace", "/tmp/demo")], title="Review")
+    lines = rendered.splitlines()
+    assert lines[0] == f"{GLYPH_SUMMARY}  Review"
+    assert lines[1] == f"{GLYPH_TRUNK}  workspace: /tmp/demo"
+
+
+def test_format_summary_with_empty_rows_emits_header_only() -> None:
+    """Empty rows yield the ◇ header line alone."""
+    rendered = format_summary([])
+    assert rendered == f"{GLYPH_SUMMARY}  Summary"
+    assert GLYPH_TRUNK not in rendered
+
+
+def test_format_success_emits_checkmark_and_optional_next_hint() -> None:
+    """format_success uses ✓ and optional │ next-hint (Step 8 mock)."""
+    with_hint = format_success(
+        "Configuration written.",
+        "Next: cursor-agent setup check",
+    )
+    assert with_hint.splitlines() == [
+        f"{GLYPH_SUCCESS}  Configuration written.",
+        f"{GLYPH_TRUNK}  Next: cursor-agent setup check",
+    ]
+    header_only = format_success("Configuration written.")
+    assert header_only == f"{GLYPH_SUCCESS}  Configuration written."
+
+
+def test_formatters_return_exact_layout_strings_without_tty_dependency() -> None:
+    """Formatters are pure: exact layout strings, no interactive I/O side effects."""
     step = format_step("Title", ["Body"], "Prompt?")
     radio = format_radio_option(1, "Label", "id", selected=True)
     summary = format_summary([("Key", "Value")])
-    assert isinstance(step, str)
-    assert isinstance(radio, str)
-    assert isinstance(summary, str)
-    assert step.strip() != ""
-    assert radio.strip() != ""
-    assert summary.strip() != ""
+    success = format_success("Done.", "Next: check")
+    assert step == (
+        f"{GLYPH_STEP}  Title\n{GLYPH_TRUNK}  Body\n\n{GLYPH_PROMPT}  Prompt?"
+    )
+    assert radio == f"{GLYPH_RADIO_ON}  1  Label  id"
+    assert summary == f"{GLYPH_SUMMARY}  Summary\n{GLYPH_TRUNK}  Key: Value"
+    assert success == f"{GLYPH_SUCCESS}  Done.\n{GLYPH_TRUNK}  Next: check"

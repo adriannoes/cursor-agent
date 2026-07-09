@@ -2,6 +2,11 @@
 
 Glyph vocabulary matches the locked Proposal B mock (D10–D11). No TTY, input,
 or print — callers compose these strings and own I/O.
+
+Chrome owns short step titles (e.g. summary default ``\"Summary\"`` via
+``format_summary(..., title=...)``). ``product_copy.SETUP_*`` supplies English
+copy; G3 should pass titles into these helpers rather than duplicating glyphs
+in copy strings. Non-interactive ``setup apply`` stays terse (no chrome).
 """
 
 from __future__ import annotations
@@ -18,13 +23,15 @@ GLYPH_SUCCESS: str = "✓"
 
 # Two spaces after glyphs match the approved onboard mock (readable TTY scan).
 _GLYPH_GAP: str = "  "
+_DEFAULT_SUMMARY_TITLE: str = "Summary"
 
 
 def format_step(title: str, body_lines: Sequence[str], prompt: str) -> str:
     """Render a wizard step: ◆ title, │ body, optional blank line, └ prompt.
 
-    Empty ``prompt`` omits the leaf line (intro / guidance blocks). A blank
-    line before the prompt is inserted only when ``body_lines`` is non-empty.
+    Empty or whitespace-only ``prompt`` omits the leaf line (intro / guidance).
+    A blank line before the prompt is inserted only when ``body_lines`` is
+    non-empty.
 
     Example:
         >>> "Choose" in format_step("Choose", ["Hint."], "Enter:")
@@ -33,10 +40,11 @@ def format_step(title: str, body_lines: Sequence[str], prompt: str) -> str:
     lines: list[str] = [f"{GLYPH_STEP}{_GLYPH_GAP}{title}"]
     for body_line in body_lines:
         lines.append(f"{GLYPH_TRUNK}{_GLYPH_GAP}{body_line}")
-    if prompt:
+    prompt_text = prompt.strip()
+    if prompt_text:
         if body_lines:
             lines.append("")
-        lines.append(f"{GLYPH_PROMPT}{_GLYPH_GAP}{prompt}")
+        lines.append(f"{GLYPH_PROMPT}{_GLYPH_GAP}{prompt_text}")
     return "\n".join(lines)
 
 
@@ -57,14 +65,40 @@ def format_radio_option(
     return f"{glyph}{_GLYPH_GAP}{index}{_GLYPH_GAP}{label}{_GLYPH_GAP}{option_id}"
 
 
-def format_summary(rows: Sequence[tuple[str, str]]) -> str:
+def format_summary(
+    rows: Sequence[tuple[str, str]],
+    *,
+    title: str = _DEFAULT_SUMMARY_TITLE,
+) -> str:
     """Render a ◇ summary header with │ ``key: value`` trunk rows.
+
+    ``title`` defaults to the short chrome header (``Summary``). Callers that
+    still hold longer ``SETUP_SUMMARY_HEADER`` copy should pass an explicit
+    short title rather than baking glyphs into product_copy.
+
+    Empty ``rows`` yields the header line only.
 
     Example:
         >>> "Model" in format_summary([("Model", "grok-4.5")])
         True
     """
-    lines: list[str] = [f"{GLYPH_SUMMARY}{_GLYPH_GAP}Summary"]
+    lines: list[str] = [f"{GLYPH_SUMMARY}{_GLYPH_GAP}{title}"]
     for key, value in rows:
         lines.append(f"{GLYPH_TRUNK}{_GLYPH_GAP}{key}: {value}")
+    return "\n".join(lines)
+
+
+def format_success(message: str, next_hint: str = "") -> str:
+    """Render Step 8 success: ✓ message and optional │ next-hint trunk.
+
+    Interactive wizard only — do not use on non-interactive ``setup apply``.
+
+    Example:
+        >>> GLYPH_SUCCESS in format_success("Configuration written.")
+        True
+    """
+    lines: list[str] = [f"{GLYPH_SUCCESS}{_GLYPH_GAP}{message}"]
+    hint_text = next_hint.strip()
+    if hint_text:
+        lines.append(f"{GLYPH_TRUNK}{_GLYPH_GAP}{hint_text}")
     return "\n".join(lines)
