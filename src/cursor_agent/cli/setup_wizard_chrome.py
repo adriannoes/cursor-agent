@@ -23,7 +23,11 @@ GLYPH_SUCCESS: str = "✓"
 
 # Two spaces after glyphs match the approved onboard mock (readable TTY scan).
 _GLYPH_GAP: str = "  "
+# Trailing spaces after the longest radio label before option_detail.
+_RADIO_LABEL_DETAIL_GAP: int = 2
 _DEFAULT_SUMMARY_TITLE: str = "Summary"
+# Four spaces after ○ so the hatch label aligns with numbered ``● 1  `` rows.
+_ESCAPE_HATCH_INDEX_COLUMN: str = "    "
 
 
 def _format_trunk_line(body_line: str) -> str:
@@ -65,6 +69,21 @@ def format_step(title: str, body_lines: Sequence[str], prompt: str) -> str:
     return "\n".join(lines)
 
 
+def radio_option_label_width(labels: Sequence[str]) -> int:
+    """Derive radio label column width from option labels (longest + detail gap).
+
+    Example:
+        >>> radio_option_label_width(("coding", "messaging")) == len("messaging") + 2
+        True
+    """
+    if not labels:
+        raise ValueError(
+            f"invalid radio labels: received {labels!r}, "
+            "expected a non-empty sequence of label strings",
+        )
+    return max(len(label) for label in labels) + _RADIO_LABEL_DETAIL_GAP
+
+
 def format_radio_option(
     index: int,
     label: str,
@@ -84,6 +103,16 @@ def format_radio_option(
         f"{label:<{label_width}}" if label_width is not None else f"{label}{_GLYPH_GAP}"
     )
     return f"{glyph} {index}{_GLYPH_GAP}{label_column}{option_detail}"
+
+
+def format_radio_escape_hatch(label: str) -> str:
+    """Render the unnumbered Other-style escape hatch with a hollow radio glyph.
+
+    Example:
+        >>> "Other" in format_radio_escape_hatch("Other — type a Cursor SDK model id")
+        True
+    """
+    return f"{GLYPH_RADIO_OFF}{_ESCAPE_HATCH_INDEX_COLUMN}{label}"
 
 
 def format_summary(

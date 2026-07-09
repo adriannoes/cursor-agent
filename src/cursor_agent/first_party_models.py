@@ -98,22 +98,31 @@ def format_first_party_model_help() -> str:
     return "\n".join(lines)
 
 
-def format_wizard_model_options() -> list[str]:
-    """Return Proposal B model-step body lines for wizard chrome to wrap.
+# Glyph-free Other row; setup_wizard_chrome owns ○ / spacing (D10–D11).
+WIZARD_MODEL_OTHER_ESCAPE_LABEL: Final[str] = "Other — type a Cursor SDK model id"
+# Keep recommended-id padding aligned with the locked Proposal B mock.
+_WIZARD_MODEL_RECOMMENDED_DETAIL_SUFFIX: Final[str] = "         (recommended)"
+
+
+def wizard_model_radio_options() -> tuple[tuple[int, str, str, bool], ...]:
+    """Return glyph-free numbered model rows for chrome radio rendering.
+
+    Each row is ``(index, label, option_detail, selected)``. Callers must render
+    glyphs via ``setup_wizard_chrome`` — this catalog stays soft and glyph-free.
 
     Example:
-        >>> any("grok-4.5" in line for line in format_wizard_model_options())
+        >>> wizard_model_radio_options()[0][2].startswith("grok-4.5")
         True
     """
-    lines: list[str] = []
+    rows: list[tuple[int, str, str, bool]] = []
     for index, row in enumerate(FIRST_PARTY_AGENT_MODELS, start=1):
-        marker = "●" if row.is_default else "○"
-        recommended = "         (recommended)" if row.is_default else ""
-        lines.append(
-            f"{marker} {index}  {row.label:<14} {row.id}{recommended}".rstrip()
+        detail = (
+            f"{row.id}{_WIZARD_MODEL_RECOMMENDED_DETAIL_SUFFIX}"
+            if row.is_default
+            else row.id
         )
-    lines.append("○    Other — type a Cursor SDK model id")
-    return lines
+        rows.append((index, row.label, detail, row.is_default))
+    return tuple(rows)
 
 
 def _looks_like_wizard_numeric_index(stripped: str) -> bool:

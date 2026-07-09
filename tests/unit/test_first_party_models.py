@@ -14,12 +14,13 @@ from cursor_agent.errors import ConfigError
 from cursor_agent.first_party_models import (
     DEFAULT_AGENT_MODEL,
     FIRST_PARTY_AGENT_MODELS,
+    WIZARD_MODEL_OTHER_ESCAPE_LABEL,
     default_agent_model,
     format_first_party_model_help,
-    format_wizard_model_options,
     recommended_agent_model_ids,
     resolve_wizard_model_choice,
     resolve_wizard_tool_profile_choice,
+    wizard_model_radio_options,
 )
 
 
@@ -66,16 +67,16 @@ def test_format_first_party_model_help_includes_ids_and_default() -> None:
     assert "default" in help_text.lower()
 
 
-def test_format_wizard_model_options_returns_proposal_b_body_lines() -> None:
-    """Wizard body lines are list[str] with Grok/Composer labels and ids."""
-    lines = format_wizard_model_options()
-    assert isinstance(lines, list)
-    assert all(isinstance(line, str) for line in lines)
-    joined = "\n".join(lines)
-    assert "grok-4.5" in joined
-    assert "composer-2.5" in joined
-    assert "Grok" in joined or "grok" in joined.lower()
-    assert "Composer" in joined or "composer" in joined.lower()
+def test_wizard_model_radio_options_are_glyph_free_structured_rows() -> None:
+    """Catalog exposes glyph-free model rows; chrome owns ●/○ layout."""
+    options = wizard_model_radio_options()
+    assert options == (
+        (1, "Grok 4.5", "grok-4.5         (recommended)", True),
+        (2, "Composer 2.5", "composer-2.5", False),
+    )
+    assert all(glyph not in str(options) for glyph in ("●", "○"))
+    assert "Other" in WIZARD_MODEL_OTHER_ESCAPE_LABEL
+    assert all(glyph not in WIZARD_MODEL_OTHER_ESCAPE_LABEL for glyph in ("●", "○"))
 
 
 @pytest.mark.parametrize(

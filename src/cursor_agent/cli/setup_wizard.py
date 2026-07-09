@@ -18,16 +18,19 @@ import typer
 from cursor_agent.cli.setup_wizard_chrome import (
     GLYPH_TRUNK,
     format_prompt_leaf,
+    format_radio_escape_hatch,
     format_radio_option,
     format_step,
     format_summary,
+    radio_option_label_width,
 )
 from cursor_agent.errors import ConfigError
 from cursor_agent.first_party_models import (
     DEFAULT_AGENT_MODEL,
-    format_wizard_model_options,
+    WIZARD_MODEL_OTHER_ESCAPE_LABEL,
     resolve_wizard_model_choice,
     resolve_wizard_tool_profile_choice,
+    wizard_model_radio_options,
 )
 from cursor_agent.product_copy import (
     SETUP_CONFIRM,
@@ -62,7 +65,6 @@ _input_fn: Callable[[str], str] = input
 _SKIPPED_MEMORY_ROOT: str = "(skipped → ~/.cursor-agent)"
 _SKIPPED_SESSIONS_DB: str = "(skipped → ~/.cursor-agent/sessions.db)"
 _DEFAULT_TOOL_PROFILE_SUMMARY: str = "(default: coding)"
-_TOOL_PROFILE_LABEL_WIDTH: int = 12
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,12 +179,33 @@ def _prompt_optional_path(title: str, hint: str, prompt: str) -> Path | None:
     return Path(raw).expanduser()
 
 
+def _format_numbered_radio_rows(
+    options: Sequence[tuple[int, str, str, bool]],
+) -> list[str]:
+    """Render numbered radio rows with chrome-owned glyphs and derived widths."""
+    label_width = radio_option_label_width(tuple(label for _, label, _, _ in options))
+    return [
+        format_radio_option(
+            index,
+            label,
+            detail,
+            selected=selected,
+            label_width=label_width,
+        )
+        for index, label, detail, selected in options
+    ]
+
+
 def _prompt_model() -> str | None:
     """Proposal B model step; resolve via soft catalog (Step 5)."""
+    option_lines = [
+        *_format_numbered_radio_rows(wizard_model_radio_options()),
+        format_radio_escape_hatch(WIZARD_MODEL_OTHER_ESCAPE_LABEL),
+    ]
     body: list[str] = [
         *SETUP_HINT_MODEL.splitlines(),
         "",
-        *format_wizard_model_options(),
+        *option_lines,
     ]
     leaf = _prompt_leaf(SETUP_TITLE_MODEL, body, SETUP_PROMPT_MODEL)
     return resolve_wizard_model_choice(_input_fn(leaf))
@@ -190,16 +213,7 @@ def _prompt_model() -> str | None:
 
 def _prompt_tool_profile() -> str | None:
     """Numbered tool-profile step; resolve before confirm (Step 6)."""
-    option_lines = [
-        format_radio_option(
-            index,
-            profile,
-            description,
-            selected=selected,
-            label_width=_TOOL_PROFILE_LABEL_WIDTH,
-        )
-        for index, profile, description, selected in SETUP_TOOL_PROFILE_OPTIONS
-    ]
+    option_lines = _format_numbered_radio_rows(SETUP_TOOL_PROFILE_OPTIONS)
     body: list[str] = [
         *SETUP_HINT_TOOL_PROFILE.splitlines(),
         "",

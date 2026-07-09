@@ -405,9 +405,12 @@ def test_wizard_applies_on_confirm_y_and_never_echoes_api_key(
     assert all(
         line in combined
         for line in (
-            "│  ● 1  coding      Local development (default)",
-            "│  ○ 2  messaging   Gateways / bots — read-only posture",
-            "│  ○ 3  full        Coding + curated MCP servers",
+            "│  ● 1  Grok 4.5      grok-4.5         (recommended)",
+            "│  ○ 2  Composer 2.5  composer-2.5",
+            "│  ○    Other — type a Cursor SDK model id",
+            "│  ● 1  coding     Local development (default)",
+            "│  ○ 2  messaging  Gateways / bots — read-only posture",
+            "│  ○ 3  full       Coding + curated MCP servers",
         )
     )
     assert "model: (default: grok-4.5)" in combined
@@ -655,6 +658,7 @@ def test_wizard_invalid_tool_profile_fails_before_confirm(
     [
         ("model", "1", "model: grok-4.5"),
         ("model", "2", "model: composer-2.5"),
+        ("model", "some-other-model", "model: some-other-model"),
         ("tool_profile", "1", "tool_profile: coding"),
         ("tool_profile", "2", "tool_profile: messaging"),
         ("tool_profile", "3", "tool_profile: full"),
@@ -667,7 +671,7 @@ def test_wizard_resolves_numbered_model_and_tool_profile_choices(
     choice: str,
     expected: str,
 ) -> None:
-    """Proposal B indexes persist their model/profile values."""
+    """Proposal B indexes and soft non-catalog model ids persist unchanged."""
     kwargs = {field: choice}
     result, config_path, _, _ = _run_wizard_choices(
         tmp_path,
