@@ -1116,6 +1116,31 @@ def test_apply_flag_matrix_memory_model_profile_sessions(
     assert (memory_root / "MEMORY.md").is_file()
 
 
+def test_apply_accepts_tool_profile_full(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """FR-15: headless setup accepts ``--tool-profile full`` (PRD-012)."""
+    _patch_non_interactive(monkeypatch)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    config_path = tmp_path / "home" / "config.yaml"
+    env_file = tmp_path / "project" / ".env"
+    env_file.parent.mkdir()
+
+    result = CliRunner().invoke(
+        app,
+        _apply_args(
+            workspace=workspace,
+            config_path=config_path,
+            env_file=env_file,
+            extra=["--tool-profile", "full"],
+        ),
+    )
+    assert result.exit_code == 0, result.output
+    assert "tool_profile: full" in config_path.read_text(encoding="utf-8")
+
+
 def test_invalid_tool_profile_exits_nonzero_without_write(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -1139,7 +1164,9 @@ def test_invalid_tool_profile_exits_nonzero_without_write(
     )
     assert result.exit_code != 0
     combined = f"{result.stdout}\n{result.stderr}\n{result.output}".lower()
-    assert "tool" in combined and ("coding" in combined or "messaging" in combined)
+    assert "tool" in combined and (
+        "coding" in combined or "messaging" in combined or "full" in combined
+    )
     assert not config_path.exists()
     assert not env_file.exists()
 

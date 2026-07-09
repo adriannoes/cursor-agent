@@ -76,6 +76,73 @@ def test_build_effective_config_yaml_source_and_values(tmp_path: Path) -> None:
     assert view.sources["memory_root"] == "yaml"
 
 
+def test_build_effective_config_surfaces_tool_profile_full(tmp_path: Path) -> None:
+    """FR-1: effective view surfaces tool_profile full from YAML."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("tool_profile: full\n", encoding="utf-8")
+
+    view = build_effective_config(
+        config_path=config_path,
+        environ={},
+        dotenv_path=tmp_path / ".env",
+    )
+
+    assert view.tool_profile == "full"
+    assert view.sources["tool_profile"] == "yaml"
+    rendered = render_effective_config_redacted(view)
+    assert "tool_profile: full" in rendered
+
+
+def test_build_effective_config_surfaces_mcp_full_servers_allowlist(
+    tmp_path: Path,
+) -> None:
+    """FR-9: effective view surfaces mcp.full.servers allowlist and yaml source."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "tool_profile: full\n"
+        "mcp:\n"
+        "  full:\n"
+        "    servers:\n"
+        "      - github\n"
+        "      - brave-search\n",
+        encoding="utf-8",
+    )
+
+    view = build_effective_config(
+        config_path=config_path,
+        environ={},
+        dotenv_path=tmp_path / ".env",
+    )
+
+    assert view.mcp_full_servers == ["github", "brave-search"]
+    assert view.sources["mcp_full_servers"] == "yaml"
+    rendered = render_effective_config_redacted(view)
+    assert "mcp.full.servers" in rendered
+    assert "github" in rendered
+
+
+def test_build_effective_config_empty_mcp_full_servers_allowlist_display(
+    tmp_path: Path,
+) -> None:
+    """Explicit empty allowlist must not look like default-all in setup show."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "tool_profile: full\nmcp:\n  full:\n    servers: []\n",
+        encoding="utf-8",
+    )
+
+    view = build_effective_config(
+        config_path=config_path,
+        environ={},
+        dotenv_path=tmp_path / ".env",
+    )
+
+    assert view.mcp_full_servers == []
+    rendered = render_effective_config_redacted(view)
+    assert "(empty allowlist)" in rendered
+    assert "(all curated)" not in rendered
+
+
 def test_build_effective_config_env_api_key_present_and_redacted(
     tmp_path: Path,
 ) -> None:
