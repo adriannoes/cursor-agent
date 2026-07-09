@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 
 from cursor_agent.cli.exit_codes import exit_code_for_error
 from cursor_agent.cli.setup_wizard import run_interactive_wizard
+from cursor_agent.cli.setup_wizard_chrome import format_success
 from cursor_agent.cli.startup import (
     load_cwd_dotenv,
     snapshot_process_environ_before_dotenv,
@@ -181,6 +182,7 @@ def run_setup_apply(
                 env_file=resolved_env,
                 dry_run=False,
                 force=force,
+                wizard_success_chrome=True,
             )
         except CursorAgentError as exc:
             exit_on_cursor_agent_error(exc)
@@ -217,11 +219,14 @@ def apply_non_interactive(
     env_file: Path,
     dry_run: bool,
     force: bool,
+    wizard_success_chrome: bool = False,
 ) -> None:
     """Write YAML + env (or print dry-run plan) and post-validate on success.
 
     Preflights env refuse-without-force before any YAML/memory mutation so a
     refused overwrite cannot leave orphan ``config.yaml`` or memory placeholders.
+    ``wizard_success_chrome`` renders Step 8 ``format_success`` for the
+    interactive wizard only; non-interactive apply stays terse (D14 / rec. 12).
     """
     yaml_updates = build_yaml_updates(
         workspace=workspace,
@@ -249,6 +254,7 @@ def apply_non_interactive(
         env_result=env_result,
         config_path=config_path,
         env_file=env_file,
+        wizard_success_chrome=wizard_success_chrome,
     )
     load_setup_dotenv(env_file)
     load_config(config_path=config_path)
@@ -309,13 +315,29 @@ def print_apply_outcome(
     env_result: WriteConfigResult,
     config_path: Path,
     env_file: Path,
+    wizard_success_chrome: bool = False,
 ) -> None:
     """Print success or already-configured messaging after writes."""
     if not yaml_result.changed and not env_result.changed:
         typer.echo(SETUP_ALREADY_CONFIGURED)
         return
-    # SETUP_SUCCESS may include a Next: line; print paths between header and Next.
+    # SETUP_SUCCESS may include a Next: line; print paths between header and Next
+    # on the terse non-interactive path. Interactive wizard uses format_success.
     header, separator, next_hint = SETUP_SUCCESS.partition("\n")
+    if wizard_success_chrome:
+        backup_details = (
+            [f"backup: {env_result.backup_path}"]
+            if env_result.backup_path is not None
+            else []
+        )
+        typer.echo(
+            format_success(
+                header,
+                next_hint if separator else "",
+                detail_lines=backup_details,
+            )
+        )
+        return
     typer.echo(header)
     typer.echo(f"  env:  {env_file}")
     typer.echo(f"  yaml: {config_path}")

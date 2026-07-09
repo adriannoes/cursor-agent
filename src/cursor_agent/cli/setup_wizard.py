@@ -1,23 +1,42 @@
-"""Interactive TTY setup wizard (PRD-013 Task 5.0 / FR-10).
+"""Interactive TTY setup wizard (PRD-013 Task 5.0 / FR-10; v1.1.0 Wave G3).
 
-Collects API key (getpass), workspace, and optional fields, then returns
-values for ``apply_non_interactive``. Injectable ``_getpass_fn`` /
-``_input_fn`` keep unit tests free of real terminal I/O (ADR-027).
+Collects API key (getpass), workspace, and optional fields with Proposal B
+chrome, then returns values for ``apply_non_interactive``. Injectable
+``_getpass_fn`` / ``_input_fn`` keep unit tests free of real terminal I/O
+(ADR-027). Chrome is presentation only — still ≤7 interactive inputs.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from getpass import getpass
 from pathlib import Path
 
 import typer
 
-from cursor_agent.config.writer import validate_tool_profile
+from cursor_agent.cli.setup_wizard_chrome import (
+    GLYPH_TRUNK,
+    format_prompt_leaf,
+    format_radio_option,
+    format_step,
+    format_summary,
+)
 from cursor_agent.errors import ConfigError
+from cursor_agent.first_party_models import (
+    DEFAULT_AGENT_MODEL,
+    format_wizard_model_options,
+    resolve_wizard_model_choice,
+    resolve_wizard_tool_profile_choice,
+)
 from cursor_agent.product_copy import (
     SETUP_CONFIRM,
+    SETUP_HINT_API_KEY,
+    SETUP_HINT_MEMORY_ROOT,
+    SETUP_HINT_MODEL,
+    SETUP_HINT_SESSIONS_DB,
+    SETUP_HINT_TOOL_PROFILE,
+    SETUP_HINT_WORKSPACE,
     SETUP_INTRO,
     SETUP_PROMPT_API_KEY,
     SETUP_PROMPT_MEMORY_ROOT,
@@ -26,11 +45,24 @@ from cursor_agent.product_copy import (
     SETUP_PROMPT_TOOL_PROFILE,
     SETUP_PROMPT_WORKSPACE,
     SETUP_SUMMARY_HEADER,
+    SETUP_TITLE_API_KEY,
+    SETUP_TITLE_INTRO,
+    SETUP_TITLE_MEMORY_ROOT,
+    SETUP_TITLE_MODEL,
+    SETUP_TITLE_SESSIONS_DB,
+    SETUP_TITLE_TOOL_PROFILE,
+    SETUP_TITLE_WORKSPACE,
+    SETUP_TOOL_PROFILE_OPTIONS,
 )
 
 # Monkeypatch targets for unit tests (ADR-027 injectable prompt style).
 _getpass_fn: Callable[[str], str] = getpass
 _input_fn: Callable[[str], str] = input
+
+_SKIPPED_MEMORY_ROOT: str = "(skipped → ~/.cursor-agent)"
+_SKIPPED_SESSIONS_DB: str = "(skipped → ~/.cursor-agent/sessions.db)"
+_DEFAULT_TOOL_PROFILE_SUMMARY: str = "(default: coding)"
+_TOOL_PROFILE_LABEL_WIDTH: int = 12
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,30 +83,21 @@ def run_interactive_wizard() -> WizardCollectedValues:
     Example:
         >>> # values = run_interactive_wizard()  # prompts on a real TTY
     """
-    typer.echo(SETUP_INTRO)
-
-    api_key = _getpass_fn(SETUP_PROMPT_API_KEY).strip()
-    if not api_key:
-        raise ConfigError(
-            "empty API key from wizard prompt: received '', "
-            "expected non-empty CURSOR_API_KEY value",
-        )
-
-    default_workspace = Path.cwd()
-    workspace_prompt = SETUP_PROMPT_WORKSPACE.format(default=default_workspace)
-    workspace_raw = _input_fn(workspace_prompt).strip()
-    workspace = Path(workspace_raw).expanduser() if workspace_raw else default_workspace
-    if not workspace.is_dir():
-        raise ConfigError(
-            f"invalid workspace from wizard: received {str(workspace)!r}, "
-            "expected an existing directory",
-        )
-
-    memory_root = _optional_path_from_prompt(SETUP_PROMPT_MEMORY_ROOT)
-    sessions_db = _optional_path_from_prompt(SETUP_PROMPT_SESSIONS_DB)
-    model = _optional_str_from_prompt(SETUP_PROMPT_MODEL)
-    tool_profile = _optional_tool_profile_from_prompt(SETUP_PROMPT_TOOL_PROFILE)
-
+    _echo_intro()
+    api_key = _prompt_api_key()
+    workspace = _prompt_workspace()
+    memory_root = _prompt_optional_path(
+        SETUP_TITLE_MEMORY_ROOT,
+        SETUP_HINT_MEMORY_ROOT,
+        SETUP_PROMPT_MEMORY_ROOT,
+    )
+    sessions_db = _prompt_optional_path(
+        SETUP_TITLE_SESSIONS_DB,
+        SETUP_HINT_SESSIONS_DB,
+        SETUP_PROMPT_SESSIONS_DB,
+    )
+    model = _prompt_model()
+    tool_profile = _prompt_tool_profile()
     print_wizard_summary(
         workspace=workspace,
         memory_root=memory_root,
@@ -85,7 +108,6 @@ def run_interactive_wizard() -> WizardCollectedValues:
     if not confirm_wizard_write():
         typer.echo("Setup cancelled.", err=True)
         raise typer.Exit(1)
-
     return WizardCollectedValues(
         api_key=api_key,
         workspace=workspace,
@@ -96,26 +118,95 @@ def run_interactive_wizard() -> WizardCollectedValues:
     )
 
 
-def _optional_path_from_prompt(prompt: str) -> Path | None:
+def _echo_intro() -> None:
+    """Print Step 0 intro chrome (no interactive input)."""
+    typer.echo(
+        format_step(SETUP_TITLE_INTRO, SETUP_INTRO.splitlines(), ""),
+    )
+
+
+def _prompt_leaf(title: str, body_lines: Sequence[str], prompt: str) -> str:
+    """Echo ◆/│ chrome and return the └ prompt string for input/getpass."""
+    rendered = format_step(title, body_lines, prompt)
+    lines = rendered.splitlines()
+    for line in lines[:-1]:
+        typer.echo(line)
+    return f"{lines[-1]} "
+
+
+def _prompt_api_key() -> str:
+    """Collect a non-empty API key via getpass (Step 1)."""
+    leaf = _prompt_leaf(
+        SETUP_TITLE_API_KEY,
+        SETUP_HINT_API_KEY.splitlines(),
+        SETUP_PROMPT_API_KEY,
+    )
+    api_key = _getpass_fn(leaf).strip()
+    if not api_key:
+        raise ConfigError(
+            "empty API key from wizard prompt: received '', "
+            "expected non-empty CURSOR_API_KEY value",
+        )
+    return api_key
+
+
+def _prompt_workspace() -> Path:
+    """Collect workspace path; empty Enter keeps ``Path.cwd()`` (Step 2)."""
+    default_workspace = Path.cwd()
+    leaf = _prompt_leaf(
+        SETUP_TITLE_WORKSPACE,
+        SETUP_HINT_WORKSPACE.splitlines(),
+        SETUP_PROMPT_WORKSPACE.format(default=default_workspace),
+    )
+    workspace_raw = _input_fn(leaf).strip()
+    workspace = Path(workspace_raw).expanduser() if workspace_raw else default_workspace
+    if not workspace.is_dir():
+        raise ConfigError(
+            f"invalid workspace from wizard: received {str(workspace)!r}, "
+            "expected an existing directory",
+        )
+    return workspace
+
+
+def _prompt_optional_path(title: str, hint: str, prompt: str) -> Path | None:
     """Prompt for an optional path; empty Enter skips."""
-    raw = _input_fn(prompt).strip()
+    leaf = _prompt_leaf(title, hint.splitlines(), prompt)
+    raw = _input_fn(leaf).strip()
     if not raw:
         return None
     return Path(raw).expanduser()
 
 
-def _optional_str_from_prompt(prompt: str) -> str | None:
-    """Prompt for an optional string; empty Enter skips."""
-    raw = _input_fn(prompt).strip()
-    return raw if raw else None
+def _prompt_model() -> str | None:
+    """Proposal B model step; resolve via soft catalog (Step 5)."""
+    body: list[str] = [
+        *SETUP_HINT_MODEL.splitlines(),
+        "",
+        *format_wizard_model_options(),
+    ]
+    leaf = _prompt_leaf(SETUP_TITLE_MODEL, body, SETUP_PROMPT_MODEL)
+    return resolve_wizard_model_choice(_input_fn(leaf))
 
 
-def _optional_tool_profile_from_prompt(prompt: str) -> str | None:
-    """Prompt for optional tool profile; validate before confirm when provided."""
-    raw = _optional_str_from_prompt(prompt)
-    if raw is None:
-        return None
-    return validate_tool_profile(raw)
+def _prompt_tool_profile() -> str | None:
+    """Numbered tool-profile step; resolve before confirm (Step 6)."""
+    option_lines = [
+        format_radio_option(
+            index,
+            profile,
+            description,
+            selected=selected,
+            label_width=_TOOL_PROFILE_LABEL_WIDTH,
+        )
+        for index, profile, description, selected in SETUP_TOOL_PROFILE_OPTIONS
+    ]
+    body: list[str] = [
+        *SETUP_HINT_TOOL_PROFILE.splitlines(),
+        "",
+        *option_lines,
+    ]
+    leaf = _prompt_leaf(SETUP_TITLE_TOOL_PROFILE, body, SETUP_PROMPT_TOOL_PROFILE)
+    return resolve_wizard_tool_profile_choice(_input_fn(leaf))
 
 
 def print_wizard_summary(
@@ -126,24 +217,54 @@ def print_wizard_summary(
     model: str | None,
     tool_profile: str | None,
 ) -> None:
-    """Print redacted wizard summary (API key always shown as ``***``)."""
-    typer.echo(SETUP_SUMMARY_HEADER)
-    typer.echo("  API key: ***")
-    typer.echo(f"  workspace: {workspace}")
-    typer.echo(f"  memory_root: {_display_optional(memory_root)}")
-    typer.echo(f"  sessions_db: {_display_optional(sessions_db)}")
-    typer.echo(f"  model: {_display_optional(model)}")
-    typer.echo(f"  tool_profile: {_display_optional(tool_profile)}")
+    """Print redacted ◇ summary (API key always shown as ``***``)."""
+    typer.echo(
+        format_summary(
+            [
+                ("API key", "***"),
+                ("workspace", str(workspace)),
+                ("memory_root", _display_memory_root(memory_root)),
+                ("sessions_db", _display_sessions_db(sessions_db)),
+                ("model", _display_model(model)),
+                ("tool_profile", _display_tool_profile(tool_profile)),
+            ],
+            title=SETUP_SUMMARY_HEADER,
+        )
+    )
 
 
-def _display_optional(value: Path | str | None) -> str:
-    """Render optional wizard fields for the summary."""
+def _display_memory_root(value: Path | None) -> str:
+    """Render memory_root for the summary, including skipped default path."""
     if value is None:
-        return "(skipped)"
+        return _SKIPPED_MEMORY_ROOT
     return str(value)
+
+
+def _display_sessions_db(value: Path | None) -> str:
+    """Render sessions_db for the summary, including skipped default path."""
+    if value is None:
+        return _SKIPPED_SESSIONS_DB
+    return str(value)
+
+
+def _display_model(value: str | None) -> str:
+    """Render model for the summary; omitted → default agent model."""
+    if value is None:
+        return f"(default: {DEFAULT_AGENT_MODEL})"
+    return value
+
+
+def _display_tool_profile(value: str | None) -> str:
+    """Render tool_profile for the summary; omitted → coding default."""
+    if value is None:
+        return _DEFAULT_TOOL_PROFILE_SUMMARY
+    return value
 
 
 def confirm_wizard_write() -> bool:
     """Return True when the operator confirms with y/yes (default N)."""
-    answer = _input_fn(SETUP_CONFIRM).strip().lower()
+    # Blank │ trunk before └ matches approved Step 7 breathing room.
+    typer.echo(GLYPH_TRUNK)
+    prompt = f"{format_prompt_leaf(SETUP_CONFIRM)} "
+    answer = _input_fn(prompt).strip().lower()
     return answer in {"y", "yes"}

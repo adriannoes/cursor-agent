@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import re
 
+import cursor_agent.product_copy as product_copy
 from cursor_agent.platforms.base import GATEWAY_BUSY_MESSAGE
 from cursor_agent.product_copy import (
     CURSOR_API_KEY_SETUP_HINT,
     FIRST_COMMANDS_HINT,
     FIRST_RUN_GETTING_STARTED,
     GATEWAY_BUSY_MESSAGE as COPY_GATEWAY_BUSY_MESSAGE,
+    SETUP_ALREADY_CONFIGURED,
+    SETUP_INTRO,
+    SETUP_SUCCESS,
+    SETUP_TOOL_PROFILE_OPTIONS,
     TELEGRAM_NO_SESSION_HINT,
     WELCOME_LOGO,
     WELCOME_READY_LINE,
@@ -146,12 +151,25 @@ def test_first_commands_hint_has_no_setup_command_bullet() -> None:
 # --- Task 5.1 / 5.2: SETUP_* wizard + apply success copy (FR-11) -------------
 
 _SETUP_COPY_NAMES: tuple[str, ...] = (
+    "SETUP_TITLE_INTRO",
     "SETUP_INTRO",
+    "SETUP_TITLE_API_KEY",
+    "SETUP_HINT_API_KEY",
     "SETUP_PROMPT_API_KEY",
+    "SETUP_TITLE_WORKSPACE",
+    "SETUP_HINT_WORKSPACE",
     "SETUP_PROMPT_WORKSPACE",
+    "SETUP_TITLE_MEMORY_ROOT",
+    "SETUP_HINT_MEMORY_ROOT",
     "SETUP_PROMPT_MEMORY_ROOT",
+    "SETUP_TITLE_SESSIONS_DB",
+    "SETUP_HINT_SESSIONS_DB",
     "SETUP_PROMPT_SESSIONS_DB",
+    "SETUP_TITLE_MODEL",
+    "SETUP_HINT_MODEL",
     "SETUP_PROMPT_MODEL",
+    "SETUP_TITLE_TOOL_PROFILE",
+    "SETUP_HINT_TOOL_PROFILE",
     "SETUP_PROMPT_TOOL_PROFILE",
     "SETUP_SUMMARY_HEADER",
     "SETUP_CONFIRM",
@@ -162,8 +180,6 @@ _SETUP_COPY_NAMES: tuple[str, ...] = (
 
 def test_setup_copy_constants_exist_english_first_without_secrets() -> None:
     """SETUP_* wizard/apply constants are non-empty English Final[str] without secrets."""
-    import cursor_agent.product_copy as product_copy
-
     for name in _SETUP_COPY_NAMES:
         assert hasattr(product_copy, name), f"missing product_copy.{name}"
         value = getattr(product_copy, name)
@@ -175,39 +191,34 @@ def test_setup_copy_constants_exist_english_first_without_secrets() -> None:
 
 def test_setup_intro_points_to_docs_setup() -> None:
     """Wizard intro mentions docs/setup.md for cold-start discoverability."""
-    from cursor_agent.product_copy import SETUP_INTRO
-
     assert "docs/setup.md" in SETUP_INTRO
     assert _max_rendered_line_width(SETUP_INTRO) <= PRD_MAX_LINE_WIDTH
 
 
 def test_setup_success_suggests_setup_check() -> None:
     """Apply/wizard success copy points operators to ``cursor-agent setup check``."""
-    from cursor_agent.product_copy import SETUP_SUCCESS
-
     assert "cursor-agent setup check" in SETUP_SUCCESS
     _assert_no_secret_like_values(SETUP_SUCCESS)
 
 
 def test_setup_already_configured_is_idempotent_message() -> None:
     """Idempotent apply uses a clear already-configured success string."""
-    from cursor_agent.product_copy import SETUP_ALREADY_CONFIGURED
-
     lowered = SETUP_ALREADY_CONFIGURED.lower()
     assert "already" in lowered and "configur" in lowered
 
 
 def test_setup_banner_adjacent_prompts_respect_prd_width() -> None:
-    """Short wizard prompts stay within PRD ≤60 column budget where applicable."""
-    import cursor_agent.product_copy as product_copy
-
-    for name in (
-        "SETUP_PROMPT_API_KEY",
-        "SETUP_PROMPT_WORKSPACE",
-        "SETUP_CONFIRM",
-        "SETUP_SUMMARY_HEADER",
-        "SETUP_SUCCESS",
-        "SETUP_ALREADY_CONFIGURED",
-    ):
+    """Wizard copy stays within the PRD ≤60-column budget."""
+    for name in _SETUP_COPY_NAMES:
         value = getattr(product_copy, name)
         assert _max_rendered_line_width(value) <= PRD_MAX_LINE_WIDTH, name
+
+
+def test_setup_tool_profile_options_are_glyph_free_structured_copy() -> None:
+    """Tool-profile product copy leaves radio glyph rendering to chrome."""
+    assert SETUP_TOOL_PROFILE_OPTIONS == (
+        (1, "coding", "Local development (default)", True),
+        (2, "messaging", "Gateways / bots — read-only posture", False),
+        (3, "full", "Coding + curated MCP servers", False),
+    )
+    assert all(glyph not in str(SETUP_TOOL_PROFILE_OPTIONS) for glyph in ("●", "○"))

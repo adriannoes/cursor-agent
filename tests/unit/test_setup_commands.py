@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
+import pytest
 from typer.testing import CliRunner
 
 from cursor_agent.cli import startup as startup_mod
@@ -17,6 +18,7 @@ from cursor_agent.config.loader import CursorAgentConfig
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
+    from click.testing import Result
 
 _PLACEHOLDER_API_KEY = "sk-test-placeholder"
 _SETUP_EXAMPLE = "cursor-agent setup"
@@ -149,6 +151,10 @@ def test_apply_with_flags_writes_via_injected_paths(
     yaml_text = config_path.read_text(encoding="utf-8")
     assert str(workspace) in yaml_text
     assert _PLACEHOLDER_API_KEY not in yaml_text
+    combined = f"{result.stdout}\n{result.output}"
+    assert "Configuration written." in combined
+    assert "cursor-agent setup check" in combined
+    assert all(glyph not in combined for glyph in ("◆", "◇", "✓"))
 
 
 def test_dry_run_prints_plan_without_writes(
@@ -345,51 +351,113 @@ def _patch_wizard_io(
     return prompts_seen
 
 
-def test_wizard_applies_on_confirm_y_and_never_echoes_api_key(
+def _run_wizard_choices(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
-) -> None:
-    """Wizard collects values, confirms with y, writes via same apply path; key never echoed."""
+    *,
+    model: str = "",
+    tool_profile: str = "",
+    api_key: str = _PLACEHOLDER_API_KEY,
+) -> tuple[Result, Path, Path, list[str]]:
+    """Run one isolated wizard case with optional model/profile choices."""
     _patch_tty_not_ci(monkeypatch)
     workspace = tmp_path / "ws"
     workspace.mkdir()
     config_path = tmp_path / "home" / "config.yaml"
     env_file = tmp_path / "project" / ".env"
     env_file.parent.mkdir()
-    secret = "sk-wizard-secret-key-never-echo"
+    prompts = _patch_wizard_io(
+        monkeypatch,
+        api_key=api_key,
+        input_answers=[str(workspace), "", "", model, tool_profile, "y"],
+    )
+    result = CliRunner().invoke(
+        app,
+        ["setup", "--config-path", str(config_path), "--env-file", str(env_file)],
+    )
+    return result, config_path, env_file, prompts
 
-    _patch_wizard_io(
+
+def test_wizard_applies_on_confirm_y_and_never_echoes_api_key(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Happy path locks G3 chrome/defaults while keeping the API key secret."""
+    secret = "sk-wizard-secret-key-never-echo"
+    result, config_path, env_file, prompts = _run_wizard_choices(
+        tmp_path,
         monkeypatch,
         api_key=secret,
-        input_answers=[
-            str(workspace),
-            "",
-            "",
-            "",
-            "",
-            "y",
-        ],
+    )
+    assert result.exit_code == 0, result.output
+    combined = f"{result.stdout}\n{result.stderr}\n{result.output}"
+    prompt_text = "\n".join(prompts)
+    transcript = f"{combined}\n{prompt_text}"
+    assert secret not in combined
+    assert all(glyph in transcript for glyph in ("◆", "│", "◇", "●", "○", "✓"))
+    assert "└" in prompt_text
+    assert all(
+        token in prompt_text
+        for token in ("[1 / 2 / id]", "[1 / 2 / 3 / name]", "[y / N]")
+    )
+    assert "Grok 4.5" in transcript and "composer-2.5" in transcript
+    assert all(profile in transcript for profile in ("coding", "messaging", "full"))
+    assert all(
+        line in combined
+        for line in (
+            "│  ● 1  coding      Local development (default)",
+            "│  ○ 2  messaging   Gateways / bots — read-only posture",
+            "│  ○ 3  full        Coding + curated MCP servers",
+        )
+    )
+    assert "model: (default: grok-4.5)" in combined
+    assert "tool_profile: (default: coding)" in combined
+    assert "memory_root: (skipped → ~/.cursor-agent)" in combined
+    assert "sessions_db: (skipped → ~/.cursor-agent/sessions.db)" in combined
+    assert "cursor-agent setup check" in combined and len(prompts) <= 7
+    assert env_file.is_file()
+    assert secret in env_file.read_text(encoding="utf-8")
+    assert config_path.is_file()
+    yaml_text = config_path.read_text(encoding="utf-8")
+    assert secret not in yaml_text
+    assert "model:" not in yaml_text and "tool_profile:" not in yaml_text
+
+
+def test_wizard_force_overwrite_surfaces_backup_path_in_success_output(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Interactive ``--force`` reports its generated env backup path."""
+    _patch_tty_not_ci(monkeypatch)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    config_path = tmp_path / "home" / "config.yaml"
+    env_file = tmp_path / "project" / ".env"
+    env_file.parent.mkdir()
+    env_file.write_text("CURSOR_API_KEY=sk-existing-other\n", encoding="utf-8")
+    _patch_wizard_io(
+        monkeypatch,
+        api_key=_PLACEHOLDER_API_KEY,
+        input_answers=[str(workspace), "", "", "", "", "y"],
     )
 
     result = CliRunner().invoke(
         app,
         [
             "setup",
+            "--force",
             "--config-path",
             str(config_path),
             "--env-file",
             str(env_file),
         ],
     )
+
     assert result.exit_code == 0, result.output
-    combined = f"{result.stdout}\n{result.stderr}\n{result.output}"
-    assert secret not in combined
-    assert "***" in combined or "API key" in combined.lower()
-    assert "cursor-agent setup check" in combined
-    assert env_file.is_file()
-    assert secret in env_file.read_text(encoding="utf-8")
-    assert config_path.is_file()
-    assert secret not in config_path.read_text(encoding="utf-8")
+    backups = list(env_file.parent.glob(f"{env_file.name}.bak.*"))
+    assert len(backups) == 1
+    assert f"✓  Configuration written.\n│  backup: {backups[0]}" in result.output
+    assert "│  Next: cursor-agent setup check" in result.output
 
 
 def test_wizard_declines_on_n_without_writes(
@@ -476,46 +544,6 @@ def test_wizard_skips_optional_fields_on_empty_enter(
     env_text = env_file.read_text(encoding="utf-8")
     assert "CURSOR_AGENT_SESSIONS_DB" not in env_text
     assert _PLACEHOLDER_API_KEY in env_text
-
-
-def test_wizard_completes_in_at_most_seven_interactive_steps(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """Wizard stays within FR-10 ≤7 interactive prompt/getpass steps."""
-    _patch_tty_not_ci(monkeypatch)
-    workspace = tmp_path / "ws"
-    workspace.mkdir()
-    config_path = tmp_path / "home" / "config.yaml"
-    env_file = tmp_path / "project" / ".env"
-    env_file.parent.mkdir()
-
-    prompts = _patch_wizard_io(
-        monkeypatch,
-        api_key=_PLACEHOLDER_API_KEY,
-        input_answers=[
-            str(workspace),
-            "",
-            "",
-            "",
-            "",
-            "y",
-        ],
-    )
-
-    result = CliRunner().invoke(
-        app,
-        [
-            "setup",
-            "--config-path",
-            str(config_path),
-            "--env-file",
-            str(env_file),
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    # getpass (1) + workspace (1) + ≤4 optionals + confirm (1) ≤ 7 interactive steps
-    assert len(prompts) <= 7, f"too many interactive steps: {len(prompts)} {prompts!r}"
 
 
 def test_wizard_yes_without_flags_still_requires_non_interactive_inputs(
@@ -617,6 +645,60 @@ def test_wizard_invalid_tool_profile_fails_before_confirm(
     assert "foo" in combined
     assert not config_path.exists()
     assert not env_file.exists()
+
+
+# --- Wave G3 / Task 1.9: Proposal B choices ----------------------------------
+
+
+@pytest.mark.parametrize(
+    ("field", "choice", "expected"),
+    [
+        ("model", "1", "model: grok-4.5"),
+        ("model", "2", "model: composer-2.5"),
+        ("tool_profile", "1", "tool_profile: coding"),
+        ("tool_profile", "2", "tool_profile: messaging"),
+        ("tool_profile", "3", "tool_profile: full"),
+    ],
+)
+def test_wizard_resolves_numbered_model_and_tool_profile_choices(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    field: str,
+    choice: str,
+    expected: str,
+) -> None:
+    """Proposal B indexes persist their model/profile values."""
+    kwargs = {field: choice}
+    result, config_path, _, _ = _run_wizard_choices(
+        tmp_path,
+        monkeypatch,
+        **kwargs,
+    )
+    assert result.exit_code == 0, result.output
+    assert expected in config_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("field", ["model", "tool_profile"])
+def test_wizard_rejects_invalid_numeric_choice_nine(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    field: str,
+) -> None:
+    """Out-of-range model/profile index fails before any writes."""
+    kwargs = {field: "9"}
+    result, config_path, env_file, _ = _run_wizard_choices(
+        tmp_path,
+        monkeypatch,
+        **kwargs,
+    )
+    combined = f"{result.stdout}\n{result.stderr}\n{result.output}"
+    assert result.exit_code != 0
+    assert "9" in combined and "expected" in combined.lower()
+    expected_indexes = (
+        ("'1'", "'2'", "'3'") if field == "tool_profile" else ("'1'", "'2'")
+    )
+    assert all(index in combined for index in expected_indexes)
+    assert not config_path.exists() and not env_file.exists()
 
 
 # --- Task 4.5 / 4.10: check and show ------------------------------------------
