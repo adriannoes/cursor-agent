@@ -300,6 +300,20 @@ def test_github_http_bearer_strips_trailing_newline_from_pat() -> None:
     assert "\n" not in auth
 
 
+def test_github_stdio_env_strips_trailing_newline_from_pat() -> None:
+    """Stdio emit strips trailing newline from PAT so Docker env matches HTTP."""
+    servers, warnings = build_mcp_servers_for_full(
+        allowlist=[MCP_SERVER_ID_GITHUB],
+        environ={"GITHUB_PERSONAL_ACCESS_TOKEN": f"{_FAKE_GITHUB_TOKEN}\n"},
+        github_transport="stdio",
+    )
+
+    assert warnings == []
+    env = servers[MCP_SERVER_ID_GITHUB]["env"]
+    assert env["GITHUB_PERSONAL_ACCESS_TOKEN"] == _FAKE_GITHUB_TOKEN
+    assert "\n" not in env["GITHUB_PERSONAL_ACCESS_TOKEN"]
+
+
 def test_allowed_github_transports_is_http_and_stdio() -> None:
     """Public ALLOWED_GITHUB_TRANSPORTS is the single source for {http, stdio}."""
     assert ALLOWED_GITHUB_TRANSPORTS == frozenset({"http", "stdio"})

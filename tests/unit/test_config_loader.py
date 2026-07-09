@@ -390,6 +390,27 @@ def test_env_mcp_full_github_transport_stdio_loads(
     assert config.mcp.full.github_transport == "stdio"
 
 
+def test_yaml_mcp_full_github_transport_case_normalized(tmp_path: Path) -> None:
+    """Loader lowercases github_transport so HTTP/STDIO match the allowed set."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        "mcp:\n  full:\n    github_transport: HTTP\n",
+        encoding="utf-8",
+    )
+    config = load_config(config_path=config_file)
+    assert config.mcp.full.github_transport == "http"
+
+
+def test_env_mcp_full_github_transport_case_normalized(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Env github_transport is case-normalized (STDIO → stdio)."""
+    monkeypatch.setenv("CURSOR_AGENT__MCP__FULL__GITHUB_TRANSPORT", "STDIO")
+    config = load_config(config_path=tmp_path / "missing.yaml")
+    assert config.mcp.full.github_transport == "stdio"
+
+
 def test_yaml_mcp_full_servers_allowlist_round_trip(tmp_path: Path) -> None:
     """FR-9 / Q3: mcp.full.servers allowlist loads as a curated id list."""
     config_file = tmp_path / "config.yaml"

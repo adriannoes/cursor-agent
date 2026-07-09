@@ -223,8 +223,14 @@ def _emit_stdio_server_config(
     definition: _CuratedMcpServerDefinition,
     environ: Mapping[str, str],
 ) -> dict[str, Any]:
-    """Emit a flat stdio dict; interpolate required env from ``environ``."""
-    env: dict[str, str] = {key: environ[key] for key in definition.required_env_keys}
+    """Emit a flat stdio dict; interpolate required env from ``environ``.
+
+    Strip secret values so ``.env`` trailing newlines match the HTTP Bearer path
+    (Wave 5 review: HTTP vs stdio PAT asymmetry).
+    """
+    env: dict[str, str] = {
+        key: environ[key].strip() for key in definition.required_env_keys
+    }
     return {
         "command": definition.command,
         "args": list(definition.args),

@@ -99,14 +99,16 @@ class McpFullConfig(BaseModel):
     @field_validator("github_transport", mode="before")
     @classmethod
     def _reject_invalid_github_transport(cls, value: object) -> object:
-        """Reject transports outside {http, stdio} with received + allowed set."""
-        if value not in ALLOWED_GITHUB_TRANSPORTS:
+        """Normalize case then reject transports outside {http, stdio}."""
+        # Operators often type HTTP/STDIO; lowercase before the allowlist check.
+        normalized: object = value.lower() if isinstance(value, str) else value
+        if normalized not in ALLOWED_GITHUB_TRANSPORTS:
             allowed = ", ".join(sorted(ALLOWED_GITHUB_TRANSPORTS))
             raise ValueError(
                 f"invalid mcp.full.github_transport: received {value!r}, "
                 f"expected one of {{{allowed}}}",
             )
-        return value
+        return normalized
 
 
 class McpConfig(BaseModel):
