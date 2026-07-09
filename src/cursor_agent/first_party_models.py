@@ -15,18 +15,11 @@ from cursor_agent.errors import ConfigError
 
 DEFAULT_AGENT_MODEL: Final[str] = "grok-4.5"
 
-_WIZARD_MODEL_INDEX_TO_ID: Final[dict[str, str]] = {
-    "1": "grok-4.5",
-    "2": "composer-2.5",
-}
 _WIZARD_TOOL_PROFILE_INDEX_TO_NAME: Final[dict[str, str]] = {
     "1": "coding",
     "2": "messaging",
     "3": "full",
 }
-_MODEL_CHOICE_EXPECTED_SHAPE: Final[str] = (
-    "empty (default), '1' (Grok 4.5), '2' (Composer 2.5), or a Cursor SDK model id"
-)
 _TOOL_PROFILE_CHOICE_EXPECTED_SHAPE: Final[str] = (
     "empty (default), '1' (coding), '2' (messaging), '3' (full), "
     "or a profile name ('coding', 'messaging', 'full')"
@@ -51,6 +44,19 @@ class FirstPartyAgentModel:
 FIRST_PARTY_AGENT_MODELS: Final[tuple[FirstPartyAgentModel, ...]] = (
     FirstPartyAgentModel(id="grok-4.5", label="Grok 4.5", is_default=True),
     FirstPartyAgentModel(id="composer-2.5", label="Composer 2.5", is_default=False),
+)
+
+# Derived from catalog so display (enumerate) and resolve stay in sync.
+_WIZARD_MODEL_INDEX_TO_ID: Final[dict[str, str]] = {
+    str(index): row.id for index, row in enumerate(FIRST_PARTY_AGENT_MODELS, start=1)
+}
+_MODEL_CHOICE_EXPECTED_SHAPE: Final[str] = (
+    "empty (default), "
+    + ", ".join(
+        f"'{index}' ({row.label})"
+        for index, row in enumerate(FIRST_PARTY_AGENT_MODELS, start=1)
+    )
+    + ", or a Cursor SDK model id"
 )
 
 

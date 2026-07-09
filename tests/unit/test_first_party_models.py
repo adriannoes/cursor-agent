@@ -52,6 +52,12 @@ def test_recommended_agent_model_ids_order_grok_then_composer() -> None:
     assert recommended_agent_model_ids() == ("grok-4.5", "composer-2.5")
 
 
+def test_wizard_model_indexes_match_catalog_order() -> None:
+    """Resolve indexes 1..N match FIRST_PARTY_AGENT_MODELS order (no drift map)."""
+    for index, row in enumerate(FIRST_PARTY_AGENT_MODELS, start=1):
+        assert resolve_wizard_model_choice(str(index)) == row.id
+
+
 def test_format_first_party_model_help_includes_ids_and_default() -> None:
     """Flat /model help lists both ids and marks the default."""
     help_text = format_first_party_model_help()
