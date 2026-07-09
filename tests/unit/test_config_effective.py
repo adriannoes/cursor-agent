@@ -121,6 +121,28 @@ def test_build_effective_config_surfaces_mcp_full_servers_allowlist(
     assert "github" in rendered
 
 
+def test_build_effective_config_empty_mcp_full_servers_allowlist_display(
+    tmp_path: Path,
+) -> None:
+    """Explicit empty allowlist must not look like default-all in setup show."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "tool_profile: full\nmcp:\n  full:\n    servers: []\n",
+        encoding="utf-8",
+    )
+
+    view = build_effective_config(
+        config_path=config_path,
+        environ={},
+        dotenv_path=tmp_path / ".env",
+    )
+
+    assert view.mcp_full_servers == []
+    rendered = render_effective_config_redacted(view)
+    assert "(empty allowlist)" in rendered
+    assert "(all curated)" not in rendered
+
+
 def test_build_effective_config_env_api_key_present_and_redacted(
     tmp_path: Path,
 ) -> None:

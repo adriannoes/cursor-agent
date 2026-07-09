@@ -377,3 +377,32 @@ def test_yaml_mcp_full_servers_unknown_id_raises_config_error(tmp_path: Path) ->
     assert "github" in message
     assert "brave-search" in message
     assert "playwright" in message
+
+
+def test_env_mcp_full_servers_json_list_loads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CURSOR_AGENT__MCP__FULL__SERVERS JSON list loads as curated allowlist."""
+    monkeypatch.setenv(
+        "CURSOR_AGENT__MCP__FULL__SERVERS",
+        '["playwright","github"]',
+    )
+    config = load_config(config_path=tmp_path / "missing.yaml")
+    assert config.mcp.full.servers == ["playwright", "github"]
+
+
+def test_env_mcp_full_servers_unknown_id_raises_config_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unknown id via env raises ConfigError with received value and allowed set."""
+    monkeypatch.setenv(
+        "CURSOR_AGENT__MCP__FULL__SERVERS",
+        '["not-a-curated-server"]',
+    )
+    with pytest.raises(ConfigError) as exc_info:
+        load_config(config_path=tmp_path / "missing.yaml")
+    message = str(exc_info.value)
+    assert "not-a-curated-server" in message
+    assert "playwright" in message

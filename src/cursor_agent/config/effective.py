@@ -164,11 +164,13 @@ def render_effective_config_redacted(view: EffectiveConfigView) -> str:
     """
     api_key_display = view.api_key_redacted if view.api_key_present else "(unset)"
     memory_display = view.memory_root if view.memory_root is not None else "(unset)"
-    mcp_servers_display = (
-        ", ".join(view.mcp_full_servers)
-        if view.mcp_full_servers is not None
-        else "(all curated)"
-    )
+    if view.mcp_full_servers is None:
+        mcp_servers_display = "(all curated)"
+    elif len(view.mcp_full_servers) == 0:
+        # Explicit empty allowlist ≠ default-all; operators must see the difference.
+        mcp_servers_display = "(empty allowlist)"
+    else:
+        mcp_servers_display = ", ".join(view.mcp_full_servers)
     lines = [
         "Effective configuration",
         f"  model: {view.model} (source: {view.sources['model']})",

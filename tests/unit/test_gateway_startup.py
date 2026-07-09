@@ -91,6 +91,35 @@ async def test_gateway_profile_coding_fails_before_hooks_store_and_adapters(
         assert adapter.lifecycle == []
 
 
+async def test_gateway_profile_full_fails_before_hooks_store_and_adapters(
+    tmp_path: Path,
+) -> None:
+    """FR-2: full profile aborts before hooks, store, or adapters start."""
+    config_file = tmp_path / "gateway.yaml"
+    write_gateway_yaml(config_file, tool_profile="full")
+    adapter = FakePlatformAdapter()
+    facade = FakeSdkFacade()
+
+    with (
+        patch(
+            "cursor_agent.gateway.runner.bootstrap_messaging_hooks",
+        ) as mock_hooks,
+        patch.object(SessionStore, "initialize", autospec=True) as mock_init,
+    ):
+        with pytest.raises(ConfigError, match="full"):
+            async with gateway_runtime(
+                config_path=config_file,
+                adapters=[adapter],
+                facade=facade,
+                store_path=tmp_path / "sessions.db",
+            ):
+                pytest.fail("gateway_runtime must not start with full profile")
+
+        mock_hooks.assert_not_called()
+        mock_init.assert_not_called()
+        assert adapter.lifecycle == []
+
+
 async def test_gateway_profile_messaging_proceeds_past_profile_gate(
     tmp_path: Path,
 ) -> None:
