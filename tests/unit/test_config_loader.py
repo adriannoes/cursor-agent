@@ -13,10 +13,10 @@ from cursor_agent.cli.startup import load_cwd_dotenv
 from cursor_agent.errors import ConfigError
 
 
-def test_defaults_model_is_composer_2_5() -> None:
-    """FR-10: default model matches STRATEGY §8 minimal config."""
+def test_defaults_model_is_grok_4_5() -> None:
+    """FR-10: default model is first-party Grok 4.5 (v1.1.0)."""
     config = load_config(config_path=Path("/nonexistent/config.yaml"))
-    assert config.model == "composer-2.5"
+    assert config.model == "grok-4.5"
 
 
 def test_defaults_tool_profile_is_coding() -> None:

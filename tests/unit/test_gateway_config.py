@@ -266,7 +266,7 @@ def test_to_cursor_agent_config_preserves_cli_compatible_defaults(
     gateway_config_loaded = load_gateway_config(config_path=config_file)
     agent_config = to_cursor_agent_config(gateway_config_loaded)
 
-    assert agent_config.model == "composer-2.5"
+    assert agent_config.model == "grok-4.5"
     assert agent_config.runtime.mode == "local"
     assert agent_config.runtime.local.setting_sources == ["project", "user"]
 
@@ -283,7 +283,7 @@ def test_to_cursor_agent_config_ignores_cursor_agent_env(
     gateway_config_loaded = load_gateway_config(config_path=config_file)
     agent_config = to_cursor_agent_config(gateway_config_loaded)
 
-    assert agent_config.model == "composer-2.5"
+    assert agent_config.model == "grok-4.5"
     assert agent_config.tool_profile == "messaging"
 
 

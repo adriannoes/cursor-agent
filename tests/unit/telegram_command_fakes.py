@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from cursor_agent.first_party_models import DEFAULT_AGENT_MODEL
 from cursor_agent.platforms.base import InboundMessage
 from cursor_agent.platforms.telegram import TelegramAdapter
 from cursor_agent.platforms.telegram_chunking import telegram_session_key
@@ -39,7 +40,7 @@ class CreateAgentTrackingFacade(FakeSdkFacade):
         self,
         *,
         workspace: str,
-        model: str = "composer-2.5",
+        model: str = DEFAULT_AGENT_MODEL,
         tool_profile: str = "coding",
         runtime_mode: str = "local",
     ) -> str:

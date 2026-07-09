@@ -33,7 +33,7 @@ def test_build_effective_config_defaults_when_empty(tmp_path: Path) -> None:
     )
 
     assert isinstance(view, EffectiveConfigView)
-    assert view.model == "composer-2.5"
+    assert view.model == "grok-4.5"
     assert view.tool_profile == "coding"
     assert view.api_key_present is False
     assert view.api_key_redacted is None

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from cursor_agent.cli.repl_session import run_repl
 from cursor_agent.config.loader import CursorAgentConfig
+from cursor_agent.first_party_models import DEFAULT_AGENT_MODEL
 from cursor_agent.pool import SessionAgentPool
 from cursor_agent.sdk_facade import (
     FakeSdkFacade,
@@ -131,7 +132,7 @@ class CreateAgentTrackingFacade(FakeSdkFacade):
         self,
         *,
         workspace: str,
-        model: str = "composer-2.5",
+        model: str = DEFAULT_AGENT_MODEL,
         tool_profile: str = "coding",
         runtime_mode: str = "local",
     ) -> str:

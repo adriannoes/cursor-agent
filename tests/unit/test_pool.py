@@ -18,6 +18,7 @@ from cursor_agent.errors import (
     SupersededSessionError,
 )
 from cursor_agent.facade_logging import LogContext
+from cursor_agent.first_party_models import DEFAULT_AGENT_MODEL
 from cursor_agent.messaging_hooks import ensure_messaging_hooks
 from cursor_agent.pool import SessionAgentPool
 from cursor_agent.sdk_facade import FakeSdkFacade, RunResult, RunStatus, StreamCallbacks
@@ -314,10 +315,10 @@ async def test_get_re_resumes_when_model_override_changes(
 
     pool = SessionAgentPool(store=store, facade=facade, config=config)
     await pool.get(session_key)
-    await pool.get(session_key, model_override="composer-2.5-fast")
+    await pool.get(session_key, model_override="opaque-override-model")
 
     assert len(facade.resume_calls) == 2
-    assert facade.resume_calls[1]["model"] == "composer-2.5-fast"
+    assert facade.resume_calls[1]["model"] == "opaque-override-model"
 
 
 @pytest.mark.asyncio
@@ -359,10 +360,10 @@ async def test_send_uses_model_override_on_resume(
     await _seed_session(store, facade, session_key)
 
     pool = SessionAgentPool(store=store, facade=facade, config=config)
-    await pool.send(session_key, "hello", model_override="composer-2.5-fast")
+    await pool.send(session_key, "hello", model_override="opaque-override-model")
 
     assert len(facade.resume_calls) == 1
-    assert facade.resume_calls[0]["model"] == "composer-2.5-fast"
+    assert facade.resume_calls[0]["model"] == "opaque-override-model"
 
 
 @pytest.mark.asyncio
@@ -943,7 +944,7 @@ class ReattachTrackingFacade(ColdStartSendFailFacade):
         self,
         *,
         workspace: str,
-        model: str = "composer-2.5",
+        model: str = DEFAULT_AGENT_MODEL,
         tool_profile: str = "coding",
         runtime_mode: str = "local",
     ) -> str:

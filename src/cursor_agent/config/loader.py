@@ -27,6 +27,7 @@ from pydantic_settings.sources import InitSettingsSource
 
 from cursor_agent.config.yaml_io import expand_vars, load_yaml_dict, normalize_keys
 from cursor_agent.errors import ConfigError
+from cursor_agent.first_party_models import DEFAULT_AGENT_MODEL
 from cursor_agent.mcp_registry import (
     ALLOWED_GITHUB_TRANSPORTS,
     CURATED_MCP_SERVER_IDS,
@@ -127,7 +128,7 @@ class CursorAgentConfig(BaseSettings):
     Example:
         >>> config = load_config(config_path=Path("/tmp/missing.yaml"))
         >>> config.model
-        'composer-2.5'
+        'grok-4.5'
     """
 
     model_config = SettingsConfigDict(
@@ -139,7 +140,7 @@ class CursorAgentConfig(BaseSettings):
         nested_model_default_partial_update=True,
     )
 
-    model: str = "composer-2.5"
+    model: str = DEFAULT_AGENT_MODEL
     tool_profile: ToolProfile = "coding"
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     memory_root: str | None = None

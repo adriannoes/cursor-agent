@@ -307,8 +307,8 @@ async def test_resume_agent_cloud_options_omit_local_setting_sources() -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_agent_uses_composer_and_local_cwd() -> None:
-    """create_agent passes composer-2.5 and LocalAgentOptions cwd."""
+async def test_create_agent_uses_grok_and_local_cwd() -> None:
+    """create_agent passes grok-4.5 and LocalAgentOptions cwd."""
     mock_agent = AsyncMock()
     mock_agent.agent_id = "agent-abc"
     mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
@@ -324,7 +324,7 @@ async def test_create_agent_uses_composer_and_local_cwd() -> None:
 
     assert agent_id == "agent-abc"
     create_kwargs = mock_client.agents.create.await_args.kwargs
-    assert create_kwargs["model"] == "composer-2.5"
+    assert create_kwargs["model"] == "grok-4.5"
     local_opts = create_kwargs["local"]
     assert (
         getattr(local_opts, "cwd", None) == "/repo/path"
@@ -1040,14 +1040,14 @@ async def test_resume_agent_applies_model_change_when_agent_already_in_memory() 
     resumed_id = await facade.resume_agent(
         agent_id,
         workspace="/repo",
-        model="composer-2.5-fast",
+        model="grok-4.5",
         tool_profile="coding",
     )
 
     assert resumed_id == agent_id
     mock_client.agents.resume.assert_called_once()
     options = _resume_request_options(mock_client)
-    assert options.get("model") == {"id": "composer-2.5-fast"}
+    assert options.get("model") == {"id": "grok-4.5"}
 
 
 @pytest.mark.asyncio
