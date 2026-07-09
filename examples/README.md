@@ -19,6 +19,12 @@ Validate the `messaging` profile and deny hooks locally before gateway work:
 uv run cursor-agent --profile messaging
 ```
 
+Trusted local curated MCP (`full` — GitHub / Brave Search / Playwright when env is set):
+
+```bash
+uv run cursor-agent --profile full
+```
+
 List persisted sessions for the current workspace key:
 
 ```bash
@@ -37,10 +43,11 @@ Full setup, configuration precedence, and verification without an API key: [docs
 
 | Profile | Use case |
 |---------|----------|
-| `coding` | Trusted local development — SDK auto-approve; optional dev hooks |
+| `coding` | Trusted local development — SDK auto-approve; optional dev hooks; project/user MCP preserved |
 | `messaging` | Gateways and bots — read-only workspace, deny hooks, empty MCP, sandbox network off |
+| `full` | Trusted local curated MCP allowlist — **local-only**; gateway refuses it |
 
-Override on the CLI with `--profile messaging` or set `CURSOR_AGENT__TOOL_PROFILE` / `tool_profile` in `~/.cursor-agent/config.yaml`. See [SECURITY.md](../SECURITY.md) for the messaging threat model.
+Override on the CLI with `--profile messaging` or `--profile full`, or set `CURSOR_AGENT__TOOL_PROFILE` / `tool_profile` in `~/.cursor-agent/config.yaml`. See [SECURITY.md](../SECURITY.md) for the messaging threat model and [docs/setup.md](../docs/setup.md) for enabling `full`.
 
 ## Gateway configuration
 

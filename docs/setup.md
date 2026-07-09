@@ -28,6 +28,8 @@ Legacy flat names `CURSOR_AGENT_WORKSPACE` and `CURSOR_AGENT_CONFIG` are **not s
 
 `full` injects a curated MCP allowlist for trusted **local** operators. It is **local-only** — the Telegram gateway refuses to start with `full` (use `messaging` there). There is no `cursor-agent mcp *` CLI; enable the profile and set secrets via env. Design details: [ADR-029](decisions/ADR-029-mcp-registry-full-profile.md) and [Architecture — Tool profiles](architecture.md#tool-profiles).
 
+**Effective profile:** if config or session is `messaging`, messaging wins. Otherwise, among `coding` / `full`, the **session** profile wins over config (example: `config=full` + `session=coding` → `coding`).
+
 Enable with any of:
 
 ```bash
@@ -62,18 +64,20 @@ export BRAVE_API_KEY="your-brave-api-key"
 
 **Missing env (omit, do not hard-fail):** if a curated server’s required env is unset, that server is omitted and a one-time warning is emitted. The REPL still starts; secret values are never logged.
 
-Optional allowlist (default = all curated ids). YAML:
+Optional allowlist. When the key is **omitted** / unset (`null`), all curated ids are enabled. An **explicit empty list** is different — it injects an empty MCP map and does **not** emit omit-missing-env warnings:
 
 ```yaml
 mcp:
   full:
-    servers: [github, brave-search, playwright]
+    servers: [github, brave-search, playwright]  # subset or all curated ids
+# servers: []   # empty map on purpose — not the same as omitting the key
 ```
 
 Env form (JSON list):
 
 ```bash
 export CURSOR_AGENT__MCP__FULL__SERVERS='["github","playwright"]'
+# export CURSOR_AGENT__MCP__FULL__SERVERS='[]'  # empty map; no omit warnings
 ```
 
 Ops may use `npx mcporter` for MCP discovery outside this project; it is **not** a `cursor-agent` dependency.
