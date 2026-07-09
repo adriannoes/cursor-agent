@@ -10,7 +10,14 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -20,12 +27,13 @@ from pydantic_settings.sources import InitSettingsSource
 
 from cursor_agent.config.yaml_io import expand_vars, load_yaml_dict, normalize_keys
 from cursor_agent.errors import ConfigError
+from cursor_agent.mcp_registry import CURATED_MCP_SERVER_IDS
 
 DEFAULT_CONFIG_PATH = Path.home() / ".cursor-agent" / "config.yaml"
 _ENV_PREFIX = "CURSOR_AGENT__"
 
 RuntimeMode = Literal["local", "cloud"]
-ToolProfile = Literal["coding", "messaging"]
+ToolProfile = Literal["coding", "messaging", "full"]
 
 
 class LocalRuntimeConfig(BaseModel):
@@ -44,6 +52,48 @@ class RuntimeConfig(BaseModel):
 
     mode: RuntimeMode = "local"
     local: LocalRuntimeConfig = Field(default_factory=LocalRuntimeConfig)
+
+
+class McpFullConfig(BaseModel):
+    """Allowlist for curated MCP servers under ``tool_profile: full`` (ADR-029).
+
+    ``servers=None`` means enable every curated id. Unknown ids raise with the
+    received value and the allowed set from ``CURATED_MCP_SERVER_IDS``.
+
+    Example:
+        >>> McpFullConfig(servers=["github", "playwright"]).servers
+        ['github', 'playwright']
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    servers: list[str] | None = None
+
+    @field_validator("servers")
+    @classmethod
+    def _reject_unknown_curated_server_ids(
+        cls,
+        value: list[str] | None,
+    ) -> list[str] | None:
+        """Reject allowlist entries outside the curated registry."""
+        if value is None:
+            return None
+        allowed = sorted(CURATED_MCP_SERVER_IDS)
+        for server_id in value:
+            if server_id not in CURATED_MCP_SERVER_IDS:
+                raise ValueError(
+                    f"unknown mcp.full.servers id: received {server_id!r}, "
+                    f"expected one of {allowed!r}",
+                )
+        return value
+
+
+class McpConfig(BaseModel):
+    """Nested MCP configuration block (required under ``extra='forbid'``)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    full: McpFullConfig = Field(default_factory=McpFullConfig)
 
 
 class CursorAgentConfig(BaseSettings):
@@ -70,6 +120,7 @@ class CursorAgentConfig(BaseSettings):
     tool_profile: ToolProfile = "coding"
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     memory_root: str | None = None
+    mcp: McpConfig = Field(default_factory=McpConfig)
 
     @model_validator(mode="before")
     @classmethod

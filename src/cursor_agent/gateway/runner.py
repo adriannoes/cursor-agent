@@ -193,6 +193,7 @@ async def _managed_facade(
     async with AsyncSdkFacade(  # pragma: no cover
         api_key=os.environ.get("CURSOR_API_KEY"),
         local_setting_sources=config.runtime.local.setting_sources,
+        mcp_full_servers=config.mcp.full.servers,
     ) as real_facade:
         yield real_facade
 

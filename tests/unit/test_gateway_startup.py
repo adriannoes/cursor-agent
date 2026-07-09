@@ -44,6 +44,16 @@ def test_resolve_gateway_startup_config_rejects_coding_profile() -> None:
         resolve_gateway_startup_config(config)
 
 
+def test_resolve_gateway_startup_config_rejects_full_profile() -> None:
+    """FR-2: full tool_profile raises ConfigError expecting messaging (PRD-012)."""
+    config = gateway_config(tool_profile="full")
+    with pytest.raises(ConfigError) as exc_info:
+        resolve_gateway_startup_config(config)
+    message = str(exc_info.value)
+    assert "expected 'messaging'" in message
+    assert "received 'full'" in message
+
+
 def test_resolve_gateway_startup_config_accepts_messaging_profile() -> None:
     """Messaging tool_profile converts to CursorAgentConfig."""
     config = gateway_config(tool_profile="messaging")

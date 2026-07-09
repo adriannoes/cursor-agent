@@ -330,3 +330,50 @@ def test_precedence_cli_over_dotenv_yaml_and_exported_env(
     cli_overrides: dict[str, Any] = {"model": "from-cli"}
     config = load_config(config_path=config_file, cli_overrides=cli_overrides)
     assert config.model == "from-cli"
+
+
+def test_yaml_tool_profile_full_is_accepted(tmp_path: Path) -> None:
+    """FR-1: loader accepts tool_profile full (PRD-012 / ADR-029)."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("tool_profile: full\n", encoding="utf-8")
+    config = load_config(config_path=config_file)
+    assert config.tool_profile == "full"
+
+
+def test_defaults_mcp_full_servers_is_none(tmp_path: Path) -> None:
+    """FR-9: omitted mcp.full.servers means default all curated (None)."""
+    config = load_config(config_path=tmp_path / "missing.yaml")
+    assert config.mcp.full.servers is None
+
+
+def test_yaml_mcp_full_servers_allowlist_round_trip(tmp_path: Path) -> None:
+    """FR-9 / Q3: mcp.full.servers allowlist loads as a curated id list."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        "tool_profile: full\n"
+        "mcp:\n"
+        "  full:\n"
+        "    servers:\n"
+        "      - github\n"
+        "      - playwright\n",
+        encoding="utf-8",
+    )
+    config = load_config(config_path=config_file)
+    assert config.tool_profile == "full"
+    assert config.mcp.full.servers == ["github", "playwright"]
+
+
+def test_yaml_mcp_full_servers_unknown_id_raises_config_error(tmp_path: Path) -> None:
+    """Q3: unknown curated server id raises ConfigError with value and allowed set."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        "mcp:\n  full:\n    servers:\n      - not-a-curated-server\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError) as exc_info:
+        load_config(config_path=config_file)
+    message = str(exc_info.value)
+    assert "not-a-curated-server" in message
+    assert "github" in message
+    assert "brave-search" in message
+    assert "playwright" in message

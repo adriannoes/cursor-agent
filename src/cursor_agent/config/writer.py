@@ -28,7 +28,7 @@ _ALLOWED_ENV_KEYS: Final[frozenset[str]] = frozenset(
         "CURSOR_AGENT_SESSIONS_DB",
     }
 )
-_VALID_TOOL_PROFILES: Final[frozenset[str]] = frozenset({"coding", "messaging"})
+_VALID_TOOL_PROFILES: Final[frozenset[str]] = frozenset({"coding", "messaging", "full"})
 _MEMORY_PLACEHOLDER_FILES: Final[tuple[str, ...]] = ("USER.md", "MEMORY.md")
 _ENV_KEY_LINE_PATTERN = re.compile(r"^(\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*=)(.*)$")
 
@@ -228,7 +228,7 @@ def _validate_runtime_update(value: object) -> dict[str, object]:
 
 
 def validate_tool_profile(value: object) -> ToolProfile:
-    """Accept only ``coding`` or ``messaging`` (public for wizard early checks).
+    """Accept ``coding``, ``messaging``, or ``full`` (public for wizard early checks).
 
     Example:
         >>> validate_tool_profile("coding")
@@ -237,13 +237,13 @@ def validate_tool_profile(value: object) -> ToolProfile:
     if not isinstance(value, str) or value not in _VALID_TOOL_PROFILES:
         raise ConfigError(
             f"invalid tool_profile: received {value!r}, "
-            "expected 'coding' or 'messaging'",
+            "expected 'coding', 'messaging', or 'full'",
         )
     return value  # type: ignore[return-value]
 
 
 def _validate_tool_profile(value: object) -> ToolProfile:
-    """Accept only ``coding`` or ``messaging``."""
+    """Accept ``coding``, ``messaging``, or ``full``."""
     return validate_tool_profile(value)
 
 

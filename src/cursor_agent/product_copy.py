@@ -72,7 +72,7 @@ SETUP_PROMPT_SESSIONS_DB: Final[str] = "Sessions DB path (Enter to skip): "
 SETUP_PROMPT_MODEL: Final[str] = "Model id (Enter to skip): "
 
 SETUP_PROMPT_TOOL_PROFILE: Final[str] = (
-    "Tool profile coding|messaging (Enter to skip): "
+    "Tool profile coding|messaging|full (Enter to skip): "
 )
 
 SETUP_SUMMARY_HEADER: Final[str] = "Summary (review before write):"
