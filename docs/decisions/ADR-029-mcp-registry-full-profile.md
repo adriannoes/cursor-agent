@@ -1,6 +1,8 @@
 # ADR-029: MCP registry and full tool profile
 
-**Status:** Accepted
+**Status:** Proposed
+
+> Design lock for PRD-012 Wave 0. Promote to **Accepted** when `tool_profile: full` and `mcp_registry` are implemented in the codebase (PRD-012 closeout). Until then, `ToolProfile` remains `coding` | `messaging` only.
 
 ## Context
 
@@ -20,13 +22,13 @@ The Cursor SDK is already the MCP host via `mcp_servers` on create/resume. This 
 
 **Key rules**
 
-- `effective_tool_profile`: messaging wins; else session `coding`/`full` wins over config.
+- `effective_tool_profile`: messaging wins; else session `coding`/`full` wins over config. Example: `config=full`, `session=coding` → `coding`.
 - Allowlist: `mcp.full.servers: [github, brave-search, playwright]` (default = all curated ids).
 - Secrets: env only (`GITHUB_PERSONAL_ACCESS_TOKEN`, `BRAVE_API_KEY`); no YAML plaintext; no interactive OAuth in v1.1.
 - Missing required env: omit that server + warn once (never silent; never hard-fail REPL for optional MCP).
 - Gateway refuses any `tool_profile != messaging` (including `full`) with an actionable `ConfigError`.
 - Observability: log `mcp_servers_injected` with server **names only**, never tokens.
-- This ADR **supersedes** ADR-014’s “MVP two profiles only / `full` deferred” clause. Messaging security remains ADR-001 (see [SECURITY.md](../../SECURITY.md)).
+- This ADR **supersedes** ADR-014’s “MVP two profiles only / `full` deferred” clause. Messaging security: [SECURITY.md](../../SECURITY.md).
 
 **Curated MVP servers (stdio):** `github` (Docker + PAT), `brave-search` (`npx @brave/brave-search-mcp-server` + `BRAVE_API_KEY`), `playwright` (`npx @playwright/mcp@latest`, no API key).
 
@@ -46,4 +48,4 @@ The Cursor SDK is already the MCP host via `mcp_servers` on create/resume. This 
 - [Architecture — MCP and sandbox by profile](../architecture.md#mcp-and-sandbox-by-profile-create-and-resume)
 - [SECURITY.md](../../SECURITY.md) — messaging threat model
 - [ADR-007](ADR-007-config-loader.md) — config precedence
-- [docs/setup.md](../setup.md) — enabling `full` (updated in PRD-012 docs wave)
+- [docs/setup.md](../setup.md) — enabling `full` (to be updated in the PRD-012 docs wave)

@@ -112,7 +112,7 @@ The SDK does not disable native tools (`shell`, `edit`, …). Real control comes
 | `coding` | Local development, trusted operator | SDK auto-approve; optional dev hooks; project/user MCP preserved |
 | `messaging` | Gateways, bots, untrusted input | Read-only workspace; deny hooks; empty MCP; sandbox network off |
 
-MVP ships only `coding` and `messaging` ([ADR-014](decisions/ADR-014-tool-profiles-mvp.md)). Gateways **must** use `messaging` and refuse to start with `coding`.
+v1.0 ships `coding` and `messaging` ([ADR-014](decisions/ADR-014-tool-profiles-mvp.md)). A third profile, `full` (curated local MCP allowlist), is the design lock in [ADR-029](decisions/ADR-029-mcp-registry-full-profile.md) (**Proposed** until implemented). Gateways **must** use `messaging` and refuse to start with any other profile (including `full` once shipped).
 
 ### MCP and sandbox by profile (create and resume)
 
@@ -122,6 +122,8 @@ The SDK facade applies profile policy on **both** agent create and resume — no
 |---------|--------------|--------------|
 | `coding` | Omits `mcp_servers` so Cursor **project** (`.cursor/mcp.json`) and **user** MCP settings apply | Omits `mcp_servers` so persisted SDK/project MCP settings apply |
 | `messaging` | Passes `mcp_servers: {}` and enables sandbox (network off) | Re-injects `mcp_servers: {}` and sandbox for defense in depth |
+
+The `full` create/resume row lands with PRD-012 implementation; until then see [ADR-029](decisions/ADR-029-mcp-registry-full-profile.md).
 
 Local `coding` runs also pass `setting_sources: ["project", "user"]` so workspace and user-level Cursor settings load. `messaging` still deploys deny hooks to the workspace before the first pool use.
 

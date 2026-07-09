@@ -2,7 +2,7 @@
 
 Curated **Architecture Decision Records (ADRs)** for external contributors. Each ADR captures context, the decision, and consequences in a concise MADR-style format.
 
-Status values: **Accepted** means the decision is in effect in the current codebase.
+Status values: **Accepted** means the decision is in effect in the current codebase. **Proposed** means the decision is locked for implementation but not yet reflected in shipped code (e.g. a release-train design gate).
 
 | ADR | Summary |
 |-----|---------|
@@ -15,7 +15,7 @@ Status values: **Accepted** means the decision is in effect in the current codeb
 | [ADR-022](ADR-022-tdd.md) | Mandatory test-first development for functional changes |
 | [ADR-027](ADR-027-onboarding-first-run.md) | First-run banner suppression, marker semantics, width limits |
 | [ADR-028](ADR-028-config-persistence-setup.md) | Setup wizard persistence: env-only secrets, atomic writes, permissions, idempotency |
-| [ADR-029](ADR-029-mcp-registry-full-profile.md) | MCP registry + `full` profile; coding/messaging/full matrix; no FastMCP dep |
+| [ADR-029](ADR-029-mcp-registry-full-profile.md) | *(Proposed)* MCP registry + `full` profile; coding/messaging/full matrix; no FastMCP dep |
 
 For system overview and diagrams, see [architecture.md](../architecture.md).
 

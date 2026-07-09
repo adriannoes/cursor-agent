@@ -33,14 +33,15 @@ For threat model, hook layout, and acceptance probes, see [SECURITY.md](../../SE
 
 - Security gate (Phase 2b) deliverable in days, not blocked by extra profiles.
 - Clear operator rule: bots always use `messaging`.
-- `full` can be defined when concrete MCPs are chosen.
 
 **Negative**
 
-- Advanced users lack a `full` profile until post-MVP work lands.
 - `coding` auto-approve is a dev convenience, not a security boundary for untrusted input.
+
+**Supersession note:** The deferred-`full` consequence of this MVP ADR is superseded by [ADR-029](ADR-029-mcp-registry-full-profile.md) (Proposed until implemented). Messaging empty-MCP and gateway refuse remain in effect.
 
 ## See also
 
+- [ADR-029](ADR-029-mcp-registry-full-profile.md) — three-profile MCP matrix (`full`)
 - [SECURITY.md](../../SECURITY.md) — messaging threat model
 - [AGENTS.md](../../AGENTS.md) — tool profile summary for contributors
