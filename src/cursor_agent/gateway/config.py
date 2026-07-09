@@ -16,12 +16,13 @@ from cursor_agent.config.loader import (
 )
 from cursor_agent.config.yaml_io import expand_vars, load_yaml_dict
 from cursor_agent.errors import ConfigError
+from cursor_agent.first_party_models import DEFAULT_AGENT_MODEL
 
 DEFAULT_GATEWAY_CONFIG_PATH = Path.home() / ".cursor-agent" / "gateway.yaml"
 MESSAGING_TOOL_PROFILE: ToolProfile = "messaging"
 
 _DEFAULT_SETTING_SOURCES: list[str] = ["project", "user"]
-_DEFAULT_MODEL = "composer-2.5"
+_DEFAULT_MODEL = DEFAULT_AGENT_MODEL
 _DEFAULT_RUNTIME_MODE: RuntimeMode = "local"
 _REDACTED_SECRET = "[REDACTED]"
 _SENSITIVE_PLATFORM_FIELDS = frozenset({"bot_token"})

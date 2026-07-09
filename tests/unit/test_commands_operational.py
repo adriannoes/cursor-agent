@@ -149,13 +149,13 @@ async def test_model_sets_override_and_resumes_agent(
         store,
         config,
         facade,
-        lines=("/model composer-2.5-fast", "/quit"),
+        lines=("/model opaque-override-model", "/quit"),
         writer=output.append,
         auto_resume=True,
     )
 
     model_calls = [
-        call for call in facade.resume_calls if call["model"] == "composer-2.5-fast"
+        call for call in facade.resume_calls if call["model"] == "opaque-override-model"
     ]
     assert len(model_calls) == 1
     assert model_calls[0]["agent_id"] == row.agent_id
@@ -179,13 +179,13 @@ async def test_model_override_applies_to_new_session(
         store,
         config,
         facade,
-        lines=("/model composer-2.5-fast", "/new", "/quit"),
+        lines=("/model opaque-override-model", "/new", "/quit"),
         writer=output.append,
         auto_resume=False,
     )
 
     assert len(facade.create_agent_calls) == 1
-    assert facade.create_agent_calls[0]["model"] == "composer-2.5-fast"
+    assert facade.create_agent_calls[0]["model"] == "opaque-override-model"
 
 
 async def test_repl_free_text_passes_model_override_to_pool(
@@ -207,13 +207,13 @@ async def test_repl_free_text_passes_model_override_to_pool(
         store,
         config,
         facade,
-        lines=("/model composer-2.5-fast", "hello", "/quit"),
+        lines=("/model opaque-override-model", "hello", "/quit"),
         writer=output.append,
         auto_resume=True,
     )
 
     assert len(pool.send_calls) == 1
-    assert pool.send_calls[0]["model_override"] == "composer-2.5-fast"
+    assert pool.send_calls[0]["model_override"] == "opaque-override-model"
 
 
 async def test_post_compress_free_text_targets_new_agent(

@@ -22,6 +22,7 @@ from cursor_agent.facade_logging import (
     emit_send_end,
     emit_send_start,
 )
+from cursor_agent.first_party_models import DEFAULT_AGENT_MODEL
 from cursor_agent.sdk_error_mapping import map_sdk_exception
 from cursor_agent.sdk_facade_models import RunResult, RunStatus, StreamCallbacks
 from cursor_agent.sdk_facade_protocol import SdkFacade
@@ -178,7 +179,7 @@ class AsyncSdkFacade:
         self,
         *,
         workspace: str,
-        model: str = "composer-2.5",
+        model: str = DEFAULT_AGENT_MODEL,
         tool_profile: str = "coding",
         runtime_mode: str = "local",
     ) -> str:
