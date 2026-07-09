@@ -10,6 +10,8 @@ The SDK does not disable native tools. Real restriction requires hooks, MCP conf
 
 ## Decision
 
+> **See [ADR-029](ADR-029-mcp-registry-full-profile.md)** for the live three-profile MCP matrix (`coding` / `messaging` / `full`). This ADR remains the historical MVP decision that shipped two profiles first.
+
 **MVP implements only two profiles:**
 
 | Profile | MCP | Hooks | Use |
@@ -19,7 +21,7 @@ The SDK does not disable native tools. Real restriction requires hooks, MCP conf
 
 MCP and sandbox policy on create and resume: [Architecture — MCP and sandbox by profile](../architecture.md#mcp-and-sandbox-by-profile-create-and-resume).
 
-Additional profiles (`minimal`, `full`) are deferred until MCP search and related integrations are promoted.
+`full` is now defined in [ADR-029](ADR-029-mcp-registry-full-profile.md). `minimal` remains deferred.
 
 **Gateway rule:** the gateway process **refuses to start** if `tool_profile != messaging`.
 
