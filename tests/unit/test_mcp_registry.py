@@ -61,6 +61,22 @@ def test_missing_required_env_omits_server_and_warns() -> None:
     assert "GITHUB_PERSONAL_ACCESS_TOKEN" in warnings[0]
 
 
+def test_whitespace_only_required_env_omits_server_and_warns() -> None:
+    """Whitespace-only secrets are treated as missing (not usable tokens)."""
+    servers, warnings = build_mcp_servers_for_full(
+        allowlist=[MCP_SERVER_ID_GITHUB, MCP_SERVER_ID_BRAVE_SEARCH],
+        environ={
+            "GITHUB_PERSONAL_ACCESS_TOKEN": "   ",
+            "BRAVE_API_KEY": "\t",
+        },
+    )
+
+    assert servers == {}
+    assert len(warnings) == 2
+    assert any(MCP_SERVER_ID_GITHUB in warning for warning in warnings)
+    assert any(MCP_SERVER_ID_BRAVE_SEARCH in warning for warning in warnings)
+
+
 def test_playwright_always_includable_without_required_env() -> None:
     """Playwright has no required env and is always includable when allowlisted."""
     servers, warnings = build_mcp_servers_for_full(

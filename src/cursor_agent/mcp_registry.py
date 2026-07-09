@@ -16,14 +16,6 @@ MCP_SERVER_ID_GITHUB: Final[str] = "github"
 MCP_SERVER_ID_BRAVE_SEARCH: Final[str] = "brave-search"
 MCP_SERVER_ID_PLAYWRIGHT: Final[str] = "playwright"
 
-CURATED_MCP_SERVER_IDS: Final[frozenset[str]] = frozenset(
-    {
-        MCP_SERVER_ID_GITHUB,
-        MCP_SERVER_ID_BRAVE_SEARCH,
-        MCP_SERVER_ID_PLAYWRIGHT,
-    }
-)
-
 _GITHUB_ENV_KEY: Final[str] = "GITHUB_PERSONAL_ACCESS_TOKEN"
 _BRAVE_ENV_KEY: Final[str] = "BRAVE_API_KEY"
 
@@ -66,6 +58,23 @@ _CURATED_MCP_SERVER_DEFINITIONS: Final[dict[str, _CuratedMcpServerDefinition]] =
         required_env_keys=(),
     ),
 }
+
+# Public allowlist set derived from catalog keys — load-time drift guard.
+CURATED_MCP_SERVER_IDS: Final[frozenset[str]] = frozenset(
+    _CURATED_MCP_SERVER_DEFINITIONS
+)
+if CURATED_MCP_SERVER_IDS != frozenset(
+    {
+        MCP_SERVER_ID_GITHUB,
+        MCP_SERVER_ID_BRAVE_SEARCH,
+        MCP_SERVER_ID_PLAYWRIGHT,
+    }
+):
+    raise RuntimeError(
+        "curated MCP catalog drift: CURATED_MCP_SERVER_IDS "
+        f"{sorted(CURATED_MCP_SERVER_IDS)!r} does not match named constants "
+        f"{[MCP_SERVER_ID_GITHUB, MCP_SERVER_ID_BRAVE_SEARCH, MCP_SERVER_ID_PLAYWRIGHT]!r}"
+    )
 
 
 def build_mcp_servers_for_full(
@@ -144,7 +153,8 @@ def _missing_required_env_keys(
     missing: list[str] = []
     for key in definition.required_env_keys:
         value = environ.get(key)
-        if value is None or value == "":
+        # Whitespace-only is not a usable secret — omit+warn like empty (Q2).
+        if value is None or value.strip() == "":
             missing.append(key)
     return missing
 
