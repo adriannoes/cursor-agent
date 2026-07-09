@@ -113,7 +113,7 @@ The SDK does not disable native tools (`shell`, `edit`, …). Real control comes
 | `messaging` | Gateways, bots, untrusted input | Read-only workspace; deny hooks; empty MCP; sandbox network off |
 | `full` | Trusted local operator with curated MCP | SDK auto-approve; curated allowlist from `mcp_registry`; sandbox off; **local-only** |
 
-Three profiles are available: `coding` and `messaging` ([ADR-014](decisions/ADR-014-tool-profiles-mvp.md)), plus `full` (curated local MCP allowlist) per [ADR-029](decisions/ADR-029-mcp-registry-full-profile.md). Curated MVP servers: `github` (default remote HTTP; Docker stdio opt-in), `brave-search`, `playwright`. Gateways **must** use `messaging` and refuse to start with any other profile (including `full`).
+Three profiles are available: `coding` and `messaging` ([ADR-014](decisions/ADR-014-tool-profiles-mvp.md)), plus `full` (curated MCP allowlist — `github` defaults to remote HTTP; other servers remain local stdio) per [ADR-029](decisions/ADR-029-mcp-registry-full-profile.md). Curated MVP servers: `github` (default remote HTTP; Docker stdio opt-in), `brave-search`, `playwright`. Gateways **must** use `messaging` and refuse to start with any other profile (including `full`).
 
 ### MCP and sandbox by profile (create and resume)
 
