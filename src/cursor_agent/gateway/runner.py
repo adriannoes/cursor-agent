@@ -194,6 +194,7 @@ async def _managed_facade(
         api_key=os.environ.get("CURSOR_API_KEY"),
         local_setting_sources=config.runtime.local.setting_sources,
         mcp_full_servers=config.mcp.full.servers,
+        mcp_full_github_transport=config.mcp.full.github_transport,
     ) as real_facade:
         yield real_facade
 

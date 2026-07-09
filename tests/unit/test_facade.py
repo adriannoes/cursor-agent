@@ -711,6 +711,70 @@ async def test_full_create_respects_mcp_full_servers_allowlist(
 
 
 @pytest.mark.asyncio
+async def test_full_create_github_transport_stdio_emits_docker_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Facade threads mcp_full_github_transport=stdio into Docker github MCP."""
+    monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", _FAKE_FULL_GITHUB_TOKEN)
+
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-full-github-stdio"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.create = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(
+        api_key="test-key",
+        mcp_full_servers=["github"],
+        mcp_full_github_transport="stdio",
+    )
+    facade._client = mock_client
+
+    await facade.create_agent(workspace="/repo/path", tool_profile="full")
+
+    mcp_servers = _create_mcp_servers(mock_client)
+    assert mcp_servers is not None
+    github = mcp_servers["github"]
+    assert github["command"] == "docker"
+    assert "ghcr.io/github/github-mcp-server" in github["args"]
+    assert github["env"]["GITHUB_PERSONAL_ACCESS_TOKEN"] == _FAKE_FULL_GITHUB_TOKEN
+    assert "url" not in github
+
+
+@pytest.mark.asyncio
+async def test_full_create_github_transport_default_emits_http_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Facade default github transport emits official remote HTTP MCP shape."""
+    monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", _FAKE_FULL_GITHUB_TOKEN)
+
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-full-github-http"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.create = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(
+        api_key="test-key",
+        mcp_full_servers=["github"],
+    )
+    facade._client = mock_client
+
+    await facade.create_agent(workspace="/repo/path", tool_profile="full")
+
+    mcp_servers = _create_mcp_servers(mock_client)
+    assert mcp_servers is not None
+    github = mcp_servers["github"]
+    assert github["url"] == "https://api.githubcopilot.com/mcp/"
+    assert github["headers"]["Authorization"] == (f"Bearer {_FAKE_FULL_GITHUB_TOKEN}")
+    assert "command" not in github
+
+
+@pytest.mark.asyncio
 async def test_messaging_warm_resume_still_empty_after_full_support() -> None:
     """Messaging warm-resume regression: still injects explicit empty MCP map."""
     mock_agent = AsyncMock()

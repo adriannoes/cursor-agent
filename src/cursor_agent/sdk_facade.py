@@ -33,6 +33,7 @@ from cursor_agent.sdk_streaming import (
     extract_text_from_messages,
     map_run_result,
 )
+from cursor_agent.mcp_registry import GithubTransport
 from cursor_agent.tool_profile_policy import (
     mcp_servers_override_for_profile,
     passes_mcp_servers_on_resume,
@@ -120,6 +121,7 @@ class AsyncSdkFacade:
         bridge_options: dict[str, Any] | None = None,
         local_setting_sources: list[str] | None = None,
         mcp_full_servers: Sequence[str] | None = None,
+        mcp_full_github_transport: GithubTransport = "http",
         logger: logging.Logger | None = None,
     ) -> None:
         self._api_key = api_key
@@ -127,6 +129,8 @@ class AsyncSdkFacade:
         self._local_setting_sources = local_setting_sources
         # From config.mcp.full.servers; None means all curated ids (ADR-029 Q3).
         self._mcp_full_servers: Sequence[str] | None = mcp_full_servers
+        # From config.mcp.full.github_transport; default http (Wave 5).
+        self._mcp_full_github_transport: GithubTransport = mcp_full_github_transport
         self._logger = logger or _MODULE_LOGGER
         self._client: AsyncClient | None = None
         self._agents: dict[str, Any] = {}
@@ -142,6 +146,7 @@ class AsyncSdkFacade:
             tool_profile,
             allowlist=self._mcp_full_servers,
             environ=os.environ,
+            github_transport=self._mcp_full_github_transport,
         )
 
     async def __aenter__(self) -> AsyncSdkFacade:

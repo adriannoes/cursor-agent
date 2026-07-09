@@ -1,28 +1,34 @@
 """Curated MCP server catalog for the ``full`` tool profile (ADR-029).
 
-Builds flat stdio dicts (``command`` / ``args`` / ``env``) matching the Cursor
-``mcp.json`` mental model. No ``cursor_sdk`` import — the facade may wrap these
-dicts into SDK types later.
+Builds flat dicts matching the Cursor ``mcp.json`` mental model: remote HTTP
+(``url`` / ``headers``) for github by default, or stdio (``command`` / ``args`` /
+``env``) for Docker github and other curated servers. No ``cursor_sdk`` import —
+the facade may wrap these dicts into SDK types later.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 # Named constants keep allowlist config and policy grep-friendly (ADR-029 Q1).
 MCP_SERVER_ID_GITHUB: Final[str] = "github"
 MCP_SERVER_ID_BRAVE_SEARCH: Final[str] = "brave-search"
 MCP_SERVER_ID_PLAYWRIGHT: Final[str] = "playwright"
 
+GithubTransport = Literal["http", "stdio"]
+
 _GITHUB_ENV_KEY: Final[str] = "GITHUB_PERSONAL_ACCESS_TOKEN"
 _BRAVE_ENV_KEY: Final[str] = "BRAVE_API_KEY"
+_GITHUB_HTTP_URL: Final[str] = "https://api.githubcopilot.com/mcp/"
+# Public set shared with config loader validation (single source of truth).
+ALLOWED_GITHUB_TRANSPORTS: Final[frozenset[str]] = frozenset({"http", "stdio"})
 
 
 @dataclass(frozen=True, slots=True)
 class _CuratedMcpServerDefinition:
-    """Internal catalog entry for one curated stdio MCP server."""
+    """Internal catalog entry for one curated MCP server (stdio shape when used)."""
 
     server_id: str
     command: str
@@ -30,7 +36,7 @@ class _CuratedMcpServerDefinition:
     required_env_keys: tuple[str, ...]
 
 
-# Appendix A spike values — authoritative until a follow-up ADR revises them.
+# Appendix A spike values — github stdio retained as explicit operator choice (Wave 5).
 _CURATED_MCP_SERVER_DEFINITIONS: Final[dict[str, _CuratedMcpServerDefinition]] = {
     MCP_SERVER_ID_GITHUB: _CuratedMcpServerDefinition(
         server_id=MCP_SERVER_ID_GITHUB,
@@ -81,12 +87,15 @@ def build_mcp_servers_for_full(
     *,
     allowlist: Sequence[str] | None,
     environ: Mapping[str, str],
+    github_transport: GithubTransport | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """Build curated MCP server configs for ``tool_profile: full``.
 
     ``allowlist=None`` enables every curated id. Missing required env omits that
     server and appends a warning (Q2) — never hard-fails for optional MCP.
     Unknown ids raise ``ValueError`` with the received value and allowed set.
+    ``github_transport`` defaults to official remote HTTP; ``stdio`` selects
+    Docker (no silent Docker fallback).
 
     Example:
         >>> servers, warnings = build_mcp_servers_for_full(
@@ -101,14 +110,17 @@ def build_mcp_servers_for_full(
     Args:
         allowlist: Curated server ids to enable, or ``None`` for all curated.
         environ: Environment mapping used to interpolate required secrets.
+        github_transport: ``http`` (default), ``stdio``, or ``None`` (= ``http``).
 
     Returns:
-        A ``(servers, warnings)`` tuple. ``servers`` maps id → flat stdio dict;
+        A ``(servers, warnings)`` tuple. ``servers`` maps id → flat MCP dict;
         ``warnings`` lists omit reasons without secret token values.
 
     Raises:
-        ValueError: When ``allowlist`` contains an unknown server id.
+        ValueError: When ``allowlist`` contains an unknown server id, or when
+            ``github_transport`` is not ``http`` / ``stdio`` / ``None``.
     """
+    resolved_transport = _resolve_github_transport(github_transport)
     resolved_ids = _resolve_allowlist(allowlist)
     servers: dict[str, Any] = {}
     warnings: list[str] = []
@@ -119,9 +131,31 @@ def build_mcp_servers_for_full(
         if missing_keys:
             warnings.append(_omit_warning_for_missing_env(server_id, missing_keys))
             continue
+        if server_id == MCP_SERVER_ID_GITHUB:
+            servers[server_id] = _emit_github_server_config(
+                transport=resolved_transport,
+                environ=environ,
+                stdio_definition=definition,
+            )
+            continue
         servers[server_id] = _emit_stdio_server_config(definition, environ)
 
     return servers, warnings
+
+
+def _resolve_github_transport(
+    github_transport: GithubTransport | None,
+) -> GithubTransport:
+    """Normalize github transport; unset defaults to http (never Docker)."""
+    if github_transport is None:
+        return "http"
+    if github_transport not in ALLOWED_GITHUB_TRANSPORTS:
+        allowed = ", ".join(sorted(ALLOWED_GITHUB_TRANSPORTS))
+        raise ValueError(
+            f"invalid github_transport: received {github_transport!r}, "
+            f"expected one of {{{allowed}}}"
+        )
+    return github_transport
 
 
 def _resolve_allowlist(allowlist: Sequence[str] | None) -> list[str]:
@@ -168,12 +202,35 @@ def _omit_warning_for_missing_env(server_id: str, missing_keys: Sequence[str]) -
     )
 
 
+def _emit_github_server_config(
+    *,
+    transport: GithubTransport,
+    environ: Mapping[str, str],
+    stdio_definition: _CuratedMcpServerDefinition,
+) -> dict[str, Any]:
+    """Emit github HTTP remote or Docker stdio; never fall back silently."""
+    if transport == "http":
+        # Strip so .env trailing newlines never land in Authorization headers.
+        pat = environ[_GITHUB_ENV_KEY].strip()
+        return {
+            "url": _GITHUB_HTTP_URL,
+            "headers": {"Authorization": f"Bearer {pat}"},
+        }
+    return _emit_stdio_server_config(stdio_definition, environ)
+
+
 def _emit_stdio_server_config(
     definition: _CuratedMcpServerDefinition,
     environ: Mapping[str, str],
 ) -> dict[str, Any]:
-    """Emit a flat stdio dict; interpolate required env from ``environ``."""
-    env: dict[str, str] = {key: environ[key] for key in definition.required_env_keys}
+    """Emit a flat stdio dict; interpolate required env from ``environ``.
+
+    Strip secret values so ``.env`` trailing newlines match the HTTP Bearer path
+    (Wave 5 review: HTTP vs stdio PAT asymmetry).
+    """
+    env: dict[str, str] = {
+        key: environ[key].strip() for key in definition.required_env_keys
+    }
     return {
         "command": definition.command,
         "args": list(definition.args),

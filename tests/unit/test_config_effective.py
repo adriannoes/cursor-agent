@@ -121,6 +121,63 @@ def test_build_effective_config_surfaces_mcp_full_servers_allowlist(
     assert "github" in rendered
 
 
+def test_build_effective_config_surfaces_mcp_full_github_transport_yaml(
+    tmp_path: Path,
+) -> None:
+    """Wave 5: effective view surfaces mcp.full.github_transport and yaml source."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "tool_profile: full\nmcp:\n  full:\n    github_transport: stdio\n",
+        encoding="utf-8",
+    )
+
+    view = build_effective_config(
+        config_path=config_path,
+        environ={},
+        dotenv_path=tmp_path / ".env",
+    )
+
+    assert view.mcp_full_github_transport == "stdio"
+    assert view.sources["mcp_full_github_transport"] == "yaml"
+    rendered = render_effective_config_redacted(view)
+    assert "mcp.full.github_transport" in rendered
+    assert "stdio" in rendered
+
+
+def test_build_effective_config_mcp_full_github_transport_default_is_http(
+    tmp_path: Path,
+) -> None:
+    """Omitted github_transport defaults to http with source=default."""
+    view = build_effective_config(
+        config_path=tmp_path / "missing.yaml",
+        environ={},
+        dotenv_path=tmp_path / ".env",
+    )
+
+    assert view.mcp_full_github_transport == "http"
+    assert view.sources["mcp_full_github_transport"] == "default"
+
+
+def test_build_effective_config_mcp_full_github_transport_env_source(
+    tmp_path: Path,
+) -> None:
+    """CWD .env alone attributes mcp_full_github_transport source as env."""
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text(
+        "CURSOR_AGENT__MCP__FULL__GITHUB_TRANSPORT=stdio\n",
+        encoding="utf-8",
+    )
+
+    view = build_effective_config(
+        config_path=tmp_path / "missing.yaml",
+        environ={},
+        dotenv_path=dotenv_path,
+    )
+
+    assert view.mcp_full_github_transport == "stdio"
+    assert view.sources["mcp_full_github_transport"] == "env"
+
+
 def test_build_effective_config_empty_mcp_full_servers_allowlist_display(
     tmp_path: Path,
 ) -> None:

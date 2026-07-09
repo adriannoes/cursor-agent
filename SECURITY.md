@@ -9,7 +9,7 @@ Threat model and capability matrix for gateway bots (Telegram and future channel
 | Context | Posture |
 |---------|---------|
 | CLI `coding` | SDK auto-approve; trusted local operator only; project/user MCP preserved |
-| CLI `full` | SDK auto-approve; curated MCP allowlist (`mcp_registry`); **local-only** — never on gateway |
+| CLI `full` | SDK auto-approve; curated MCP allowlist (`mcp_registry`); **local-only** — never on gateway; default `github` transport is remote HTTPS with PAT Bearer |
 | Gateway `messaging` | Allowlist + deny hooks + sandbox (network off) + empty MCP (`{}`) |
 | Cron `cloud` | Isolated VM; secrets via `env_vars` |
 
@@ -82,7 +82,7 @@ hooks/messaging/                          # repo source of truth
 
 Profile policy applies on **both** agent create and resume — see [Architecture — MCP and sandbox by profile](docs/architecture.md#mcp-and-sandbox-by-profile-create-and-resume).
 
-`coding` is not gateway-safe even when MCP is preserved. `full` injects a curated allowlist (`github`, `brave-search`, `playwright`) and is **local-only** — the gateway refuses any `tool_profile != messaging` (including `full`). `messaging` keeps empty MCP (`{}`), sandbox, and deny hooks; curated MCP never reaches gateway or messaging sessions ([ADR-029](docs/decisions/ADR-029-mcp-registry-full-profile.md)).
+`coding` is not gateway-safe even when MCP is preserved. `full` injects a curated allowlist (`github`, `brave-search`, `playwright`) and is **local-only** — the gateway refuses any `tool_profile != messaging` (including `full`). Default `github` transport is official remote HTTPS (`Authorization: Bearer` from `GITHUB_PERSONAL_ACCESS_TOKEN`); Docker stdio is an explicit operator opt-in. `messaging` keeps empty MCP (`{}`), sandbox, and deny hooks; curated MCP never reaches gateway or messaging sessions ([ADR-029](docs/decisions/ADR-029-mcp-registry-full-profile.md)).
 
 ---
 

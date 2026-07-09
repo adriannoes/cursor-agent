@@ -21,12 +21,13 @@ At startup the CLI loads a gitignored `.env` file from the **current working dir
 | `CURSOR_AGENT__MODEL` | Model id (default: `composer-2.5`) |
 | `CURSOR_AGENT__TOOL_PROFILE` | `coding`, `messaging`, or `full` (default: `coding`) |
 | `CURSOR_AGENT__MCP__FULL__SERVERS` | JSON list of curated MCP server ids for `full` (default: all curated) |
+| `CURSOR_AGENT__MCP__FULL__GITHUB_TRANSPORT` | `github` transport for `full`: `http` (default) or `stdio` (case-insensitive) |
 
 Legacy flat names `CURSOR_AGENT_WORKSPACE` and `CURSOR_AGENT_CONFIG` are **not supported** — use `CURSOR_AGENT__RUNTIME__LOCAL__CWD` and `~/.cursor-agent/config.yaml` instead.
 
-### Tool profile `full` (curated local MCP)
+### Tool profile `full` (curated MCP allowlist)
 
-`full` injects a curated MCP allowlist for trusted **local** operators. It is **local-only** — the Telegram gateway refuses to start with `full` (use `messaging` there). There is no `cursor-agent mcp *` CLI; enable the profile and set secrets via env. Design details: [ADR-029](decisions/ADR-029-mcp-registry-full-profile.md) and [Architecture — Tool profiles](architecture.md#tool-profiles).
+`full` injects a curated MCP allowlist for trusted **local** operators (`github` defaults to remote HTTP; Brave/Playwright stay local stdio). It is **local-only** — the Telegram gateway refuses to start with `full` (use `messaging` there). There is no `cursor-agent mcp *` CLI; enable the profile and set secrets via env. Design details: [ADR-029](decisions/ADR-029-mcp-registry-full-profile.md) and [Architecture — Tool profiles](architecture.md#tool-profiles).
 
 **Effective profile:** if config or session is `messaging`, messaging wins. Otherwise, among `coding` / `full`, the **session** profile wins over config (example: `config=full` + `session=coding` → `coding`).
 
@@ -50,11 +51,41 @@ Curated servers and required env (secrets stay in env — never put tokens in YA
 
 | Server id | Required env | Launch notes |
 |-----------|--------------|--------------|
-| `github` | `GITHUB_PERSONAL_ACCESS_TOKEN` | Docker stdio (`docker run … ghcr.io/github/github-mcp-server`) |
+| `github` | `GITHUB_PERSONAL_ACCESS_TOKEN` | **Default:** official remote HTTP (`https://api.githubcopilot.com/mcp/`). **Opt-in:** Docker stdio via `mcp.full.github_transport: stdio` |
 | `brave-search` | `BRAVE_API_KEY` | `npx -y @brave/brave-search-mcp-server` |
 | `playwright` | _(none)_ | `npx -y @playwright/mcp@latest` |
 
-Example local `.env` placeholders (see [.env.example](../.env.example)):
+**Default path — `github` without Docker** (PAT required; omit+warn if missing):
+
+```bash
+export CURSOR_AGENT__TOOL_PROFILE=full
+export CURSOR_AGENT__MCP__FULL__SERVERS='["github"]'
+export GITHUB_PERSONAL_ACCESS_TOKEN="your-github-pat"
+# CURSOR_AGENT__MCP__FULL__GITHUB_TRANSPORT defaults to http — no Docker needed
+cursor-agent
+```
+
+**Operator choice — local Docker stdio** (air-gapped / remote blocked hosts):
+
+```bash
+export CURSOR_AGENT__TOOL_PROFILE=full
+export CURSOR_AGENT__MCP__FULL__SERVERS='["github"]'
+export GITHUB_PERSONAL_ACCESS_TOKEN="your-github-pat"
+export CURSOR_AGENT__MCP__FULL__GITHUB_TRANSPORT=stdio
+# requires a running Docker daemon and image ghcr.io/github/github-mcp-server
+cursor-agent
+```
+
+YAML equivalent for the transport choice:
+
+```yaml
+tool_profile: full
+mcp:
+  full:
+    github_transport: stdio  # default is http when omitted
+```
+
+Example local `.env` placeholders for the full curated set (see [.env.example](../.env.example)):
 
 ```bash
 export CURSOR_AGENT__TOOL_PROFILE=full

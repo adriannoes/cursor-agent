@@ -27,7 +27,11 @@ from pydantic_settings.sources import InitSettingsSource
 
 from cursor_agent.config.yaml_io import expand_vars, load_yaml_dict, normalize_keys
 from cursor_agent.errors import ConfigError
-from cursor_agent.mcp_registry import CURATED_MCP_SERVER_IDS
+from cursor_agent.mcp_registry import (
+    ALLOWED_GITHUB_TRANSPORTS,
+    CURATED_MCP_SERVER_IDS,
+    GithubTransport as GithubTransport,
+)
 
 DEFAULT_CONFIG_PATH = Path.home() / ".cursor-agent" / "config.yaml"
 _ENV_PREFIX = "CURSOR_AGENT__"
@@ -55,19 +59,24 @@ class RuntimeConfig(BaseModel):
 
 
 class McpFullConfig(BaseModel):
-    """Allowlist for curated MCP servers under ``tool_profile: full`` (ADR-029).
+    """Allowlist and github transport for curated MCP under ``tool_profile: full``.
 
     ``servers=None`` means enable every curated id. Unknown ids raise with the
     received value and the allowed set from ``CURATED_MCP_SERVER_IDS``.
+    ``github_transport`` defaults to official remote HTTP; ``stdio`` selects
+    Docker (Wave 5 / ADR-029).
 
     Example:
         >>> McpFullConfig(servers=["github", "playwright"]).servers
         ['github', 'playwright']
+        >>> McpFullConfig().github_transport
+        'http'
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     servers: list[str] | None = None
+    github_transport: GithubTransport = "http"
 
     @field_validator("servers")
     @classmethod
@@ -86,6 +95,20 @@ class McpFullConfig(BaseModel):
                     f"expected one of {allowed!r}",
                 )
         return value
+
+    @field_validator("github_transport", mode="before")
+    @classmethod
+    def _reject_invalid_github_transport(cls, value: object) -> object:
+        """Normalize case then reject transports outside {http, stdio}."""
+        # Operators often type HTTP/STDIO; lowercase before the allowlist check.
+        normalized: object = value.lower() if isinstance(value, str) else value
+        if normalized not in ALLOWED_GITHUB_TRANSPORTS:
+            allowed = ", ".join(sorted(ALLOWED_GITHUB_TRANSPORTS))
+            raise ValueError(
+                f"invalid mcp.full.github_transport: received {value!r}, "
+                f"expected one of {{{allowed}}}",
+            )
+        return normalized
 
 
 class McpConfig(BaseModel):

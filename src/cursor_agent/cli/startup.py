@@ -136,6 +136,7 @@ async def repl_runtime(
             api_key=os.environ.get("CURSOR_API_KEY"),
             local_setting_sources=config.runtime.local.setting_sources,
             mcp_full_servers=config.mcp.full.servers,
+            mcp_full_github_transport=config.mcp.full.github_transport,
         ) as real:
             pool = SessionAgentPool(store=store, facade=real, config=config)
             yield pool, session_key, store, real

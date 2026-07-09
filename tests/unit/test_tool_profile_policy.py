@@ -100,6 +100,41 @@ def test_mcp_servers_override_for_profile_full_returns_curated_map() -> None:
     assert override[MCP_SERVER_ID_PLAYWRIGHT]["command"] == "npx"
 
 
+def test_mcp_servers_override_full_github_transport_stdio_emits_docker_shape() -> None:
+    """Policy threads github_transport=stdio into Docker stdio github config."""
+    environ = {"GITHUB_PERSONAL_ACCESS_TOKEN": _FAKE_GITHUB_TOKEN}
+    override = mcp_servers_override_for_profile(
+        "full",
+        allowlist=[MCP_SERVER_ID_GITHUB],
+        environ=environ,
+        github_transport="stdio",
+    )
+
+    assert override is not None
+    github = override[MCP_SERVER_ID_GITHUB]
+    assert github["command"] == "docker"
+    assert "ghcr.io/github/github-mcp-server" in github["args"]
+    assert github["env"]["GITHUB_PERSONAL_ACCESS_TOKEN"] == _FAKE_GITHUB_TOKEN
+    assert "url" not in github
+
+
+def test_mcp_servers_override_full_github_transport_default_emits_http_shape() -> None:
+    """Policy default/http github_transport emits official remote HTTP shape."""
+    environ = {"GITHUB_PERSONAL_ACCESS_TOKEN": _FAKE_GITHUB_TOKEN}
+    for transport in (None, "http"):
+        override = mcp_servers_override_for_profile(
+            "full",
+            allowlist=[MCP_SERVER_ID_GITHUB],
+            environ=environ,
+            github_transport=transport,
+        )
+        assert override is not None
+        github = override[MCP_SERVER_ID_GITHUB]
+        assert github["url"] == "https://api.githubcopilot.com/mcp/"
+        assert github["headers"]["Authorization"] == f"Bearer {_FAKE_GITHUB_TOKEN}"
+        assert "command" not in github
+
+
 def test_mcp_servers_override_for_profile_full_empty_environ_keeps_playwright() -> None:
     """Full with empty environ still includes playwright (no required env)."""
     override = mcp_servers_override_for_profile("full", environ={})
