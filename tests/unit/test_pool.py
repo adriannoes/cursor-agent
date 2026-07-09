@@ -952,6 +952,43 @@ async def test_send_reattach_uses_messaging_tool_profile_on_create(
 
 
 @pytest.mark.asyncio
+async def test_send_allows_pinned_cron_row_when_newer_row_exists(
+    store: SessionStore,
+    config: CursorAgentConfig,
+) -> None:
+    """Cron session keys skip the supersede guard so in-flight runs can finish."""
+    session_key = "cron:daily-report:run-stale"
+    facade = FakeSdkFacade(default_reply="cron-run-complete")
+    workspace = "/tmp/workspace"
+    first_agent = await facade.create_agent(workspace=workspace)
+    row_a = await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id=first_agent,
+            workspace=workspace,
+            runtime="local",
+            tool_profile="coding",
+        ),
+    )
+    second_agent = await facade.create_agent(workspace=workspace)
+    await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id=second_agent,
+            workspace=workspace,
+            runtime="local",
+            tool_profile="coding",
+        ),
+    )
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+
+    result = await pool.send(session_key, "finish cron job", session_row=row_a)
+
+    assert result.status is RunStatus.FINISHED
+    assert result.text == "cron-run-complete"
+
+
+@pytest.mark.asyncio
 async def test_send_raises_when_pinned_session_row_superseded(
     store: SessionStore,
     config: CursorAgentConfig,
