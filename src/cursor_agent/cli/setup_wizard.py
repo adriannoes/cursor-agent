@@ -131,6 +131,12 @@ def _echo_intro() -> None:
 def _prompt_leaf(title: str, body_lines: Sequence[str], prompt: str) -> str:
     """Echo ◆/│ chrome and return the └ prompt string for input/getpass."""
     parts = format_step_parts(title, body_lines, prompt)
+    if not parts.prompt_leaf:
+        raise ConfigError(
+            f"empty prompt_leaf for wizard step {title!r}: received {parts.prompt_leaf!r}, "
+            "expected non-empty └ prompt string for input/getpass "
+            "(use format_step for intro blocks without a prompt)",
+        )
     typer.echo(parts.echo_block)
     return f"{parts.prompt_leaf} "
 

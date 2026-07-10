@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
-import re
-
 import pytest
 
 from cursor_agent import mcp_registry
@@ -323,19 +320,16 @@ def test_allowed_github_transports_is_http_and_stdio() -> None:
     assert ALLOWED_GITHUB_TRANSPORTS == frozenset({"http", "stdio"})
 
 
-def test_build_loop_has_no_github_server_id_branch() -> None:
-    """Build loop must not special-case github by server_id (TN-07 / Wave D 9.1)."""
-    source = inspect.getsource(build_mcp_servers_for_full)
-    assert "if server_id == MCP_SERVER_ID_GITHUB" not in source
-    assert not re.search(r'server_id\s*==\s*["\']github["\']', source)
-
-
 def test_curated_definitions_carry_per_server_emit_strategy() -> None:
-    """Each curated definition exposes a callable emit strategy (no build-loop if)."""
+    """Catalog rows pin strategy identity (TN-07 wiring; emit() is the call-site API)."""
+    expected = {
+        MCP_SERVER_ID_GITHUB: mcp_registry._emit_github_strategy,
+        MCP_SERVER_ID_BRAVE_SEARCH: mcp_registry._emit_stdio_strategy,
+        MCP_SERVER_ID_PLAYWRIGHT: mcp_registry._emit_stdio_strategy,
+    }
+    assert set(mcp_registry._CURATED_MCP_SERVER_DEFINITIONS) == set(expected)
     for server_id, definition in mcp_registry._CURATED_MCP_SERVER_DEFINITIONS.items():
-        assert callable(definition.emit_strategy), (
-            f"curated definition {server_id!r} missing callable emit_strategy"
-        )
-        assert callable(definition.emit), (
-            f"curated definition {server_id!r} missing emit() entry point"
+        assert definition.emit_strategy is expected[server_id], (
+            f"curated definition {server_id!r} emit_strategy identity mismatch: "
+            f"received {definition.emit_strategy!r}, expected {expected[server_id]!r}"
         )

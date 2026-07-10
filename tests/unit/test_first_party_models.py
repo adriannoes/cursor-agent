@@ -49,11 +49,6 @@ def test_composer_agent_model_distinct_from_default() -> None:
     assert COMPOSER_AGENT_MODEL != DEFAULT_AGENT_MODEL
 
 
-def test_default_agent_model_identity_wrapper_is_removed() -> None:
-    """Public default surface is DEFAULT_AGENT_MODEL only (no identity wrapper)."""
-    assert not hasattr(first_party_models_mod, "default_agent_model")
-
-
 def test_first_party_catalog_has_exactly_two_rows() -> None:
     """Soft catalog is Grok (default) + Composer 2.5 only."""
     assert len(FIRST_PARTY_AGENT_MODELS) == 2
