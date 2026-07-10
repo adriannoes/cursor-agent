@@ -4,11 +4,14 @@ Builds flat dicts matching the Cursor ``mcp.json`` mental model: remote HTTP
 (``url`` / ``headers``) for github by default, or stdio (``command`` / ``args`` /
 ``env``) for Docker github and other curated servers. No ``cursor_sdk`` import —
 the facade may wrap these dicts into SDK types later.
+
+Per-server emit lives on each catalog definition (TN-07): the build loop never
+branches on ``server_id``; github HTTP vs Docker is strategy data.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
@@ -27,6 +30,14 @@ ALLOWED_GITHUB_TRANSPORTS: Final[frozenset[str]] = frozenset({"http", "stdio"})
 
 
 @dataclass(frozen=True, slots=True)
+class _McpEmitContext:
+    """Shared inputs for per-server emit strategies during a full-profile build."""
+
+    environ: Mapping[str, str]
+    github_transport: GithubTransport
+
+
+@dataclass(frozen=True, slots=True)
 class _CuratedMcpServerDefinition:
     """Internal catalog entry for one curated MCP server (stdio shape when used)."""
 
@@ -34,6 +45,37 @@ class _CuratedMcpServerDefinition:
     command: str
     args: tuple[str, ...]
     required_env_keys: tuple[str, ...]
+    emit_strategy: Callable[
+        [_CuratedMcpServerDefinition, _McpEmitContext], dict[str, Any]
+    ]
+
+    def emit(self, context: _McpEmitContext) -> dict[str, Any]:
+        """Emit flat MCP config via this server's strategy.
+
+        Example:
+            servers[id] = definition.emit(emit_context)
+        """
+        return self.emit_strategy(self, context)
+
+
+def _emit_stdio_strategy(
+    definition: _CuratedMcpServerDefinition,
+    context: _McpEmitContext,
+) -> dict[str, Any]:
+    """Default emit: flat stdio dict from definition + environ."""
+    return _emit_stdio_server_config(definition, context.environ)
+
+
+def _emit_github_strategy(
+    definition: _CuratedMcpServerDefinition,
+    context: _McpEmitContext,
+) -> dict[str, Any]:
+    """Github emit: HTTP remote or Docker stdio from transport strategy data."""
+    return _emit_github_server_config(
+        transport=context.github_transport,
+        environ=context.environ,
+        stdio_definition=definition,
+    )
 
 
 # Appendix A spike values — github stdio retained as explicit operator choice (Wave 5).
@@ -50,18 +92,21 @@ _CURATED_MCP_SERVER_DEFINITIONS: Final[dict[str, _CuratedMcpServerDefinition]] =
             "ghcr.io/github/github-mcp-server",
         ),
         required_env_keys=(_GITHUB_ENV_KEY,),
+        emit_strategy=_emit_github_strategy,
     ),
     MCP_SERVER_ID_BRAVE_SEARCH: _CuratedMcpServerDefinition(
         server_id=MCP_SERVER_ID_BRAVE_SEARCH,
         command="npx",
         args=("-y", "@brave/brave-search-mcp-server"),
         required_env_keys=(_BRAVE_ENV_KEY,),
+        emit_strategy=_emit_stdio_strategy,
     ),
     MCP_SERVER_ID_PLAYWRIGHT: _CuratedMcpServerDefinition(
         server_id=MCP_SERVER_ID_PLAYWRIGHT,
         command="npx",
         args=("-y", "@playwright/mcp@latest"),
         required_env_keys=(),
+        emit_strategy=_emit_stdio_strategy,
     ),
 }
 
@@ -122,6 +167,10 @@ def build_mcp_servers_for_full(
     """
     resolved_transport = _resolve_github_transport(github_transport)
     resolved_ids = _resolve_allowlist(allowlist)
+    emit_context = _McpEmitContext(
+        environ=environ,
+        github_transport=resolved_transport,
+    )
     servers: dict[str, Any] = {}
     warnings: list[str] = []
 
@@ -131,14 +180,7 @@ def build_mcp_servers_for_full(
         if missing_keys:
             warnings.append(_omit_warning_for_missing_env(server_id, missing_keys))
             continue
-        if server_id == MCP_SERVER_ID_GITHUB:
-            servers[server_id] = _emit_github_server_config(
-                transport=resolved_transport,
-                environ=environ,
-                stdio_definition=definition,
-            )
-            continue
-        servers[server_id] = _emit_stdio_server_config(definition, environ)
+        servers[server_id] = definition.emit(emit_context)
 
     return servers, warnings
 

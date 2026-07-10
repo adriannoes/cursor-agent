@@ -16,10 +16,12 @@ from cursor_agent.cli.setup_wizard_chrome import (
     GLYPH_SUCCESS,
     GLYPH_SUMMARY,
     GLYPH_TRUNK,
+    WizardStepParts,
     format_prompt_leaf,
     format_radio_escape_hatch,
     format_radio_option,
     format_step,
+    format_step_parts,
     format_success,
     format_summary,
     radio_option_label_width,
@@ -103,6 +105,55 @@ def test_format_step_whitespace_only_prompt_omits_leaf() -> None:
     assert lines[0] == f"{GLYPH_STEP}  Intro"
     assert lines[1] == f"{GLYPH_TRUNK}  Guidance."
     assert GLYPH_PROMPT not in rendered
+
+
+def test_format_step_parts_separates_echo_block_from_prompt_leaf() -> None:
+    """Parts API returns echo chrome and └ leaf without last-line splitting."""
+    parts = format_step_parts(
+        "Workspace",
+        ["Path under home."],
+        "Enter path:",
+    )
+    assert isinstance(parts, WizardStepParts)
+    assert parts.echo_block == (
+        f"{GLYPH_STEP}  Workspace\n{GLYPH_TRUNK}  Path under home.\n{GLYPH_TRUNK}"
+    )
+    assert parts.prompt_leaf == f"{GLYPH_PROMPT}  Enter path:"
+    assert GLYPH_PROMPT not in parts.echo_block
+
+
+def test_format_step_parts_omits_bare_trunk_when_body_empty() -> None:
+    """Empty body yields title-only echo and leaf (no breathing-room trunk)."""
+    parts = format_step_parts("API key", [], "Paste key:")
+    assert parts.echo_block == f"{GLYPH_STEP}  API key"
+    assert parts.prompt_leaf == f"{GLYPH_PROMPT}  Paste key:"
+
+
+def test_format_step_parts_empty_prompt_leaves_leaf_blank() -> None:
+    """Intro-style empty prompt keeps echo chrome and an empty leaf string."""
+    parts = format_step_parts(
+        "Welcome",
+        ["This guided setup writes ~/.cursor-agent/config.yaml."],
+        "",
+    )
+    assert parts.echo_block == (
+        f"{GLYPH_STEP}  Welcome\n"
+        f"{GLYPH_TRUNK}  This guided setup writes ~/.cursor-agent/config.yaml."
+    )
+    assert parts.prompt_leaf == ""
+
+
+def test_format_step_composes_from_format_step_parts() -> None:
+    """format_step is the joined parts view (behavior freeze for callers)."""
+    title = "Choose a model"
+    body = ["Grok is recommended.", "Composer is available."]
+    prompt = "[1 / 2 / id]"
+    parts = format_step_parts(title, body, prompt)
+    assert format_step(title, body, prompt) == (
+        f"{parts.echo_block}\n{parts.prompt_leaf}"
+    )
+    intro = format_step_parts("Welcome", ["Guidance."], "")
+    assert format_step("Welcome", ["Guidance."], "") == intro.echo_block
 
 
 def test_format_prompt_leaf_owns_prompt_glyph_spacing() -> None:

@@ -21,6 +21,7 @@ from cursor_agent.cli.setup_wizard_chrome import (
     format_radio_escape_hatch,
     format_radio_option,
     format_step,
+    format_step_parts,
     format_summary,
     radio_option_label_width,
 )
@@ -129,11 +130,15 @@ def _echo_intro() -> None:
 
 def _prompt_leaf(title: str, body_lines: Sequence[str], prompt: str) -> str:
     """Echo ◆/│ chrome and return the └ prompt string for input/getpass."""
-    rendered = format_step(title, body_lines, prompt)
-    lines = rendered.splitlines()
-    for line in lines[:-1]:
-        typer.echo(line)
-    return f"{lines[-1]} "
+    parts = format_step_parts(title, body_lines, prompt)
+    if not parts.prompt_leaf:
+        raise ConfigError(
+            f"empty prompt_leaf for wizard step {title!r}: received {parts.prompt_leaf!r}, "
+            "expected non-empty └ prompt string for input/getpass "
+            "(use format_step for intro blocks without a prompt)",
+        )
+    typer.echo(parts.echo_block)
+    return f"{parts.prompt_leaf} "
 
 
 def _prompt_api_key() -> str:

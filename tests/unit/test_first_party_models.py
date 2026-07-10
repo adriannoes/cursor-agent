@@ -17,7 +17,6 @@ from cursor_agent.first_party_models import (
     DEFAULT_AGENT_MODEL,
     FIRST_PARTY_AGENT_MODELS,
     WIZARD_MODEL_OTHER_ESCAPE_LABEL,
-    default_agent_model,
     format_first_party_model_help,
     recommended_agent_model_ids,
     resolve_wizard_model_choice,
@@ -48,12 +47,6 @@ def test_composer_agent_model_matches_sole_non_default_catalog_row() -> None:
 def test_composer_agent_model_distinct_from_default() -> None:
     """Composer override pin must not equal the unset default model."""
     assert COMPOSER_AGENT_MODEL != DEFAULT_AGENT_MODEL
-
-
-def test_default_agent_model_helper_returns_constant() -> None:
-    """default_agent_model() returns DEFAULT_AGENT_MODEL."""
-    assert default_agent_model() == DEFAULT_AGENT_MODEL
-    assert default_agent_model() == "grok-4.5"
 
 
 def test_first_party_catalog_has_exactly_two_rows() -> None:

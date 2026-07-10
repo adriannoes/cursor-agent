@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from cursor_agent import mcp_registry
 from cursor_agent.mcp_registry import (
     ALLOWED_GITHUB_TRANSPORTS,
     MCP_SERVER_ID_BRAVE_SEARCH,
@@ -317,3 +318,18 @@ def test_github_stdio_env_strips_trailing_newline_from_pat() -> None:
 def test_allowed_github_transports_is_http_and_stdio() -> None:
     """Public ALLOWED_GITHUB_TRANSPORTS is the single source for {http, stdio}."""
     assert ALLOWED_GITHUB_TRANSPORTS == frozenset({"http", "stdio"})
+
+
+def test_curated_definitions_carry_per_server_emit_strategy() -> None:
+    """Catalog rows pin strategy identity (TN-07 wiring; emit() is the call-site API)."""
+    expected = {
+        MCP_SERVER_ID_GITHUB: mcp_registry._emit_github_strategy,
+        MCP_SERVER_ID_BRAVE_SEARCH: mcp_registry._emit_stdio_strategy,
+        MCP_SERVER_ID_PLAYWRIGHT: mcp_registry._emit_stdio_strategy,
+    }
+    assert set(mcp_registry._CURATED_MCP_SERVER_DEFINITIONS) == set(expected)
+    for server_id, definition in mcp_registry._CURATED_MCP_SERVER_DEFINITIONS.items():
+        assert definition.emit_strategy is expected[server_id], (
+            f"curated definition {server_id!r} emit_strategy identity mismatch: "
+            f"received {definition.emit_strategy!r}, expected {expected[server_id]!r}"
+        )

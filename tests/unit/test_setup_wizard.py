@@ -5,9 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
 from typer.testing import CliRunner
 
 from cursor_agent.cli.app import app
+from cursor_agent.cli.setup_wizard import _prompt_leaf
+from cursor_agent.errors import ConfigError
 from tests.unit.setup_cli_test_fakes import (
     PLACEHOLDER_API_KEY,
     patch_tty_not_ci,
@@ -316,3 +319,12 @@ def test_wizard_invalid_tool_profile_fails_before_confirm(
     assert "foo" in combined
     assert not config_path.exists()
     assert not env_file.exists()
+
+
+def test_prompt_leaf_rejects_empty_prompt_string() -> None:
+    """_prompt_leaf refuses blank prompt_leaf so input/getpass never see \" \"."""
+    with pytest.raises(ConfigError, match="empty prompt_leaf") as exc_info:
+        _prompt_leaf("Intro", ["Guidance."], "")
+    message = str(exc_info.value)
+    assert "prompt_leaf" in message
+    assert "non-empty" in message.lower()
