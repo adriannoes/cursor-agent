@@ -1,77 +1,28 @@
-"""Unit tests for ``cursor-agent setup`` Typer commands (PRD-013 Wave 2)."""
+"""Unit tests for ``cursor-agent setup`` Typer apply / help / matrix (PRD-013 Wave 2)."""
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
-import pytest
 from typer.testing import CliRunner
 
-from cursor_agent.cli import startup as startup_mod
 from cursor_agent.cli.app import app, run_default
 from cursor_agent.cli.first_run_marker import MARKER_FILENAME
 from cursor_agent.config.effective import REDACTION_TOKEN
 from cursor_agent.config.loader import CursorAgentConfig
+from tests.unit.setup_cli_test_fakes import (
+    PLACEHOLDER_API_KEY,
+    SETUP_EXAMPLE,
+    apply_args,
+    patch_non_interactive,
+)
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
-    from click.testing import Result
-
-_PLACEHOLDER_API_KEY = "sk-test-placeholder"
-_SETUP_EXAMPLE = "cursor-agent setup"
-
-
-def _patch_non_interactive(monkeypatch: MonkeyPatch, *, is_ci: bool = False) -> None:
-    """Force non-interactive apply guards for CliRunner (non-TTY; optional CI)."""
-    monkeypatch.setattr(
-        "cursor_agent.cli.setup_commands._stdout_is_tty",
-        lambda: False,
-    )
-    monkeypatch.setattr(
-        "cursor_agent.cli.setup_commands._is_ci_environment",
-        lambda: is_ci,
-    )
-
-
-def _patch_tty_not_ci(monkeypatch: MonkeyPatch) -> None:
-    """Simulate interactive TTY with CI disabled (wizard eligibility guard)."""
-    monkeypatch.setattr(
-        "cursor_agent.cli.setup_commands._stdout_is_tty",
-        lambda: True,
-    )
-    monkeypatch.setattr(
-        "cursor_agent.cli.setup_commands._is_ci_environment",
-        lambda: False,
-    )
-
-
-def _apply_args(
-    *,
-    workspace: Path,
-    config_path: Path,
-    env_file: Path,
-    api_key: str = _PLACEHOLDER_API_KEY,
-    extra: list[str] | None = None,
-) -> list[str]:
-    """Build a headless ``setup`` invocation with injectable paths."""
-    args = [
-        "setup",
-        "--api-key",
-        api_key,
-        "--workspace",
-        str(workspace),
-        "--config-path",
-        str(config_path),
-        "--env-file",
-        str(env_file),
-        "--yes",
-    ]
-    if extra:
-        args.extend(extra)
-    return args
 
 
 # --- Task 4.1: help / Examples / registration ---------------------------------
@@ -83,7 +34,7 @@ def test_setup_help_includes_examples_section() -> None:
     assert result.exit_code == 0
     combined = f"{result.stdout}\n{result.output}"
     assert "Examples" in combined
-    assert _SETUP_EXAMPLE in combined
+    assert SETUP_EXAMPLE in combined
 
 
 def test_setup_check_help_includes_examples_section() -> None:
@@ -92,7 +43,7 @@ def test_setup_check_help_includes_examples_section() -> None:
     assert result.exit_code == 0
     combined = f"{result.stdout}\n{result.output}"
     assert "Examples" in combined
-    assert _SETUP_EXAMPLE in combined
+    assert SETUP_EXAMPLE in combined
 
 
 def test_setup_show_help_includes_examples_section() -> None:
@@ -101,7 +52,7 @@ def test_setup_show_help_includes_examples_section() -> None:
     assert result.exit_code == 0
     combined = f"{result.stdout}\n{result.output}"
     assert "Examples" in combined
-    assert _SETUP_EXAMPLE in combined
+    assert SETUP_EXAMPLE in combined
 
 
 def test_setup_registered_on_root_help() -> None:
@@ -118,11 +69,11 @@ def test_non_tty_without_required_flags_exits_nonzero_with_example(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Non-TTY apply without required flags exits non-zero with an example invocation."""
-    _patch_non_interactive(monkeypatch)
+    patch_non_interactive(monkeypatch)
     result = CliRunner().invoke(app, ["setup"])
     assert result.exit_code != 0
     combined = f"{result.stdout}\n{result.stderr}\n{result.output}"
-    assert _SETUP_EXAMPLE in combined
+    assert SETUP_EXAMPLE in combined
     assert "--api-key" in combined
     assert "--workspace" in combined
     assert "--yes" in combined
@@ -133,7 +84,7 @@ def test_apply_with_flags_writes_via_injected_paths(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Headless apply writes API key to env file and workspace to YAML under tmp_path."""
-    _patch_non_interactive(monkeypatch)
+    patch_non_interactive(monkeypatch)
     workspace = tmp_path / "ws"
     workspace.mkdir()
     config_path = tmp_path / "home" / "config.yaml"
@@ -142,15 +93,15 @@ def test_apply_with_flags_writes_via_injected_paths(
 
     result = CliRunner().invoke(
         app,
-        _apply_args(workspace=workspace, config_path=config_path, env_file=env_file),
+        apply_args(workspace=workspace, config_path=config_path, env_file=env_file),
     )
     assert result.exit_code == 0, result.output
     assert env_file.is_file()
-    assert _PLACEHOLDER_API_KEY in env_file.read_text(encoding="utf-8")
+    assert PLACEHOLDER_API_KEY in env_file.read_text(encoding="utf-8")
     assert config_path.is_file()
     yaml_text = config_path.read_text(encoding="utf-8")
     assert str(workspace) in yaml_text
-    assert _PLACEHOLDER_API_KEY not in yaml_text
+    assert PLACEHOLDER_API_KEY not in yaml_text
     combined = f"{result.stdout}\n{result.output}"
     assert "Configuration written." in combined
     assert "cursor-agent setup check" in combined
@@ -162,7 +113,7 @@ def test_dry_run_prints_plan_without_writes(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """``--dry-run`` prints planned paths/key names with redacted secrets and no FS writes."""
-    _patch_non_interactive(monkeypatch)
+    patch_non_interactive(monkeypatch)
     workspace = tmp_path / "ws"
     workspace.mkdir()
     config_path = tmp_path / "home" / "config.yaml"
@@ -171,7 +122,7 @@ def test_dry_run_prints_plan_without_writes(
 
     result = CliRunner().invoke(
         app,
-        _apply_args(
+        apply_args(
             workspace=workspace,
             config_path=config_path,
             env_file=env_file,
@@ -182,7 +133,7 @@ def test_dry_run_prints_plan_without_writes(
     combined = f"{result.stdout}\n{result.output}"
     assert str(config_path) in combined or "config" in combined.lower()
     assert "CURSOR_API_KEY" in combined
-    assert _PLACEHOLDER_API_KEY not in combined
+    assert PLACEHOLDER_API_KEY not in combined
     assert REDACTION_TOKEN in combined or "***" in combined
     assert not config_path.exists()
     assert not env_file.exists()
@@ -193,7 +144,7 @@ def test_refuse_overwrite_env_without_force(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Differing existing env value without ``--force`` refuses and mentions setup show."""
-    _patch_non_interactive(monkeypatch)
+    patch_non_interactive(monkeypatch)
     workspace = tmp_path / "ws"
     workspace.mkdir()
     config_path = tmp_path / "home" / "config.yaml"
@@ -203,7 +154,7 @@ def test_refuse_overwrite_env_without_force(
 
     result = CliRunner().invoke(
         app,
-        _apply_args(workspace=workspace, config_path=config_path, env_file=env_file),
+        apply_args(workspace=workspace, config_path=config_path, env_file=env_file),
     )
     assert result.exit_code != 0
     combined = f"{result.stdout}\n{result.stderr}\n{result.output}"
@@ -220,7 +171,7 @@ def test_refuse_overwrite_without_force_leaves_no_yaml_or_memory_placeholders(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Env refuse must not leave orphan config.yaml or memory USER.md/MEMORY.md."""
-    _patch_non_interactive(monkeypatch)
+    patch_non_interactive(monkeypatch)
     workspace = tmp_path / "ws"
     workspace.mkdir()
     config_path = tmp_path / "home" / "config.yaml"
@@ -231,7 +182,7 @@ def test_refuse_overwrite_without_force_leaves_no_yaml_or_memory_placeholders(
 
     result = CliRunner().invoke(
         app,
-        _apply_args(
+        apply_args(
             workspace=workspace,
             config_path=config_path,
             env_file=env_file,
@@ -253,13 +204,13 @@ def test_apply_idempotent_second_run_exits_zero(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Second identical apply prints already-configured messaging and exits 0."""
-    _patch_non_interactive(monkeypatch)
+    patch_non_interactive(monkeypatch)
     workspace = tmp_path / "ws"
     workspace.mkdir()
     config_path = tmp_path / "home" / "config.yaml"
     env_file = tmp_path / "project" / ".env"
     env_file.parent.mkdir()
-    args = _apply_args(workspace=workspace, config_path=config_path, env_file=env_file)
+    args = apply_args(workspace=workspace, config_path=config_path, env_file=env_file)
 
     first = CliRunner().invoke(app, args)
     assert first.exit_code == 0, first.output
@@ -268,807 +219,6 @@ def test_apply_idempotent_second_run_exits_zero(
     assert second.exit_code == 0, second.output
     combined = f"{second.stdout}\n{second.output}".lower()
     assert "already" in combined and "configur" in combined
-
-
-def test_tty_without_flags_runs_interactive_wizard_not_deferred_error(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """TTY without value flags enters the wizard (FR-10), not the deferred-error branch."""
-    _patch_tty_not_ci(monkeypatch)
-    workspace = tmp_path / "ws"
-    workspace.mkdir()
-    config_path = tmp_path / "home" / "config.yaml"
-    env_file = tmp_path / "project" / ".env"
-    env_file.parent.mkdir()
-
-    answers = iter(
-        [
-            str(workspace),  # workspace
-            "",  # memory root skip
-            "",  # sessions db skip
-            "",  # model skip
-            "",  # tool profile skip
-            "y",  # confirm
-        ]
-    )
-    monkeypatch.setattr(
-        "cursor_agent.cli.setup_wizard._getpass_fn",
-        lambda _prompt="": _PLACEHOLDER_API_KEY,
-    )
-    monkeypatch.setattr(
-        "cursor_agent.cli.setup_wizard._input_fn",
-        lambda _prompt="": next(answers),
-    )
-
-    result = CliRunner().invoke(
-        app,
-        [
-            "setup",
-            "--config-path",
-            str(config_path),
-            "--env-file",
-            str(env_file),
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    combined = f"{result.stdout}\n{result.stderr}\n{result.output}"
-    assert "not available yet" not in combined.lower()
-    assert env_file.is_file()
-    assert _PLACEHOLDER_API_KEY in env_file.read_text(encoding="utf-8")
-    assert _PLACEHOLDER_API_KEY not in combined
-
-
-# --- Task 5.1 / 5.3: interactive wizard (FR-10) -------------------------------
-
-
-def _patch_wizard_io(
-    monkeypatch: MonkeyPatch,
-    *,
-    api_key: str,
-    input_answers: list[str],
-) -> list[str]:
-    """Inject getpass/input for wizard tests; return list of prompts seen by input_fn."""
-    prompts_seen: list[str] = []
-    answers = iter(input_answers)
-
-    def fake_getpass(prompt: str = "") -> str:
-        prompts_seen.append(prompt)
-        return api_key
-
-    def fake_input(prompt: str = "") -> str:
-        prompts_seen.append(prompt)
-        try:
-            return next(answers)
-        except StopIteration as exc:
-            raise AssertionError(
-                f"wizard requested more input than provided; "
-                f"last prompt={prompt!r}, prompts_seen={prompts_seen!r}"
-            ) from exc
-
-    monkeypatch.setattr("cursor_agent.cli.setup_wizard._getpass_fn", fake_getpass)
-    monkeypatch.setattr("cursor_agent.cli.setup_wizard._input_fn", fake_input)
-    return prompts_seen
-
-
-def _run_wizard_choices(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-    *,
-    model: str = "",
-    tool_profile: str = "",
-    api_key: str = _PLACEHOLDER_API_KEY,
-) -> tuple[Result, Path, Path, list[str]]:
-    """Run one isolated wizard case with optional model/profile choices."""
-    _patch_tty_not_ci(monkeypatch)
-    workspace = tmp_path / "ws"
-    workspace.mkdir()
-    config_path = tmp_path / "home" / "config.yaml"
-    env_file = tmp_path / "project" / ".env"
-    env_file.parent.mkdir()
-    prompts = _patch_wizard_io(
-        monkeypatch,
-        api_key=api_key,
-        input_answers=[str(workspace), "", "", model, tool_profile, "y"],
-    )
-    result = CliRunner().invoke(
-        app,
-        ["setup", "--config-path", str(config_path), "--env-file", str(env_file)],
-    )
-    return result, config_path, env_file, prompts
-
-
-def test_wizard_applies_on_confirm_y_and_never_echoes_api_key(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """Happy path locks G3 chrome/defaults while keeping the API key secret."""
-    secret = "sk-wizard-secret-key-never-echo"
-    result, config_path, env_file, prompts = _run_wizard_choices(
-        tmp_path,
-        monkeypatch,
-        api_key=secret,
-    )
-    assert result.exit_code == 0, result.output
-    combined = f"{result.stdout}\n{result.stderr}\n{result.output}"
-    prompt_text = "\n".join(prompts)
-    transcript = f"{combined}\n{prompt_text}"
-    assert secret not in combined
-    assert all(glyph in transcript for glyph in ("◆", "│", "◇", "●", "○", "✓"))
-    assert "└" in prompt_text
-    assert all(
-        token in prompt_text
-        for token in ("[1 / 2 / id]", "[1 / 2 / 3 / name]", "[y / N]")
-    )
-    assert "Grok 4.5" in transcript and "composer-2.5" in transcript
-    assert all(profile in transcript for profile in ("coding", "messaging", "full"))
-    assert all(
-        line in combined
-        for line in (
-            "│  ● 1  Grok 4.5      grok-4.5         (recommended)",
-            "│  ○ 2  Composer 2.5  composer-2.5",
-            "│  ○    Other — type a Cursor SDK model id",
-            "│  ● 1  coding     Local development (default)",
-            "│  ○ 2  messaging  Gateways / bots — read-only posture",
-            "│  ○ 3  full       Coding + curated MCP servers",
-        )
-    )
-    assert "model: (default: grok-4.5)" in combined
-    assert "tool_profile: (default: coding)" in combined
-    assert "memory_root: (skipped → ~/.cursor-agent)" in combined
-    assert "sessions_db: (skipped → ~/.cursor-agent/sessions.db)" in combined
-    assert "cursor-agent setup check" in combined and len(prompts) <= 7
-    assert f"│  env: {env_file}" in combined
-    assert f"│  yaml: {config_path}" in combined
-    assert env_file.is_file()
-    assert secret in env_file.read_text(encoding="utf-8")
-    assert config_path.is_file()
-    yaml_text = config_path.read_text(encoding="utf-8")
-    assert secret not in yaml_text
-    assert "model:" not in yaml_text and "tool_profile:" not in yaml_text
-
-
-def test_wizard_force_overwrite_surfaces_backup_path_in_success_output(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """Interactive ``--force`` reports its generated env backup path."""
-    _patch_tty_not_ci(monkeypatch)
-    workspace = tmp_path / "ws"
-    workspace.mkdir()
-    config_path = tmp_path / "home" / "config.yaml"
-    env_file = tmp_path / "project" / ".env"
-    env_file.parent.mkdir()
-    env_file.write_text("CURSOR_API_KEY=sk-existing-other\n", encoding="utf-8")
-    _patch_wizard_io(
-        monkeypatch,
-        api_key=_PLACEHOLDER_API_KEY,
-        input_answers=[str(workspace), "", "", "", "", "y"],
-    )
-
-    result = CliRunner().invoke(
-        app,
-        [
-            "setup",
-            "--force",
-            "--config-path",
-            str(config_path),
-            "--env-file",
-            str(env_file),
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    backups = list(env_file.parent.glob(f"{env_file.name}.bak.*"))
-    assert len(backups) == 1
-    assert (
-        f"✓  Configuration written.\n"
-        f"│  env: {env_file}\n"
-        f"│  yaml: {config_path}\n"
-        f"│  backup: {backups[0]}"
-    ) in result.output
-    assert "│  Next: cursor-agent setup check" in result.output
-
-
-def test_wizard_declines_on_n_without_writes(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """Confirm N aborts wizard without writing env or YAML files."""
-    _patch_tty_not_ci(monkeypatch)
-    workspace = tmp_path / "ws"
-    workspace.mkdir()
-    config_path = tmp_path / "home" / "config.yaml"
-    env_file = tmp_path / "project" / ".env"
-    env_file.parent.mkdir()
-
-    _patch_wizard_io(
-        monkeypatch,
-        api_key=_PLACEHOLDER_API_KEY,
-        input_answers=[
-            str(workspace),
-            "",
-            "",
-            "",
-            "",
-            "n",
-        ],
-    )
-
-    result = CliRunner().invoke(
-        app,
-        [
-            "setup",
-            "--config-path",
-            str(config_path),
-            "--env-file",
-            str(env_file),
-        ],
-    )
-    assert result.exit_code != 0
-    assert not config_path.exists()
-    assert not env_file.exists()
-    combined = f"{result.stdout}\n{result.stderr}\n{result.output}"
-    assert _PLACEHOLDER_API_KEY not in combined
-
-
-def test_wizard_skips_optional_fields_on_empty_enter(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """Empty Enter on optional prompts skips them; required api-key + workspace still apply."""
-    _patch_tty_not_ci(monkeypatch)
-    workspace = tmp_path / "ws"
-    workspace.mkdir()
-    config_path = tmp_path / "home" / "config.yaml"
-    env_file = tmp_path / "project" / ".env"
-    env_file.parent.mkdir()
-
-    _patch_wizard_io(
-        monkeypatch,
-        api_key=_PLACEHOLDER_API_KEY,
-        input_answers=[
-            str(workspace),
-            "",  # memory
-            "",  # sessions
-            "",  # model
-            "",  # profile
-            "y",
-        ],
-    )
-
-    result = CliRunner().invoke(
-        app,
-        [
-            "setup",
-            "--config-path",
-            str(config_path),
-            "--env-file",
-            str(env_file),
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    yaml_text = config_path.read_text(encoding="utf-8")
-    assert "memory_root" not in yaml_text
-    assert "tool_profile" not in yaml_text
-    env_text = env_file.read_text(encoding="utf-8")
-    assert "CURSOR_AGENT_SESSIONS_DB" not in env_text
-    assert _PLACEHOLDER_API_KEY in env_text
-
-
-def test_wizard_yes_without_flags_still_requires_non_interactive_inputs(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """``--yes`` without value flags on TTY must not hang — require flags (FR-6)."""
-    _patch_tty_not_ci(monkeypatch)
-    result = CliRunner().invoke(app, ["setup", "--yes"])
-    assert result.exit_code != 0
-    combined = f"{result.stdout}\n{result.stderr}\n{result.output}"
-    assert "--api-key" in combined
-    assert "--workspace" in combined
-
-
-def test_wizard_with_optional_fields_writes_all(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """Filled optional wizard fields persist memory/sessions/model/profile."""
-    _patch_tty_not_ci(monkeypatch)
-    workspace = tmp_path / "ws"
-    workspace.mkdir()
-    memory_root = tmp_path / "memory"
-    sessions_db = tmp_path / "db" / "sessions.db"
-    config_path = tmp_path / "home" / "config.yaml"
-    env_file = tmp_path / "project" / ".env"
-    env_file.parent.mkdir()
-
-    _patch_wizard_io(
-        monkeypatch,
-        api_key=_PLACEHOLDER_API_KEY,
-        input_answers=[
-            str(workspace),
-            str(memory_root),
-            str(sessions_db),
-            "composer-2.5",
-            "messaging",
-            "y",
-        ],
-    )
-
-    result = CliRunner().invoke(
-        app,
-        [
-            "setup",
-            "--config-path",
-            str(config_path),
-            "--env-file",
-            str(env_file),
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    yaml_text = config_path.read_text(encoding="utf-8")
-    assert "messaging" in yaml_text
-    assert "composer-2.5" in yaml_text
-    assert str(memory_root) in yaml_text
-    env_text = env_file.read_text(encoding="utf-8")
-    assert str(sessions_db) in env_text
-    assert _PLACEHOLDER_API_KEY not in f"{result.stdout}\n{result.output}"
-
-
-def test_wizard_invalid_tool_profile_fails_before_confirm(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """Invalid wizard tool_profile fails at prompt time with no writes (before confirm)."""
-    _patch_tty_not_ci(monkeypatch)
-    workspace = tmp_path / "ws"
-    workspace.mkdir()
-    config_path = tmp_path / "home" / "config.yaml"
-    env_file = tmp_path / "project" / ".env"
-    env_file.parent.mkdir()
-
-    _patch_wizard_io(
-        monkeypatch,
-        api_key=_PLACEHOLDER_API_KEY,
-        input_answers=[
-            str(workspace),
-            "",
-            "",
-            "",
-            "foo",  # invalid tool_profile — must fail before confirm
-        ],
-    )
-
-    result = CliRunner().invoke(
-        app,
-        [
-            "setup",
-            "--config-path",
-            str(config_path),
-            "--env-file",
-            str(env_file),
-        ],
-    )
-    assert result.exit_code != 0
-    combined = f"{result.stdout}\n{result.stderr}\n{result.output}".lower()
-    assert "tool" in combined and ("coding" in combined or "messaging" in combined)
-    assert "foo" in combined
-    assert not config_path.exists()
-    assert not env_file.exists()
-
-
-# --- Wave G3 / Task 1.9: Proposal B choices ----------------------------------
-
-
-@pytest.mark.parametrize(
-    ("field", "choice", "expected"),
-    [
-        ("model", "1", "model: grok-4.5"),
-        ("model", "2", "model: composer-2.5"),
-        ("model", "some-other-model", "model: some-other-model"),
-        ("tool_profile", "1", "tool_profile: coding"),
-        ("tool_profile", "2", "tool_profile: messaging"),
-        ("tool_profile", "3", "tool_profile: full"),
-    ],
-)
-def test_wizard_resolves_numbered_model_and_tool_profile_choices(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-    field: str,
-    choice: str,
-    expected: str,
-) -> None:
-    """Proposal B indexes and soft non-catalog model ids persist unchanged."""
-    kwargs = {field: choice}
-    result, config_path, _, _ = _run_wizard_choices(
-        tmp_path,
-        monkeypatch,
-        **kwargs,
-    )
-    assert result.exit_code == 0, result.output
-    assert expected in config_path.read_text(encoding="utf-8")
-
-
-@pytest.mark.parametrize("field", ["model", "tool_profile"])
-def test_wizard_rejects_invalid_numeric_choice_nine(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-    field: str,
-) -> None:
-    """Out-of-range model/profile index fails before any writes."""
-    kwargs = {field: "9"}
-    result, config_path, env_file, _ = _run_wizard_choices(
-        tmp_path,
-        monkeypatch,
-        **kwargs,
-    )
-    combined = f"{result.stdout}\n{result.stderr}\n{result.output}"
-    assert result.exit_code != 0
-    assert "9" in combined and "expected" in combined.lower()
-    expected_indexes = (
-        ("'1'", "'2'", "'3'") if field == "tool_profile" else ("'1'", "'2'")
-    )
-    assert all(index in combined for index in expected_indexes)
-    assert not config_path.exists() and not env_file.exists()
-
-
-# --- Task 4.5 / 4.10: check and show ------------------------------------------
-
-
-def test_check_missing_api_key_exit_one(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """``setup check`` with missing API key prints error: line and exits 1."""
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text("model: composer-2.5\n", encoding="utf-8")
-    env_file = tmp_path / ".env"
-    env_file.write_text("", encoding="utf-8")
-    monkeypatch.delenv("CURSOR_API_KEY", raising=False)
-
-    result = CliRunner().invoke(
-        app,
-        [
-            "setup",
-            "check",
-            "--config-path",
-            str(config_path),
-            "--env-file",
-            str(env_file),
-        ],
-        env={"CURSOR_API_KEY": ""},
-    )
-    assert result.exit_code == 1
-    combined = f"{result.stdout}\n{result.output}"
-    assert "error:" in combined
-    assert "api" in combined.lower() or "CURSOR_API_KEY" in combined
-
-
-def test_check_bad_workspace_exit_one(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """``setup check`` with missing workspace directory exits 1 with error: line."""
-    missing_ws = tmp_path / "does-not-exist"
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "runtime:\n  local:\n    cwd: " + str(missing_ws) + "\n",
-        encoding="utf-8",
-    )
-    env_file = tmp_path / ".env"
-    env_file.write_text(f"CURSOR_API_KEY={_PLACEHOLDER_API_KEY}\n", encoding="utf-8")
-    monkeypatch.delenv("CURSOR_API_KEY", raising=False)
-
-    result = CliRunner().invoke(
-        app,
-        [
-            "setup",
-            "check",
-            "--config-path",
-            str(config_path),
-            "--env-file",
-            str(env_file),
-        ],
-    )
-    assert result.exit_code == 1
-    assert "error:" in f"{result.stdout}\n{result.output}"
-    assert "workspace" in f"{result.stdout}\n{result.output}".lower()
-
-
-def test_check_all_pass_exit_zero(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """``setup check`` happy path prints ok: lines and exits 0."""
-    workspace = tmp_path / "ws"
-    workspace.mkdir()
-    memory_root = tmp_path / "memory"
-    memory_root.mkdir()
-    sessions_parent = tmp_path / "sessions_parent"
-    sessions_parent.mkdir()
-    sessions_db = sessions_parent / "sessions.db"
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "\n".join(
-            [
-                "model: composer-2.5",
-                f"memory_root: {memory_root}",
-                "runtime:",
-                "  local:",
-                f"    cwd: {workspace}",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
-    env_file = tmp_path / ".env"
-    env_file.write_text(
-        f"CURSOR_API_KEY={_PLACEHOLDER_API_KEY}\n"
-        f"CURSOR_AGENT_SESSIONS_DB={sessions_db}\n",
-        encoding="utf-8",
-    )
-    monkeypatch.delenv("CURSOR_API_KEY", raising=False)
-    monkeypatch.delenv("CURSOR_AGENT_SESSIONS_DB", raising=False)
-
-    result = CliRunner().invoke(
-        app,
-        [
-            "setup",
-            "check",
-            "--config-path",
-            str(config_path),
-            "--env-file",
-            str(env_file),
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    combined = f"{result.stdout}\n{result.output}"
-    assert "ok:" in combined
-    assert "error:" not in combined
-
-
-def test_show_prints_redacted_effective_config(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """``setup show`` prints redacted effective config with source labels; never raw key."""
-    workspace = tmp_path / "ws"
-    workspace.mkdir()
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "\n".join(
-            [
-                "model: composer-2.5",
-                "runtime:",
-                "  local:",
-                f"    cwd: {workspace}",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
-    env_file = tmp_path / ".env"
-    env_file.write_text(f"CURSOR_API_KEY={_PLACEHOLDER_API_KEY}\n", encoding="utf-8")
-    monkeypatch.delenv("CURSOR_API_KEY", raising=False)
-
-    result = CliRunner().invoke(
-        app,
-        [
-            "setup",
-            "show",
-            "--config-path",
-            str(config_path),
-            "--env-file",
-            str(env_file),
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    combined = f"{result.stdout}\n{result.output}"
-    assert _PLACEHOLDER_API_KEY not in combined
-    assert REDACTION_TOKEN in combined or "***" in combined
-    assert "source:" in combined
-    assert "Effective" in combined or "effective" in combined.lower()
-
-
-def test_show_attributes_api_key_from_env_file_as_env_not_shell(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """API key only in ``.env`` must show ``source: env``, not ``shell`` (FR-4).
-
-    ``cli_entry`` loads CWD dotenv into ``os.environ`` before show runs; the
-    process-environ snapshot for attribution must be taken before that load.
-    """
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("CURSOR_API_KEY", raising=False)
-    # Fixture clears this; re-clear after delenv so the first load captures unset.
-    startup_mod._PRE_DOTENV_PROCESS_ENVIRON = None
-    workspace = tmp_path / "ws"
-    workspace.mkdir()
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "\n".join(
-            [
-                "model: composer-2.5",
-                "runtime:",
-                "  local:",
-                f"    cwd: {workspace}",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
-    env_file = tmp_path / ".env"
-    env_only_key = "sk-env-file-only-placeholder"
-    env_file.write_text(f"CURSOR_API_KEY={env_only_key}\n", encoding="utf-8")
-
-    result = CliRunner().invoke(
-        app,
-        [
-            "setup",
-            "show",
-            "--config-path",
-            str(config_path),
-            "--env-file",
-            str(env_file),
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    combined = f"{result.stdout}\n{result.output}"
-    assert env_only_key not in combined
-    assert "api_key:" in combined
-    assert "source: env" in combined
-    assert "api_key: *** (source: shell)" not in combined
-    assert "api_key: *** (source: env)" in combined
-
-
-def test_check_memory_root_missing_exits_one(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """Missing memory_root path yields error: line and exit 1."""
-    workspace = tmp_path / "ws"
-    workspace.mkdir()
-    missing_memory = tmp_path / "no-memory"
-    sessions_parent = tmp_path / "sessions_parent"
-    sessions_parent.mkdir()
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "\n".join(
-            [
-                f"memory_root: {missing_memory}",
-                "runtime:",
-                "  local:",
-                f"    cwd: {workspace}",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
-    env_file = tmp_path / ".env"
-    env_file.write_text(
-        f"CURSOR_API_KEY={_PLACEHOLDER_API_KEY}\n"
-        f"CURSOR_AGENT_SESSIONS_DB={sessions_parent / 'sessions.db'}\n",
-        encoding="utf-8",
-    )
-    monkeypatch.delenv("CURSOR_API_KEY", raising=False)
-    monkeypatch.delenv("CURSOR_AGENT_SESSIONS_DB", raising=False)
-
-    result = CliRunner().invoke(
-        app,
-        [
-            "setup",
-            "check",
-            "--config-path",
-            str(config_path),
-            "--env-file",
-            str(env_file),
-        ],
-    )
-    assert result.exit_code == 1
-    combined = f"{result.stdout}\n{result.output}".lower()
-    assert "error:" in combined
-    assert "memory" in combined
-
-
-def test_check_sessions_db_parent_not_creatable_exits_one(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """Sessions-db parent that cannot be created yields error: and exit 1."""
-    workspace = tmp_path / "ws"
-    workspace.mkdir()
-    # Point sessions-db under a file path so parent is not a directory.
-    blocker = tmp_path / "blocker-file"
-    blocker.write_text("not-a-dir", encoding="utf-8")
-    sessions_db = blocker / "nested" / "sessions.db"
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "\n".join(
-            [
-                "runtime:",
-                "  local:",
-                f"    cwd: {workspace}",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
-    env_file = tmp_path / ".env"
-    env_file.write_text(
-        f"CURSOR_API_KEY={_PLACEHOLDER_API_KEY}\n"
-        f"CURSOR_AGENT_SESSIONS_DB={sessions_db}\n",
-        encoding="utf-8",
-    )
-    monkeypatch.delenv("CURSOR_API_KEY", raising=False)
-    monkeypatch.delenv("CURSOR_AGENT_SESSIONS_DB", raising=False)
-
-    result = CliRunner().invoke(
-        app,
-        [
-            "setup",
-            "check",
-            "--config-path",
-            str(config_path),
-            "--env-file",
-            str(env_file),
-        ],
-    )
-    assert result.exit_code == 1
-    combined = f"{result.stdout}\n{result.output}".lower()
-    assert "error:" in combined
-    assert "session" in combined
-
-
-def test_check_memory_and_sessions_ok_lines(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """Happy path prints ok: for memory root and sessions-db parent checks."""
-    workspace = tmp_path / "ws"
-    workspace.mkdir()
-    memory_root = tmp_path / "memory"
-    memory_root.mkdir()
-    sessions_parent = tmp_path / "sessions_parent"
-    sessions_parent.mkdir()
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "\n".join(
-            [
-                f"memory_root: {memory_root}",
-                "runtime:",
-                "  local:",
-                f"    cwd: {workspace}",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
-    env_file = tmp_path / ".env"
-    env_file.write_text(
-        f"CURSOR_API_KEY={_PLACEHOLDER_API_KEY}\n"
-        f"CURSOR_AGENT_SESSIONS_DB={sessions_parent / 'sessions.db'}\n",
-        encoding="utf-8",
-    )
-    monkeypatch.delenv("CURSOR_API_KEY", raising=False)
-    monkeypatch.delenv("CURSOR_AGENT_SESSIONS_DB", raising=False)
-
-    result = CliRunner().invoke(
-        app,
-        [
-            "setup",
-            "check",
-            "--config-path",
-            str(config_path),
-            "--env-file",
-            str(env_file),
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    combined = f"{result.stdout}\n{result.output}".lower()
-    assert "ok:" in combined
-    assert "memory" in combined
-    assert "session" in combined
 
 
 # --- Task 4.7: no auto-setup / no first-run marker ----------------------------
@@ -1103,8 +253,6 @@ def test_run_default_does_not_invoke_setup(monkeypatch: MonkeyPatch) -> None:
         lambda *_a, **_k: None,
     )
 
-    import asyncio
-
     asyncio.run(
         run_default(
             CursorAgentConfig(),
@@ -1121,7 +269,7 @@ def test_apply_does_not_write_first_run_marker(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Setup apply must not create ``first_run_complete`` under an injected marker home."""
-    _patch_non_interactive(monkeypatch)
+    patch_non_interactive(monkeypatch)
     marker_home = tmp_path / "marker_home"
     marker_home.mkdir()
     monkeypatch.setattr(
@@ -1136,7 +284,7 @@ def test_apply_does_not_write_first_run_marker(
 
     result = CliRunner().invoke(
         app,
-        _apply_args(workspace=workspace, config_path=config_path, env_file=env_file),
+        apply_args(workspace=workspace, config_path=config_path, env_file=env_file),
     )
     assert result.exit_code == 0, result.output
     assert not (marker_home / MARKER_FILENAME).exists()
@@ -1160,7 +308,7 @@ def test_ci_mode_forces_non_interactive_even_when_tty(
     result = CliRunner().invoke(app, ["setup"])
     assert result.exit_code != 0
     combined = f"{result.stdout}\n{result.stderr}\n{result.output}"
-    assert _SETUP_EXAMPLE in combined
+    assert SETUP_EXAMPLE in combined
     assert "--api-key" in combined
 
 
@@ -1169,7 +317,7 @@ def test_apply_flag_matrix_memory_model_profile_sessions(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Headless apply covers ``--memory-root``, ``--model``, ``--tool-profile``, ``--sessions-db``."""
-    _patch_non_interactive(monkeypatch)
+    patch_non_interactive(monkeypatch)
     workspace = tmp_path / "ws"
     workspace.mkdir()
     memory_root = tmp_path / "memory"
@@ -1180,7 +328,7 @@ def test_apply_flag_matrix_memory_model_profile_sessions(
 
     result = CliRunner().invoke(
         app,
-        _apply_args(
+        apply_args(
             workspace=workspace,
             config_path=config_path,
             env_file=env_file,
@@ -1204,7 +352,7 @@ def test_apply_flag_matrix_memory_model_profile_sessions(
     env_text = env_file.read_text(encoding="utf-8")
     assert "CURSOR_AGENT_SESSIONS_DB" in env_text
     assert str(sessions_db) in env_text
-    assert _PLACEHOLDER_API_KEY not in yaml_text
+    assert PLACEHOLDER_API_KEY not in yaml_text
     assert (memory_root / "USER.md").is_file()
     assert (memory_root / "MEMORY.md").is_file()
 
@@ -1214,7 +362,7 @@ def test_apply_accepts_tool_profile_full(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """FR-15: headless setup accepts ``--tool-profile full`` (PRD-012)."""
-    _patch_non_interactive(monkeypatch)
+    patch_non_interactive(monkeypatch)
     workspace = tmp_path / "ws"
     workspace.mkdir()
     config_path = tmp_path / "home" / "config.yaml"
@@ -1223,7 +371,7 @@ def test_apply_accepts_tool_profile_full(
 
     result = CliRunner().invoke(
         app,
-        _apply_args(
+        apply_args(
             workspace=workspace,
             config_path=config_path,
             env_file=env_file,
@@ -1239,7 +387,7 @@ def test_invalid_tool_profile_exits_nonzero_without_write(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Invalid ``--tool-profile`` exits non-zero with actionable error and no write."""
-    _patch_non_interactive(monkeypatch)
+    patch_non_interactive(monkeypatch)
     workspace = tmp_path / "ws"
     workspace.mkdir()
     config_path = tmp_path / "home" / "config.yaml"
@@ -1248,7 +396,7 @@ def test_invalid_tool_profile_exits_nonzero_without_write(
 
     result = CliRunner().invoke(
         app,
-        _apply_args(
+        apply_args(
             workspace=workspace,
             config_path=config_path,
             env_file=env_file,
@@ -1269,7 +417,7 @@ def test_force_overwrite_surfaces_backup_path_in_success_output(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """``--force`` creating ``.env.bak.*`` prints the backup path on success."""
-    _patch_non_interactive(monkeypatch)
+    patch_non_interactive(monkeypatch)
     workspace = tmp_path / "ws"
     workspace.mkdir()
     config_path = tmp_path / "home" / "config.yaml"
@@ -1279,7 +427,7 @@ def test_force_overwrite_surfaces_backup_path_in_success_output(
 
     result = CliRunner().invoke(
         app,
-        _apply_args(
+        apply_args(
             workspace=workspace,
             config_path=config_path,
             env_file=env_file,
@@ -1293,4 +441,4 @@ def test_force_overwrite_surfaces_backup_path_in_success_output(
     backups = list(env_file.parent.glob(f"{env_file.name}.bak.*"))
     assert len(backups) == 1
     assert str(backups[0]) in combined
-    assert _PLACEHOLDER_API_KEY in env_file.read_text(encoding="utf-8")
+    assert PLACEHOLDER_API_KEY in env_file.read_text(encoding="utf-8")
