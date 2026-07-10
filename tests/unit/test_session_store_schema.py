@@ -11,6 +11,7 @@ import pytest
 
 from cursor_agent.sessions.models import build_cli_session_key
 from cursor_agent.sessions.store import CURRENT_SCHEMA_VERSION, SessionStore
+from tests.unit.session_store_test_fakes import iso_utc
 
 _SESSIONS_COLUMNS = frozenset(
     {
@@ -26,11 +27,6 @@ _SESSIONS_COLUMNS = frozenset(
         "metadata",
     }
 )
-
-
-def _iso(dt: datetime) -> str:
-    """Format datetime as UTC ISO-8601."""
-    return dt.astimezone(UTC).isoformat()
 
 
 async def _fetch_table_info(db_path: Path, table: str) -> list[tuple[str, str]]:
@@ -95,7 +91,7 @@ async def _seed_legacy_v0_database(
     """Create a pre-version V0 database with one session row (user_version stays 0)."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
     session_id = str(uuid.uuid4())
-    timestamp = _iso(datetime(2026, 6, 1, 8, 0, 0, tzinfo=UTC))
+    timestamp = iso_utc(datetime(2026, 6, 1, 8, 0, 0, tzinfo=UTC))
     async with aiosqlite.connect(db_path) as db:
         await db.execute(_LEGACY_V0_SESSIONS_DDL)
         await db.execute(_LEGACY_V0_IDX_SESSIONS_KEY_DDL)
