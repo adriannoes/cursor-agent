@@ -12,6 +12,7 @@ in copy strings. Non-interactive ``setup apply`` stays terse (no chrome).
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 GLYPH_STEP: str = "◆"
 GLYPH_TRUNK: str = "│"
@@ -37,6 +38,25 @@ def _format_trunk_line(body_line: str) -> str:
     return f"{GLYPH_TRUNK}{_GLYPH_GAP}{body_line}"
 
 
+@dataclass(frozen=True, slots=True)
+class WizardStepParts:
+    """Structured chrome for one wizard step: echo block + optional └ leaf.
+
+    ``echo_block`` is ◆ title, │ body, and the bare │ breathing trunk when a
+    leaf follows. ``prompt_leaf`` is the └ line alone (empty when omitted).
+    Callers that need input/getpass use ``prompt_leaf`` directly instead of
+    splitting a joined ``format_step`` string.
+
+    Example:
+        >>> parts = format_step_parts("Title", ["Body"], "Prompt?")
+        >>> GLYPH_PROMPT not in parts.echo_block and parts.prompt_leaf.startswith("└")
+        True
+    """
+
+    echo_block: str
+    prompt_leaf: str
+
+
 def format_prompt_leaf(prompt: str) -> str:
     """Render a └ prompt leaf with the shared glyph spacing.
 
@@ -47,26 +67,49 @@ def format_prompt_leaf(prompt: str) -> str:
     return f"{GLYPH_PROMPT}{_GLYPH_GAP}{prompt.strip()}"
 
 
+def format_step_parts(
+    title: str,
+    body_lines: Sequence[str],
+    prompt: str,
+) -> WizardStepParts:
+    """Split a wizard step into echoable chrome and an explicit prompt leaf.
+
+    Empty or whitespace-only ``prompt`` yields an empty ``prompt_leaf`` (intro /
+    guidance). A visible bare trunk is appended to ``echo_block`` when both
+    ``body_lines`` and a non-empty prompt are present. Empty body rows become
+    bare trunks without trailing spaces.
+
+    Example:
+        >>> format_step_parts("API key", [], "Paste key:").prompt_leaf
+        '└  Paste key:'
+    """
+    echo_lines: list[str] = [f"{GLYPH_STEP}{_GLYPH_GAP}{title}"]
+    for body_line in body_lines:
+        echo_lines.append(_format_trunk_line(body_line))
+    prompt_text = prompt.strip()
+    if prompt_text and body_lines:
+        echo_lines.append(GLYPH_TRUNK)
+    prompt_leaf = format_prompt_leaf(prompt_text) if prompt_text else ""
+    return WizardStepParts(
+        echo_block="\n".join(echo_lines),
+        prompt_leaf=prompt_leaf,
+    )
+
+
 def format_step(title: str, body_lines: Sequence[str], prompt: str) -> str:
     """Render a wizard step: ◆ title, │ body/breathing room, then └ prompt.
 
-    Empty or whitespace-only ``prompt`` omits the leaf line (intro / guidance).
-    A visible bare trunk before the prompt is inserted when ``body_lines`` is
-    non-empty. Empty body rows also become bare trunks without trailing spaces.
+    Composes :func:`format_step_parts` into a single multiline string for
+    callers that only need the joined layout (e.g. intro echo).
 
     Example:
         >>> "Choose" in format_step("Choose", ["Hint."], "Enter:")
         True
     """
-    lines: list[str] = [f"{GLYPH_STEP}{_GLYPH_GAP}{title}"]
-    for body_line in body_lines:
-        lines.append(_format_trunk_line(body_line))
-    prompt_text = prompt.strip()
-    if prompt_text:
-        if body_lines:
-            lines.append(GLYPH_TRUNK)
-        lines.append(format_prompt_leaf(prompt_text))
-    return "\n".join(lines)
+    parts = format_step_parts(title, body_lines, prompt)
+    if parts.prompt_leaf:
+        return f"{parts.echo_block}\n{parts.prompt_leaf}"
+    return parts.echo_block
 
 
 def radio_option_label_width(labels: Sequence[str]) -> int:
