@@ -137,32 +137,6 @@ def passes_mcp_servers_on_resume(tool_profile: str) -> bool:
     return tool_profile in {"messaging", "full"}
 
 
-def resolve_mcp_servers(
-    tool_profile: str,
-    *,
-    allowlist: Sequence[str] | None = None,
-    environ: Mapping[str, str] | None = None,
-    github_transport: GithubTransport | None = None,
-) -> dict[str, Any]:
-    """Return MCP server config for a tool profile (legacy empty-map API).
-
-    Prefer :func:`mcp_servers_override_for_profile` when ``None`` must mean
-    "do not override SDK/project settings". For ``full``, returns the same
-    curated dict as the override helper.
-
-    Example:
-        >>> resolve_mcp_servers("messaging")
-        {}
-    """
-    override = mcp_servers_override_for_profile(
-        tool_profile,
-        allowlist=allowlist,
-        environ=environ,
-        github_transport=github_transport,
-    )
-    return override if override is not None else {}
-
-
 def sandbox_enabled(tool_profile: str) -> bool:
     """Return True when SDK sandbox must be enabled for the profile.
 
