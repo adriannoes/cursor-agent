@@ -23,15 +23,36 @@ GLYPH_SUCCESS: str = "✓"
 
 # Two spaces after glyphs match the approved onboard mock (readable TTY scan).
 _GLYPH_GAP: str = "  "
+# Trailing spaces after the longest radio label before option_detail.
+_RADIO_LABEL_DETAIL_GAP: int = 2
 _DEFAULT_SUMMARY_TITLE: str = "Summary"
+# Four spaces after ○ so the hatch label aligns with numbered ``● 1  `` rows.
+_ESCAPE_HATCH_INDEX_COLUMN: str = "    "
+
+
+def _format_trunk_line(body_line: str) -> str:
+    """Render an empty body row as a bare trunk without trailing spaces."""
+    if not body_line.strip():
+        return GLYPH_TRUNK
+    return f"{GLYPH_TRUNK}{_GLYPH_GAP}{body_line}"
+
+
+def format_prompt_leaf(prompt: str) -> str:
+    """Render a └ prompt leaf with the shared glyph spacing.
+
+    Example:
+        >>> format_prompt_leaf("Continue?")
+        '└  Continue?'
+    """
+    return f"{GLYPH_PROMPT}{_GLYPH_GAP}{prompt.strip()}"
 
 
 def format_step(title: str, body_lines: Sequence[str], prompt: str) -> str:
-    """Render a wizard step: ◆ title, │ body, optional blank line, └ prompt.
+    """Render a wizard step: ◆ title, │ body/breathing room, then └ prompt.
 
     Empty or whitespace-only ``prompt`` omits the leaf line (intro / guidance).
-    A blank line before the prompt is inserted only when ``body_lines`` is
-    non-empty.
+    A visible bare trunk before the prompt is inserted when ``body_lines`` is
+    non-empty. Empty body rows also become bare trunks without trailing spaces.
 
     Example:
         >>> "Choose" in format_step("Choose", ["Hint."], "Enter:")
@@ -39,30 +60,59 @@ def format_step(title: str, body_lines: Sequence[str], prompt: str) -> str:
     """
     lines: list[str] = [f"{GLYPH_STEP}{_GLYPH_GAP}{title}"]
     for body_line in body_lines:
-        lines.append(f"{GLYPH_TRUNK}{_GLYPH_GAP}{body_line}")
+        lines.append(_format_trunk_line(body_line))
     prompt_text = prompt.strip()
     if prompt_text:
         if body_lines:
-            lines.append("")
-        lines.append(f"{GLYPH_PROMPT}{_GLYPH_GAP}{prompt_text}")
+            lines.append(GLYPH_TRUNK)
+        lines.append(format_prompt_leaf(prompt_text))
     return "\n".join(lines)
+
+
+def radio_option_label_width(labels: Sequence[str]) -> int:
+    """Derive radio label column width from option labels (longest + detail gap).
+
+    Example:
+        >>> radio_option_label_width(("coding", "messaging")) == len("messaging") + 2
+        True
+    """
+    if not labels:
+        raise ValueError(
+            f"invalid radio labels: received {labels!r}, "
+            "expected a non-empty sequence of label strings",
+        )
+    return max(len(label) for label in labels) + _RADIO_LABEL_DETAIL_GAP
 
 
 def format_radio_option(
     index: int,
     label: str,
-    option_id: str,
+    option_detail: str,
     *,
     selected: bool,
+    label_width: int | None = None,
 ) -> str:
-    """Render one radio choice line with ●/○, index, label, and option id.
+    """Render one radio choice with single-space glyph/index and optional alignment.
 
     Example:
         >>> "grok-4.5" in format_radio_option(1, "Grok", "grok-4.5", selected=True)
         True
     """
     glyph = GLYPH_RADIO_ON if selected else GLYPH_RADIO_OFF
-    return f"{glyph}{_GLYPH_GAP}{index}{_GLYPH_GAP}{label}{_GLYPH_GAP}{option_id}"
+    label_column = (
+        f"{label:<{label_width}}" if label_width is not None else f"{label}{_GLYPH_GAP}"
+    )
+    return f"{glyph} {index}{_GLYPH_GAP}{label_column}{option_detail}"
+
+
+def format_radio_escape_hatch(label: str) -> str:
+    """Render the unnumbered Other-style escape hatch with a hollow radio glyph.
+
+    Example:
+        >>> "Other" in format_radio_escape_hatch("Other — type a Cursor SDK model id")
+        True
+    """
+    return f"{GLYPH_RADIO_OFF}{_ESCAPE_HATCH_INDEX_COLUMN}{label}"
 
 
 def format_summary(
@@ -88,8 +138,13 @@ def format_summary(
     return "\n".join(lines)
 
 
-def format_success(message: str, next_hint: str = "") -> str:
-    """Render Step 8 success: ✓ message and optional │ next-hint trunk.
+def format_success(
+    message: str,
+    next_hint: str = "",
+    *,
+    detail_lines: Sequence[str] = (),
+) -> str:
+    """Render Step 8 success with optional detail and next-hint trunks.
 
     Interactive wizard only — do not use on non-interactive ``setup apply``.
 
@@ -98,7 +153,10 @@ def format_success(message: str, next_hint: str = "") -> str:
         True
     """
     lines: list[str] = [f"{GLYPH_SUCCESS}{_GLYPH_GAP}{message}"]
+    for detail_line in detail_lines:
+        if detail_line.strip():
+            lines.append(_format_trunk_line(detail_line))
     hint_text = next_hint.strip()
     if hint_text:
-        lines.append(f"{GLYPH_TRUNK}{_GLYPH_GAP}{hint_text}")
+        lines.append(_format_trunk_line(hint_text))
     return "\n".join(lines)
