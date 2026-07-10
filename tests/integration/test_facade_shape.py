@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from cursor_agent.first_party_models import DEFAULT_AGENT_MODEL
 from cursor_agent.sdk_facade import AsyncSdkFacade, RunStatus
 
 pytestmark = [
@@ -21,7 +22,8 @@ pytestmark = [
     ),
 ]
 
-MODEL = "composer-2.5"
+# Default-path smoke uses product default (G5 / D5), not a Composer pin.
+MODEL = DEFAULT_AGENT_MODEL
 MINIMAL_PROMPT = "Reply with the single word OK."
 
 # SDK 0.1.7 shapes observed through the facade adapter:

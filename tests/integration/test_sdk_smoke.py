@@ -12,6 +12,8 @@ import pytest
 from cursor_sdk import AsyncClient, AsyncRun, LocalAgentOptions
 from cursor_sdk.types import SDKToolUseMessage
 
+from cursor_agent.first_party_models import DEFAULT_AGENT_MODEL
+
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
@@ -20,9 +22,11 @@ pytestmark = [
     ),
 ]
 
-MODEL = "composer-2.5"
+# Default-path smoke uses product default (G5 / D5), not a Composer pin.
+MODEL = DEFAULT_AGENT_MODEL
 MINIMAL_PROMPT = "Reply with the single word OK."
-README_FIRST_HEADING_PHRASE = "cursor agent"
+# README first `#` heading is H2 "What it provides" (no product H1); G5 Grok smoke is literal.
+README_FIRST_HEADING_PHRASE = "what it provides"
 TOOL_TURN_PROMPT = (
     "Read README.md at the repository root and reply with only the exact "
     "markdown text of the first heading line (the line that starts with #)."
@@ -88,7 +92,7 @@ async def test_sdk_native_tool_turn() -> None:
     normalized = text.lower().replace("-", " ")
     assert README_FIRST_HEADING_PHRASE in normalized, (
         "expected response to reference README first heading "
-        f"({README_FIRST_HEADING_PHRASE!r} or cursor-agent), got {text!r}"
+        f"({README_FIRST_HEADING_PHRASE!r}), got {text!r}"
     )
 
     completed_tool_calls = [

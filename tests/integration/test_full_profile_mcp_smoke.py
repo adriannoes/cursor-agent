@@ -23,6 +23,7 @@ pytestmark = [
     ),
 ]
 
+# G5 / D5: explicit Composer override fixture — default-path smokes use DEFAULT_AGENT_MODEL.
 MODEL = "composer-2.5"
 MINIMAL_PROMPT = "Reply with the single word OK."
 MCP_PROBE_PROMPT = (
