@@ -108,9 +108,10 @@ def test_first_commands_hint_is_english_without_forbidden_cli_topics() -> None:
     assert _max_rendered_line_width(FIRST_COMMANDS_HINT) <= PRD_MAX_LINE_WIDTH
 
 
-def test_first_run_getting_started_includes_composer_and_setup_pointer() -> None:
-    """First-run block includes Composer branding and getting-started bullets."""
-    assert "powered by Composer" in FIRST_RUN_GETTING_STARTED
+def test_first_run_getting_started_includes_cursor_branding_and_setup_pointer() -> None:
+    """First-run block includes Cursor branding and getting-started bullets."""
+    assert "powered by Cursor" in FIRST_RUN_GETTING_STARTED
+    assert "powered by Composer" not in FIRST_RUN_GETTING_STARTED
     assert "Installation complete" in FIRST_RUN_GETTING_STARTED
     assert FIRST_COMMANDS_HINT.strip() in FIRST_RUN_GETTING_STARTED
     assert _max_rendered_line_width(FIRST_RUN_GETTING_STARTED) <= PRD_MAX_LINE_WIDTH

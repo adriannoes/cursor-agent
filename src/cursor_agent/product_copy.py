@@ -37,7 +37,7 @@ Get started:
 FIRST_RUN_GETTING_STARTED: Final[str] = (
     f"{_WELCOME_BORDER}\n"
     "                     >_  CURSOR AGENT\n"
-    "                   powered by Composer\n"
+    "                   powered by Cursor\n"
     "\n"
     "   You bring the ideas. We handle the repetitive parts.\n"
     "\n"
