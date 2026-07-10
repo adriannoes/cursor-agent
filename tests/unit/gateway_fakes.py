@@ -56,18 +56,25 @@ class NoopCronScheduler:
         return None
 
 
+# CI Linux runners can schedule gateway create_task dispatch slower than 200ms
+# (see commit 687067d busy-outbound harden). Default window = 1.0s.
+_DEFAULT_CONDITION_WAIT_ATTEMPTS = 100
+
+
 async def _wait_for_condition(
     condition: Callable[[], bool],
     *,
     description: str,
-    attempts: int = 20,
+    attempts: int = _DEFAULT_CONDITION_WAIT_ATTEMPTS,
 ) -> None:
     """Wait for a background dispatch assertion to become true."""
     for _attempt in range(attempts):
         if condition():
             return
         await asyncio.sleep(0.01)
-    raise AssertionError(f"condition did not become true: {description}")
+    raise AssertionError(
+        f"condition did not become true after {attempts} attempts: {description}"
+    )
 
 
 def _expected_injected_message(

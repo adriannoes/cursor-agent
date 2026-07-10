@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from cursor_agent.first_party_models import COMPOSER_AGENT_MODEL
 from cursor_agent.sdk_facade import AsyncSdkFacade, RunStatus
 
 pytestmark = [
@@ -23,7 +24,8 @@ pytestmark = [
     ),
 ]
 
-MODEL = "composer-2.5"
+# G5 / D5: explicit Composer override fixture — default-path smokes use DEFAULT_AGENT_MODEL.
+MODEL = COMPOSER_AGENT_MODEL
 MINIMAL_PROMPT = "Reply with the single word OK."
 MCP_PROBE_PROMPT = (
     "List the names of any MCP / external tools you currently have available. "

@@ -139,7 +139,7 @@ For bots and gateways, use `tool_profile: messaging` as specified in [SECURITY.m
 
 **v1.0** (tagged) ships the first-run welcome banner, one-time getting-started hints, and a [setup docs index](docs/setup.md). Interactive local configuration is available via `cursor-agent setup` — see [Interactive setup](docs/setup.md#interactive-setup).
 
-**v1.1.0 train** (not tagged yet — package version remains `1.0.0` until the tag): the **`full`** tool profile (curated MCP: GitHub, Brave Search, Playwright) is implemented — enable it via [Setup](docs/setup.md); see [SECURITY.md](SECURITY.md) and [Architecture](docs/architecture.md) for the three-profile matrix. The unset default model is **Grok 4.5** (`grok-4.5`); pin **Composer 2.5** via setup (`1`/`2`), YAML, `CURSOR_AGENT__MODEL`, or `/model`. Interactive setup uses guided step chrome (model + tool profile including `full` when local). Remaining on this train: Wave G5 polish, then the `v1.1.0` tag.
+**v1.1.0 train** (not tagged yet — package version remains `1.0.0` until the tag): the **`full`** tool profile (curated MCP: GitHub, Brave Search, Playwright) is implemented — enable it via [Setup](docs/setup.md); see [SECURITY.md](SECURITY.md) and [Architecture](docs/architecture.md) for the three-profile matrix. The unset default model is **Grok 4.5** (`grok-4.5`); pin **Composer 2.5** via setup (`1`/`2`), YAML, `CURSOR_AGENT__MODEL`, or `/model`. Interactive setup uses guided step chrome (model + tool profile including `full` when local). Remaining on this train: Wave G6 release bump, then the `v1.1.0` tag.
 
 Further roadmap:
 

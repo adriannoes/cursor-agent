@@ -12,6 +12,7 @@ import pytest
 
 from cursor_agent.errors import ConfigError
 from cursor_agent.first_party_models import (
+    COMPOSER_AGENT_MODEL,
     DEFAULT_AGENT_MODEL,
     FIRST_PARTY_AGENT_MODELS,
     WIZARD_MODEL_OTHER_ESCAPE_LABEL,
@@ -30,6 +31,23 @@ PRD_MAX_LINE_WIDTH = 60
 def test_default_agent_model_constant_is_grok_4_5() -> None:
     """DEFAULT_AGENT_MODEL is the confirmed Grok id."""
     assert DEFAULT_AGENT_MODEL == "grok-4.5"
+
+
+def test_composer_agent_model_constant_is_composer_2_5() -> None:
+    """COMPOSER_AGENT_MODEL is the confirmed Composer override id."""
+    assert COMPOSER_AGENT_MODEL == "composer-2.5"
+
+
+def test_composer_agent_model_matches_sole_non_default_catalog_row() -> None:
+    """COMPOSER_AGENT_MODEL equals the sole soft-catalog non-default row id."""
+    non_defaults = [row for row in FIRST_PARTY_AGENT_MODELS if not row.is_default]
+    assert len(non_defaults) == 1
+    assert COMPOSER_AGENT_MODEL == non_defaults[0].id
+
+
+def test_composer_agent_model_distinct_from_default() -> None:
+    """Composer override pin must not equal the unset default model."""
+    assert COMPOSER_AGENT_MODEL != DEFAULT_AGENT_MODEL
 
 
 def test_default_agent_model_helper_returns_constant() -> None:
