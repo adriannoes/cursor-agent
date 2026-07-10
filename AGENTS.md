@@ -6,7 +6,7 @@
 
 ## What is cursor-agent
 
-**cursor-agent** is a clean-room orchestration layer for the [Cursor Python SDK](https://cursor.com/docs/sdk/python) and **Composer 2.5**. It delegates the agentic loop, tools, and inference to the SDK, and implements sessions, configuration, concurrency, CLI UX, and security policy (hooks, tool profiles, allowlists).
+**cursor-agent** is a clean-room orchestration layer for the [Cursor Python SDK](https://cursor.com/docs/sdk/python) and first-party models (**Grok 4.5** default, **Composer 2.5** available). It delegates the agentic loop, tools, and inference to the SDK, and implements sessions, configuration, concurrency, CLI UX, and security policy (hooks, tool profiles, allowlists).
 
 You may study reference projects (for example [Hermes Agent](https://github.com/NousResearch/hermes-agent) or [OpenClaw](https://github.com/openclaw/openclaw)) for **behavior patterns only** — **zero copied code**; reimplement in `cursor_agent`.
 

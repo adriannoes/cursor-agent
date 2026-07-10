@@ -1,4 +1,4 @@
-"""Static checks that `.env.example` documents only supported env vars (PRD-012)."""
+"""Static checks that `.env.example` and setup docs stay aligned (PRD-012 / Wave G4)."""
 
 from __future__ import annotations
 
@@ -7,8 +7,14 @@ from pathlib import Path
 
 import pytest
 
+from cursor_agent.first_party_models import (
+    DEFAULT_AGENT_MODEL,
+    recommended_agent_model_ids,
+)
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ENV_EXAMPLE_PATH = _REPO_ROOT / ".env.example"
+_SETUP_DOCS_PATH = _REPO_ROOT / "docs" / "setup.md"
 
 # CursorAgentConfig fields via pydantic-settings (ADR-007) plus startup flat override.
 _SUPPORTED_CURSOR_AGENT_ENV_VARS: frozenset[str] = frozenset(
@@ -90,3 +96,38 @@ def test_env_example_includes_canonical_workspace_override() -> None:
     names = _parse_env_example_variable_names(_ENV_EXAMPLE_PATH)
     assert "CURSOR_AGENT__RUNTIME__LOCAL__CWD" in names
     assert "CURSOR_AGENT_WORKSPACE" not in names
+
+
+def test_setup_docs_and_env_example_document_soft_catalog_model_ids() -> None:
+    """Public docs must mention every soft-catalog model id (Wave G4 drift guard)."""
+    setup_text = _SETUP_DOCS_PATH.read_text(encoding="utf-8")
+    env_text = _ENV_EXAMPLE_PATH.read_text(encoding="utf-8")
+    missing_setup: list[str] = []
+    missing_env: list[str] = []
+    for model_id in recommended_agent_model_ids():
+        if model_id not in setup_text:
+            missing_setup.append(model_id)
+        if model_id not in env_text:
+            missing_env.append(model_id)
+    assert missing_setup == [], (
+        f"docs/setup.md missing soft-catalog model id(s): {missing_setup!r}; "
+        f"expected every id from recommended_agent_model_ids()="
+        f"{list(recommended_agent_model_ids())!r}"
+    )
+    assert missing_env == [], (
+        f".env.example missing soft-catalog model id(s): {missing_env!r}; "
+        f"expected every id from recommended_agent_model_ids()="
+        f"{list(recommended_agent_model_ids())!r}"
+    )
+
+
+def test_setup_docs_document_default_model_and_choosing_section() -> None:
+    """setup.md must name the unset default and include Choosing a model guidance."""
+    setup_text = _SETUP_DOCS_PATH.read_text(encoding="utf-8")
+    assert DEFAULT_AGENT_MODEL in setup_text, (
+        f"docs/setup.md must mention DEFAULT_AGENT_MODEL={DEFAULT_AGENT_MODEL!r}"
+    )
+    assert "## Choosing a model" in setup_text, (
+        "docs/setup.md must include a '## Choosing a model' section "
+        f"(DEFAULT_AGENT_MODEL={DEFAULT_AGENT_MODEL!r})"
+    )
