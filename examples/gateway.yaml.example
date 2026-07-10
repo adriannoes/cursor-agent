@@ -6,6 +6,9 @@
 workspace: /path/to/your/project
 tool_profile: messaging
 
+# Optional — model id (omit → default grok-4.5). Pin Composer for cost if preferred:
+# model: composer-2.5
+
 # Optional — directory containing USER.md and MEMORY.md (default: ~/.cursor-agent)
 # memory_root: /path/to/memory
 

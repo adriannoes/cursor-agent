@@ -1,6 +1,6 @@
 # Architecture
 
-High-level design of **Cursor Agent** — an orchestration layer on the [Cursor SDK (Python)](https://cursor.com/docs/sdk/python) and **Composer 2.5**. For install and operations, see [setup.md](setup.md). For recorded design choices, see [Architecture decisions](decisions/README.md).
+High-level design of **Cursor Agent** — an orchestration layer on the [Cursor SDK (Python)](https://cursor.com/docs/sdk/python) and first-party models (**Grok 4.5** default, **Composer 2.5** available). For install and operations, see [setup.md](setup.md). For recorded design choices, see [Architecture decisions](decisions/README.md).
 
 ---
 
@@ -32,7 +32,7 @@ Reference projects may inform **behavior patterns** — reimplement in `cursor_a
                              ▼
                     AsyncSdkFacade  ← cursor_sdk via sdk_facade + sdk_error_mapping
                              ▼
-                    Cursor SDK (Composer 2.5 + tools)
+                    Cursor SDK (Grok 4.5 / Composer 2.5 + tools)
                              ▼
                   Local cwd  |  Cloud VM
 ```

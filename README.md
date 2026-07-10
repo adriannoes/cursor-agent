@@ -8,7 +8,7 @@
 
 > **Humans:** quick start below. **AI Agents:** start at **[AGENTS.md](AGENTS.md)**.
 
-Clean-room agent inspired by [Hermes Agent](https://github.com/NousResearch/hermes-agent) behavior and [OpenClaw](https://github.com/openclaw/openclaw) gateway patterns, powered by the [Cursor Python SDK](https://cursor.com/docs/sdk/python). First-party models include **Composer 2.5** and **Grok 4.5** (set via config / `CURSOR_AGENT__MODEL` / `/model`).
+Clean-room agent inspired by [Hermes Agent](https://github.com/NousResearch/hermes-agent) behavior and [OpenClaw](https://github.com/openclaw/openclaw) gateway patterns, powered by the [Cursor Python SDK](https://cursor.com/docs/sdk/python). First-party models: **Grok 4.5** (default) and **Composer 2.5** (pin via config / `CURSOR_AGENT__MODEL` / `/model`).
 
 Orchestration layer only — the SDK owns the agent loop, tools, and inference. **Cursor Agent** adds sessions, configuration, CLI UX, concurrency and security policy (tool profiles, hooks, allowlists).
 
@@ -65,7 +65,7 @@ On your first interactive launch (`uv run cursor-agent`), the CLI prints a welco
 ```text
 ==========================================================
                      >_  CURSOR AGENT
-                   powered by Composer
+                   powered by Cursor
 
    You bring the ideas. We handle the repetitive parts.
 
@@ -139,7 +139,7 @@ For bots and gateways, use `tool_profile: messaging` as specified in [SECURITY.m
 
 **v1.0** (tagged) ships the first-run welcome banner, one-time getting-started hints, and a [setup docs index](docs/setup.md). Interactive local configuration is available via `cursor-agent setup` — see [Interactive setup](docs/setup.md#interactive-setup).
 
-**v1.1.0 train** (not tagged yet — package version remains `1.0.0` until the tag): the **`full`** tool profile (curated MCP: GitHub, Brave Search, Playwright) is implemented on this train — enable it via [Setup](docs/setup.md); see [SECURITY.md](SECURITY.md) and [Architecture](docs/architecture.md) for the three-profile matrix. **Grok 4.5** is already selectable as a model id; remaining on this train is flipping the *unset* default from Composer 2.5 → Grok 4.5, then the `v1.1.0` tag.
+**v1.1.0 train** (not tagged yet — package version remains `1.0.0` until the tag): the **`full`** tool profile (curated MCP: GitHub, Brave Search, Playwright) is implemented — enable it via [Setup](docs/setup.md); see [SECURITY.md](SECURITY.md) and [Architecture](docs/architecture.md) for the three-profile matrix. The unset default model is **Grok 4.5** (`grok-4.5`); pin **Composer 2.5** via setup (`1`/`2`), YAML, `CURSOR_AGENT__MODEL`, or `/model`. Interactive setup uses guided step chrome (model + tool profile including `full` when local). Remaining on this train: Wave G5 polish, then the `v1.1.0` tag.
 
 Further roadmap:
 

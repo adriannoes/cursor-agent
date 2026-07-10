@@ -25,6 +25,24 @@ At startup the CLI loads a gitignored `.env` file from the **current working dir
 
 Legacy flat names `CURSOR_AGENT_WORKSPACE` and `CURSOR_AGENT_CONFIG` are **not supported** — use `CURSOR_AGENT__RUNTIME__LOCAL__CWD` and `~/.cursor-agent/config.yaml` instead.
 
+### Choosing a model
+
+When `model` is unset, the default is **Grok 4.5** (`grok-4.5`). Recommended first-party options:
+
+| Id | Role |
+|----|------|
+| `grok-4.5` | Default when unset |
+| `composer-2.5` | Alternate — pin for cost or preference |
+
+Choose a model via:
+
+- Interactive `cursor-agent setup` — model step accepts `1` (Grok), `2` (Composer), or a Cursor SDK model id
+- YAML: `model: composer-2.5` in `~/.cursor-agent/config.yaml`
+- Env: `CURSOR_AGENT__MODEL=composer-2.5`
+- REPL: `/model composer-2.5` (bare `/model` lists first-party options)
+
+Other Cursor SDK model ids are accepted (advanced). Existing YAML or env that already pins `composer-2.5` is preserved ([ADR-007](decisions/ADR-007-config-loader.md)).
+
 ### Tool profile `full` (curated MCP allowlist)
 
 `full` injects a curated MCP allowlist for trusted **local** operators (`github` defaults to remote HTTP; Brave/Playwright stay local stdio). It is **local-only** — the Telegram gateway refuses to start with `full` (use `messaging` there). There is no `cursor-agent mcp *` CLI; enable the profile and set secrets via env. Design details: [ADR-029](decisions/ADR-029-mcp-registry-full-profile.md) and [Architecture — Tool profiles](architecture.md#tool-profiles).
@@ -121,13 +139,15 @@ Setup does **not** export variables into the current shell. After apply, run `so
 
 ### Humans (interactive)
 
-On a TTY, run without value-bearing flags:
+On a TTY, run without value-bearing flags (opt-in — setup is never forced on first REPL launch):
 
 ```bash
 cursor-agent setup
 ```
 
-This command walks through API key (hidden input), workspace, and optional paths, then writes configuration after confirmation.
+Interactive setup uses a guided step UI: API key (hidden input), workspace, optional memory/sessions paths, model choice (`1` / `2` / SDK id), and tool profile (`1` / `2` / `3` / name — including `full` for trusted local use). After a summary confirmation it writes configuration.
+
+Non-interactive `setup apply` (value-bearing flags + `--yes`) stays terse and unchanged — no step chrome.
 
 Verify and inspect:
 

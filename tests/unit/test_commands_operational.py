@@ -8,6 +8,7 @@ from cursor_agent.cli.command_router import BuiltinMatch
 from cursor_agent.cli.slash_commands import build_repl_command_router
 from cursor_agent.cli.startup import session_key_for
 from cursor_agent.config.loader import CursorAgentConfig
+from cursor_agent.first_party_models import format_first_party_model_help
 from cursor_agent.pool import SessionAgentPool
 from cursor_agent.sdk_facade import FakeSdkFacade, RunStatus
 from cursor_agent.sessions.store import SessionStore
@@ -159,6 +160,38 @@ async def test_model_sets_override_and_resumes_agent(
     ]
     assert len(model_calls) == 1
     assert model_calls[0]["agent_id"] == row.agent_id
+
+
+async def test_model_bare_lists_first_party_ids(
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """/model with no argument lists first-party ids via soft-catalog help."""
+    facade = FakeSdkFacade(scripted_replies={"default": "ok"})
+    store = SessionStore(tmp_path / "sessions.db")
+    await store.initialize()
+    session_key = session_key_for(config)
+    await seed_session(store, facade, session_key)
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    output: list[str] = []
+
+    await drive_repl(
+        pool,
+        session_key,
+        store,
+        config,
+        facade,
+        lines=("/model", "/quit"),
+        writer=output.append,
+        auto_resume=True,
+    )
+
+    joined = "\n".join(output)
+    expected_help = format_first_party_model_help()
+    assert expected_help in joined
+    assert "grok-4.5" in joined
+    assert "composer-2.5" in joined
+    assert "Usage: /model <id>" in joined
 
 
 async def test_model_override_applies_to_new_session(
