@@ -24,6 +24,7 @@ from cursor_agent.pool import SessionAgentPool
 from cursor_agent.sdk_facade import FakeSdkFacade, RunResult, RunStatus, StreamCallbacks
 from cursor_agent.sessions.models import SessionCreateParams
 from cursor_agent.sessions.store import SessionStore
+from cursor_agent.tool_profile_policy import passes_mcp_servers_on_resume
 
 
 @pytest.fixture
@@ -104,6 +105,61 @@ class ResumeTrackingFacade(FakeSdkFacade):
             tool_profile=tool_profile,
             runtime_mode=runtime_mode,
         )
+
+
+class SdkResumeCountingFacade(FakeSdkFacade):
+    """Fake that separates facade ``resume_agent`` entry from SDK resume attempts.
+
+    Mimics AsyncSdkFacade ownership after task 3.2: pool may call ``resume_agent``
+    on every warm get, but coding warm (same ``model:tool_profile``) short-circuits
+    without an SDK attempt. Messaging and ``full`` always record an SDK attempt so
+    MCP reinjection remains observable at the facade boundary.
+
+    Authority for resume policy is ``AsyncSdkFacade`` coverage in
+    ``test_facade_resume_send.py`` / ``test_facade.py`` — this fake only locks
+    pool→facade call counts, not production short-circuit logic.
+    """
+
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(**kwargs)  # type: ignore[arg-type]
+        self.resume_calls: list[dict[str, object]] = []
+        self.sdk_resume_attempts: list[dict[str, object]] = []
+        self._warm_resume_keys: dict[str, str] = {}
+
+    async def resume_agent(
+        self,
+        agent_id: str,
+        *,
+        workspace: str,
+        model: str | None = None,
+        tool_profile: str | None = None,
+        runtime_mode: str = "local",
+    ) -> str:
+        """Record facade entry; count SDK attempts unless coding warm short-circuits."""
+        call: dict[str, object] = {
+            "agent_id": agent_id,
+            "workspace": workspace,
+            "model": model,
+            "tool_profile": tool_profile,
+            "runtime_mode": runtime_mode,
+        }
+        self.resume_calls.append(call)
+        profile = tool_profile if tool_profile is not None else "coding"
+        resume_key = f"{model}:{profile}"
+        if self._warm_resume_keys.get(
+            agent_id
+        ) == resume_key and not passes_mcp_servers_on_resume(profile):
+            return agent_id
+        self.sdk_resume_attempts.append(call)
+        result = await super().resume_agent(
+            agent_id,
+            workspace=workspace,
+            model=model,
+            tool_profile=tool_profile,
+            runtime_mode=runtime_mode,
+        )
+        self._warm_resume_keys[agent_id] = resume_key
+        return result
 
 
 class SendCapturingFacade(FakeSdkFacade):
@@ -248,16 +304,45 @@ async def test_lazy_resume_get_is_idempotent_per_agent_and_model(
     store: SessionStore,
     config: CursorAgentConfig,
 ) -> None:
-    """Repeated get() for the same agent_id and model resumes only once."""
+    """Repeated get() always delegates to facade; SDK resume stays once for coding.
+
+    Pool no longer short-circuits coding warm — facade owns MCP/SDK policy.
+    ``resume_calls == 2`` proves pool always calls ``facade.resume_agent``;
+    ``sdk_resume_attempts == 1`` proves facade skips SDK on the warm second get.
+    """
     session_key = "cli:default:abc12345"
-    facade = ResumeTrackingFacade()
+    facade = SdkResumeCountingFacade()
     await _seed_session(store, facade, session_key)
 
     pool = SessionAgentPool(store=store, facade=facade, config=config)
     await pool.get(session_key)
     await pool.get(session_key)
 
-    assert len(facade.resume_calls) == 1
+    assert len(facade.resume_calls) == 2
+    assert len(facade.sdk_resume_attempts) == 1
+    assert facade.sdk_resume_attempts[0]["tool_profile"] == "coding"
+
+
+@pytest.mark.asyncio
+async def test_coding_warm_get_skips_sdk_resume_on_repeated_get(
+    store: SessionStore,
+    config: CursorAgentConfig,
+) -> None:
+    """Coding warm must not hit SDK resume on a second get (facade owns short-circuit).
+
+    Green today via pool short-circuit; stays green after 3.2 when pool always
+    calls ``facade.resume_agent`` and the facade (mirrored here) skips SDK.
+    """
+    session_key = "cli:default:codingwarm1"
+    facade = SdkResumeCountingFacade()
+    await _seed_session(store, facade, session_key, tool_profile="coding")
+
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    await pool.get(session_key)
+    await pool.get(session_key)
+
+    assert len(facade.sdk_resume_attempts) == 1
+    assert facade.sdk_resume_attempts[0]["tool_profile"] == "coding"
 
 
 @pytest.mark.asyncio
@@ -266,7 +351,7 @@ async def test_full_profile_get_re_resumes_for_mcp_reinjection(
 ) -> None:
     """full must re-call resume_agent on repeated get so MCP/environ re-apply."""
     session_key = "cli:default:fullmcp1"
-    facade = ResumeTrackingFacade()
+    facade = SdkResumeCountingFacade()
     await _seed_session(store, facade, session_key, tool_profile="full")
 
     pool = SessionAgentPool(
@@ -278,6 +363,7 @@ async def test_full_profile_get_re_resumes_for_mcp_reinjection(
     await pool.get(session_key)
 
     assert len(facade.resume_calls) == 2
+    assert len(facade.sdk_resume_attempts) == 2
     assert facade.resume_calls[0]["tool_profile"] == "full"
     assert facade.resume_calls[1]["tool_profile"] == "full"
 
@@ -288,7 +374,7 @@ async def test_messaging_profile_get_re_resumes_for_empty_mcp_reinjection(
 ) -> None:
     """messaging must re-call resume_agent on repeated get (empty MCP defense)."""
     session_key = "cli:default:msgmcp1"
-    facade = ResumeTrackingFacade()
+    facade = SdkResumeCountingFacade()
     await _seed_session(store, facade, session_key, tool_profile="messaging")
 
     pool = SessionAgentPool(
@@ -300,6 +386,7 @@ async def test_messaging_profile_get_re_resumes_for_empty_mcp_reinjection(
     await pool.get(session_key)
 
     assert len(facade.resume_calls) == 2
+    assert len(facade.sdk_resume_attempts) == 2
     assert all(call["tool_profile"] == "messaging" for call in facade.resume_calls)
 
 
@@ -614,13 +701,17 @@ async def test_messaging_hook_deploy_does_not_corrupt_resume_cache_or_metadata(
     config: CursorAgentConfig,
     tmp_path: Path,
 ) -> None:
-    """Workspace hook deploy must not change pool resume caching or session metadata."""
+    """Workspace hook deploy must not change SDK resume caching or session metadata.
+
+    Pool always delegates to ``facade.resume_agent``; coding warm still skips SDK.
+    Hook deploy must not force a second SDK resume or mutate session metadata.
+    """
     from cursor_agent import messaging_hooks
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     session_key = "cli:default:hookdep1"
-    facade = ResumeTrackingFacade()
+    facade = SdkResumeCountingFacade()
     session_id = await _seed_session(
         store,
         facade,
@@ -631,6 +722,7 @@ async def test_messaging_hook_deploy_does_not_corrupt_resume_cache_or_metadata(
     pool = SessionAgentPool(store=store, facade=facade, config=config)
     await pool.get(session_key)
     assert len(facade.resume_calls) == 1
+    assert len(facade.sdk_resume_attempts) == 1
 
     user_hooks = tmp_path / "user-hooks" / "messaging"
     messaging_hooks.install_messaging_hooks(target_dir=user_hooks)
@@ -640,7 +732,8 @@ async def test_messaging_hook_deploy_does_not_corrupt_resume_cache_or_metadata(
     )
 
     await pool.get(session_key)
-    assert len(facade.resume_calls) == 1
+    assert len(facade.resume_calls) == 2
+    assert len(facade.sdk_resume_attempts) == 1
 
     row = await store.resolve(session_key, session_id=session_id)
     assert row is not None
