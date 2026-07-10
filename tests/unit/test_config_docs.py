@@ -127,7 +127,13 @@ def test_setup_docs_document_default_model_and_choosing_section() -> None:
     assert DEFAULT_AGENT_MODEL in setup_text, (
         f"docs/setup.md must mention DEFAULT_AGENT_MODEL={DEFAULT_AGENT_MODEL!r}"
     )
-    assert "## Choosing a model" in setup_text, (
-        "docs/setup.md must include a '## Choosing a model' section "
-        f"(DEFAULT_AGENT_MODEL={DEFAULT_AGENT_MODEL!r})"
+    # Require the Configuration child heading (###), not a top-level ## that
+    # would re-parent Tool profile in the TOC.
+    assert re.search(r"(?m)^### Choosing a model$", setup_text), (
+        "docs/setup.md must include a '### Choosing a model' heading under "
+        f"Configuration (DEFAULT_AGENT_MODEL={DEFAULT_AGENT_MODEL!r})"
+    )
+    assert not re.search(r"(?m)^## Choosing a model$", setup_text), (
+        "docs/setup.md must not use a top-level '## Choosing a model' heading "
+        "(keeps Tool profile nested under Configuration)"
     )

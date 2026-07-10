@@ -23,6 +23,9 @@ from cursor_agent.first_party_models import (
     wizard_model_radio_options,
 )
 
+# Same TTY width budget as FIRST_RUN / product_copy tests (PRD-011).
+PRD_MAX_LINE_WIDTH = 60
+
 
 def test_default_agent_model_constant_is_grok_4_5() -> None:
     """DEFAULT_AGENT_MODEL is the confirmed Grok id."""
@@ -59,10 +62,6 @@ def test_wizard_model_indexes_match_catalog_order() -> None:
         assert resolve_wizard_model_choice(str(index)) == row.id
 
 
-# Align with FIRST_RUN / product_copy REPL width budget (PRD-011).
-_REPL_HELP_MAX_LINE_WIDTH: int = 60
-
-
 def test_format_first_party_model_help_includes_ids_and_default() -> None:
     """Flat /model help lists both ids and marks the default."""
     help_text = format_first_party_model_help()
@@ -70,7 +69,7 @@ def test_format_first_party_model_help_includes_ids_and_default() -> None:
     assert "composer-2.5" in help_text
     assert "default" in help_text.lower()
     # Keep bare /model help within the same TTY width budget as welcome copy.
-    assert max(len(line) for line in help_text.splitlines()) <= _REPL_HELP_MAX_LINE_WIDTH
+    assert max(len(line) for line in help_text.splitlines()) <= PRD_MAX_LINE_WIDTH
 
 
 def test_wizard_model_radio_options_are_glyph_free_structured_rows() -> None:

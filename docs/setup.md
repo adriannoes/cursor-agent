@@ -25,7 +25,7 @@ At startup the CLI loads a gitignored `.env` file from the **current working dir
 
 Legacy flat names `CURSOR_AGENT_WORKSPACE` and `CURSOR_AGENT_CONFIG` are **not supported** — use `CURSOR_AGENT__RUNTIME__LOCAL__CWD` and `~/.cursor-agent/config.yaml` instead.
 
-## Choosing a model
+### Choosing a model
 
 When `model` is unset, the default is **Grok 4.5** (`grok-4.5`). Recommended first-party options:
 
