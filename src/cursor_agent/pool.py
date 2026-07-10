@@ -254,7 +254,12 @@ class SessionAgentPool:
         return updated
 
     def forget_resumed_agent(self, agent_id: str) -> None:
-        """Drop resume cache for ``agent_id`` after agent swaps (e.g. /compress)."""
+        """Clear cold-start tracking after agent swaps (e.g. /compress).
+
+        Also drops any leftover ``_resumed_models`` entry. That dict is write-only
+        and is not consulted for resume decisions — do not reintroduce a
+        pool-level short-circuit against it.
+        """
         self._resumed_models.pop(agent_id, None)
         self._cold_resumed_agent_ids.discard(agent_id)
 

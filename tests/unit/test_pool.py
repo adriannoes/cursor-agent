@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -21,7 +22,13 @@ from cursor_agent.facade_logging import LogContext
 from cursor_agent.first_party_models import DEFAULT_AGENT_MODEL
 from cursor_agent.messaging_hooks import ensure_messaging_hooks
 from cursor_agent.pool import SessionAgentPool
-from cursor_agent.sdk_facade import FakeSdkFacade, RunResult, RunStatus, StreamCallbacks
+from cursor_agent.sdk_facade import (
+    AsyncSdkFacade,
+    FakeSdkFacade,
+    RunResult,
+    RunStatus,
+    StreamCallbacks,
+)
 from cursor_agent.sessions.models import SessionCreateParams
 from cursor_agent.sessions.store import SessionStore
 from cursor_agent.tool_profile_policy import passes_mcp_servers_on_resume
@@ -110,14 +117,14 @@ class ResumeTrackingFacade(FakeSdkFacade):
 class SdkResumeCountingFacade(FakeSdkFacade):
     """Fake that separates facade ``resume_agent`` entry from SDK resume attempts.
 
-    Mimics AsyncSdkFacade ownership after task 3.2: pool may call ``resume_agent``
-    on every warm get, but coding warm (same ``model:tool_profile``) short-circuits
-    without an SDK attempt. Messaging and ``full`` always record an SDK attempt so
-    MCP reinjection remains observable at the facade boundary.
+    Mimics AsyncSdkFacade ownership: pool may call ``resume_agent`` on every warm
+    get/send, but coding warm (same ``model:tool_profile``) short-circuits without
+    an SDK attempt. Messaging and ``full`` always record an SDK attempt so MCP
+    reinjection remains observable at the facade boundary.
 
-    Authority for resume policy is ``AsyncSdkFacade`` coverage in
-    ``test_facade_resume_send.py`` / ``test_facade.py`` — this fake only locks
-    pool→facade call counts, not production short-circuit logic.
+    Authority for resume policy is production ``AsyncSdkFacade`` (see
+    ``test_coding_warm_pool_get_skips_sdk_via_real_facade`` and
+    ``test_facade_resume_send.py``). This fake only locks pool→facade call counts.
     """
 
     def __init__(self, **kwargs: object) -> None:
@@ -324,23 +331,69 @@ async def test_lazy_resume_get_is_idempotent_per_agent_and_model(
 
 
 @pytest.mark.asyncio
-async def test_coding_warm_get_skips_sdk_resume_on_repeated_get(
+async def test_coding_warm_pool_get_skips_sdk_via_real_facade(
     store: SessionStore,
     config: CursorAgentConfig,
 ) -> None:
-    """Coding warm must not hit SDK resume on a second get (facade owns short-circuit).
+    """Pool get() uses real AsyncSdkFacade; coding warm must not call SDK resume.
 
-    Green today via pool short-circuit; stays green after 3.2 when pool always
-    calls ``facade.resume_agent`` and the facade (mirrored here) skips SDK.
+    Guards against drift where ``SdkResumeCountingFacade`` stays green while
+    production ``resume_agent`` short-circuit changes.
     """
     session_key = "cli:default:codingwarm1"
-    facade = SdkResumeCountingFacade()
-    await _seed_session(store, facade, session_key, tool_profile="coding")
+    workspace = "/tmp/ws-real-facade"
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-pool-coding-warm"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.create = AsyncMock(return_value=mock_agent)
+    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(api_key="test-key")
+    facade._client = mock_client
+    agent_id = await facade.create_agent(
+        workspace=workspace,
+        model=config.model,
+        tool_profile="coding",
+    )
+    await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id=agent_id,
+            workspace=workspace,
+            runtime="local",
+            tool_profile="coding",
+        )
+    )
 
     pool = SessionAgentPool(store=store, facade=facade, config=config)
     await pool.get(session_key)
     await pool.get(session_key)
 
+    mock_client.agents.resume.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_coding_warm_send_skips_sdk_resume_on_repeated_send(
+    store: SessionStore,
+    config: CursorAgentConfig,
+) -> None:
+    """Repeated send() always hits facade.resume_agent; coding warm skips SDK.
+
+    Pool always calls ``facade.resume_agent``; facade skips SDK on coding warm
+    (mirrored here). Covers the hot CLI/gateway path through ``_ensure_resumed``.
+    """
+    session_key = "cli:default:codingwarmsend"
+    facade = SdkResumeCountingFacade(default_reply="ok")
+    await _seed_session(store, facade, session_key, tool_profile="coding")
+
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    await pool.send(session_key, "first")
+    await pool.send(session_key, "second")
+
+    assert len(facade.resume_calls) == 2
     assert len(facade.sdk_resume_attempts) == 1
     assert facade.sdk_resume_attempts[0]["tool_profile"] == "coding"
 
