@@ -13,6 +13,7 @@ from cursor_sdk import AsyncClient, AsyncRun, LocalAgentOptions
 from cursor_sdk.types import SDKToolUseMessage
 
 from cursor_agent.first_party_models import DEFAULT_AGENT_MODEL
+from tests.integration.readme_heading import first_readme_heading_phrase
 
 pytestmark = [
     pytest.mark.integration,
@@ -25,8 +26,7 @@ pytestmark = [
 # Default-path smoke uses product default (G5 / D5), not a Composer pin.
 MODEL = DEFAULT_AGENT_MODEL
 MINIMAL_PROMPT = "Reply with the single word OK."
-# README first `#` heading is H2 "What it provides" (no product H1); G5 Grok smoke is literal.
-README_FIRST_HEADING_PHRASE = "what it provides"
+# Grok is literal; derive expected phrase from README to avoid marketing-copy drift.
 TOOL_TURN_PROMPT = (
     "Read README.md at the repository root and reply with only the exact "
     "markdown text of the first heading line (the line that starts with #)."
@@ -89,10 +89,13 @@ async def test_sdk_native_tool_turn() -> None:
         f"expected run status 'finished', got {result.status!r}"
     )
     assert text, "expected non-empty assistant text after tool turn"
+    # Grok is literal; derive from README so marketing-copy edits do not drift the assert.
+    expected_phrase = first_readme_heading_phrase(repo_root() / "README.md")
     normalized = text.lower().replace("-", " ")
-    assert README_FIRST_HEADING_PHRASE in normalized, (
+    assert expected_phrase in normalized, (
         "expected response to reference README first heading "
-        f"({README_FIRST_HEADING_PHRASE!r}), got {text!r}"
+        f"(expected_phrase={expected_phrase!r}, normalized={normalized!r}), "
+        f"got {text!r}"
     )
 
     completed_tool_calls = [

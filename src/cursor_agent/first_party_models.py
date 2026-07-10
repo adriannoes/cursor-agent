@@ -46,6 +46,11 @@ FIRST_PARTY_AGENT_MODELS: Final[tuple[FirstPartyAgentModel, ...]] = (
     FirstPartyAgentModel(id="composer-2.5", label="Composer 2.5", is_default=False),
 )
 
+# Soft-catalog non-default pin for override fixtures / D5 (not load_config).
+COMPOSER_AGENT_MODEL: Final[str] = next(
+    row.id for row in FIRST_PARTY_AGENT_MODELS if not row.is_default
+)
+
 # Derived from catalog so display (enumerate) and resolve stay in sync.
 _WIZARD_MODEL_INDEX_TO_ID: Final[dict[str, str]] = {
     str(index): row.id for index, row in enumerate(FIRST_PARTY_AGENT_MODELS, start=1)
