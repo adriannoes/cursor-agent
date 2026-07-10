@@ -57,16 +57,6 @@ _MODEL_CHOICE_EXPECTED_SHAPE: Final[str] = (
 )
 
 
-def default_agent_model() -> str:
-    """Return the unset-default agent model id.
-
-    Example:
-        >>> default_agent_model()
-        'grok-4.5'
-    """
-    return DEFAULT_AGENT_MODEL
-
-
 def recommended_agent_model_ids() -> tuple[str, ...]:
     """Return recommended first-party model ids in catalog order.
 

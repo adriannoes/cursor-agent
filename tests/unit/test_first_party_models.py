@@ -17,7 +17,6 @@ from cursor_agent.first_party_models import (
     DEFAULT_AGENT_MODEL,
     FIRST_PARTY_AGENT_MODELS,
     WIZARD_MODEL_OTHER_ESCAPE_LABEL,
-    default_agent_model,
     format_first_party_model_help,
     recommended_agent_model_ids,
     resolve_wizard_model_choice,
@@ -50,10 +49,9 @@ def test_composer_agent_model_distinct_from_default() -> None:
     assert COMPOSER_AGENT_MODEL != DEFAULT_AGENT_MODEL
 
 
-def test_default_agent_model_helper_returns_constant() -> None:
-    """default_agent_model() returns DEFAULT_AGENT_MODEL."""
-    assert default_agent_model() == DEFAULT_AGENT_MODEL
-    assert default_agent_model() == "grok-4.5"
+def test_default_agent_model_identity_wrapper_is_removed() -> None:
+    """Public default surface is DEFAULT_AGENT_MODEL only (no identity wrapper)."""
+    assert not hasattr(first_party_models_mod, "default_agent_model")
 
 
 def test_first_party_catalog_has_exactly_two_rows() -> None:
