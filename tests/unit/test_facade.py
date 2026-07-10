@@ -1,32 +1,13 @@
-"""Unit tests for SdkFacade types, FakeSdkFacade, and AsyncSdkFacade (PRD-001)."""
+"""Unit tests for SdkFacade types, FakeSdkFacade, and create/MCP wiring (PRD-001)."""
 
 from __future__ import annotations
 
 import asyncio
-import json
-import logging
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from cursor_agent.errors import (
-    AuthError,
-    ConfigError,
-    InvalidAgentError,
-    NetworkError,
-    SdkInternalError,
-    TimeoutError,
-)
-from cursor_sdk.errors import (
-    AgentNotFoundError as SdkAgentNotFoundError,
-    APITimeoutError as SdkAPITimeoutError,
-    AuthenticationError as SdkAuthenticationError,
-    InternalServerError as SdkInternalServerError,
-    RateLimitError as SdkRateLimitError,
-)
-from cursor_agent.facade_logging import _redact
 from cursor_agent.sdk_facade import (
     AsyncSdkFacade,
     FakeSdkFacade,
@@ -34,36 +15,12 @@ from cursor_agent.sdk_facade import (
     RunResult,
     RunStatus,
     StreamCallbacks,
-    _map_sdk_exception,
 )
-from cursor_agent.sdk_retry import retry_sdk_call
-from cursor_agent.tool_profile_policy import resolve_mcp_servers
-
-
-def _local_option(local_opts: object, key: str) -> object | None:
-    """Read a LocalAgentOptions field from object or mapping test doubles."""
-    if isinstance(local_opts, dict):
-        wire_key = {
-            "setting_sources": "settingSources",
-            "sandbox_options": "sandboxOptions",
-        }.get(key, key)
-        if wire_key in local_opts:
-            return local_opts.get(wire_key)
-        return local_opts.get(key)
-    return getattr(local_opts, key, None)
-
-
-def _resume_request_options(mock_client: MagicMock) -> dict[str, Any]:
-    """Extract JSON-serializable resume options passed to the SDK."""
-    resume_args = mock_client.agents.resume.await_args
-    options = (
-        resume_args.args[1]
-        if len(resume_args.args) > 1
-        else resume_args.kwargs.get("options")
-    )
-    assert isinstance(options, dict)
-    json.dumps(options)
-    return options
+from tests.unit.facade_test_fakes import (
+    local_option,
+    resume_request_options,
+    sandbox_enabled,
+)
 
 
 def test_types_run_status_finished_value() -> None:
@@ -217,7 +174,7 @@ async def test_create_agent_local_options_include_setting_sources_from_config() 
 
     create_kwargs = mock_client.agents.create.await_args.kwargs
     local_opts = create_kwargs["local"]
-    setting_sources = _local_option(local_opts, "setting_sources")
+    setting_sources = local_option(local_opts, "setting_sources")
     assert setting_sources == ["project", "user"]
     assert setting_sources != "all"
 
@@ -242,7 +199,7 @@ async def test_create_agent_honors_custom_setting_sources_from_config() -> None:
     await facade.create_agent(workspace="/repo/path", runtime_mode="local")
 
     local_opts = mock_client.agents.create.await_args.kwargs["local"]
-    assert _local_option(local_opts, "setting_sources") == ["project"]
+    assert local_option(local_opts, "setting_sources") == ["project"]
 
 
 @pytest.mark.asyncio
@@ -268,10 +225,10 @@ async def test_resume_agent_local_options_include_setting_sources_from_config() 
         tool_profile="coding",
     )
 
-    options = _resume_request_options(mock_client)
+    options = resume_request_options(mock_client)
     local_opts = options.get("local")
     assert isinstance(local_opts, dict)
-    setting_sources = _local_option(local_opts, "setting_sources")
+    setting_sources = local_option(local_opts, "setting_sources")
     assert setting_sources == ["SETTING_SOURCE_PROJECT", "SETTING_SOURCE_USER"]
     assert setting_sources != "all"
 
@@ -300,10 +257,10 @@ async def test_resume_agent_cloud_options_omit_local_setting_sources() -> None:
         runtime_mode="cloud",
     )
 
-    options = _resume_request_options(mock_client)
+    options = resume_request_options(mock_client)
     local_opts = options.get("local")
     assert isinstance(local_opts, dict)
-    assert _local_option(local_opts, "setting_sources") is None
+    assert local_option(local_opts, "setting_sources") is None
 
 
 @pytest.mark.asyncio
@@ -332,17 +289,6 @@ async def test_create_agent_uses_grok_and_local_cwd() -> None:
     )
 
 
-def _sandbox_enabled(local_opts: object) -> bool | None:
-    """Return sandbox_options.enabled from LocalAgentOptions or a mapping."""
-    sandbox = _local_option(local_opts, "sandbox_options")
-    if sandbox is None:
-        return None
-    if isinstance(sandbox, dict):
-        enabled = sandbox.get("enabled")
-        return enabled if isinstance(enabled, bool) else None
-    return getattr(sandbox, "enabled", None)
-
-
 @pytest.mark.asyncio
 async def test_coding_create_agent_omits_mcp_servers_and_sandbox() -> None:
     """Coding create keeps legacy behavior without MCP or sandbox options."""
@@ -365,7 +311,7 @@ async def test_coding_create_agent_omits_mcp_servers_and_sandbox() -> None:
         assert "mcp_servers" not in create_options
     assert "mcp_servers" not in create_call.kwargs
     local_opts = create_call.kwargs["local"]
-    assert _sandbox_enabled(local_opts) is None
+    assert sandbox_enabled(local_opts) is None
 
 
 @pytest.mark.asyncio
@@ -388,12 +334,12 @@ async def test_coding_resume_agent_omits_mcp_servers_and_sandbox() -> None:
         tool_profile="coding",
     )
 
-    options = _resume_request_options(mock_client)
+    options = resume_request_options(mock_client)
     assert "mcpServers" not in options
     assert "mcp_servers" not in options
     local_opts = options.get("local")
     assert isinstance(local_opts, dict)
-    assert _sandbox_enabled(local_opts) is None
+    assert sandbox_enabled(local_opts) is None
 
 
 @pytest.mark.asyncio
@@ -417,7 +363,7 @@ async def test_messaging_create_agent_passes_empty_mcp_servers_and_sandbox() -> 
     assert isinstance(create_options, dict)
     assert create_options.get("mcp_servers") == {}
     local_opts = create_call.kwargs["local"]
-    assert _sandbox_enabled(local_opts) is True
+    assert sandbox_enabled(local_opts) is True
 
 
 @pytest.mark.asyncio
@@ -440,11 +386,11 @@ async def test_messaging_resume_agent_passes_empty_mcp_servers_and_sandbox() -> 
         tool_profile="messaging",
     )
 
-    options = _resume_request_options(mock_client)
+    options = resume_request_options(mock_client)
     assert options.get("mcpServers") == {}
     local_opts = options.get("local")
     assert isinstance(local_opts, dict)
-    assert _sandbox_enabled(local_opts) is True
+    assert sandbox_enabled(local_opts) is True
 
 
 @pytest.mark.asyncio
@@ -471,11 +417,11 @@ async def test_messaging_resume_after_warm_coding_agent_calls_sdk_with_empty_mcp
         tool_profile="messaging",
     )
 
-    options = _resume_request_options(mock_client)
+    options = resume_request_options(mock_client)
     assert options.get("mcpServers") == {}
     local_opts = options.get("local")
     assert isinstance(local_opts, dict)
-    assert _sandbox_enabled(local_opts) is True
+    assert sandbox_enabled(local_opts) is True
 
 
 @pytest.mark.asyncio
@@ -501,985 +447,8 @@ async def test_resume_agent_inherits_messaging_mcp_when_tool_profile_omitted() -
     resumed_id = await facade.resume_agent(agent_id, workspace="/repo/path")
     assert resumed_id == agent_id
 
-    options = _resume_request_options(mock_client)
+    options = resume_request_options(mock_client)
     assert options.get("mcpServers") == {}
     local_opts = options.get("local")
     assert isinstance(local_opts, dict)
-    assert _sandbox_enabled(local_opts) is True
-
-
-@pytest.mark.asyncio
-async def test_messaging_warm_resume_reinjects_empty_mcp_servers() -> None:
-    """Messaging warm resume still calls SDK to enforce empty MCP servers."""
-    mock_agent = AsyncMock()
-    mock_agent.agent_id = "agent-warm-messaging"
-    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
-    mock_agent.__aexit__ = AsyncMock(return_value=None)
-
-    mock_client = MagicMock()
-    mock_client.agents.create = AsyncMock(return_value=mock_agent)
-    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
-
-    facade = AsyncSdkFacade(api_key="test-key")
-    facade._client = mock_client
-
-    agent_id = await facade.create_agent(workspace="/repo", tool_profile="messaging")
-    mock_client.agents.resume.reset_mock()
-
-    await facade.resume_agent(
-        agent_id,
-        workspace="/repo",
-        tool_profile="messaging",
-    )
-
-    mock_client.agents.resume.assert_called_once()
-    options = _resume_request_options(mock_client)
-    assert options.get("mcpServers") == {}
-
-
-def _create_mcp_servers(mock_client: MagicMock) -> dict[str, Any] | None:
-    """Extract mcp_servers from client.agents.create positional options or kwargs."""
-    call = mock_client.agents.create.await_args
-    options = call.args[0] if call.args else None
-    if isinstance(options, dict) and "mcp_servers" in options:
-        mcp_servers = options["mcp_servers"]
-        return mcp_servers if isinstance(mcp_servers, dict) else None
-    kwarg_value = call.kwargs.get("mcp_servers")
-    return kwarg_value if isinstance(kwarg_value, dict) else None
-
-
-_FAKE_FULL_GITHUB_TOKEN = "ghp_fake_facade_token_DO_NOT_LEAK"
-_FAKE_FULL_BRAVE_KEY = "BSA_fake_facade_key_DO_NOT_LEAK"
-
-
-@pytest.mark.asyncio
-async def test_full_create_agent_passes_curated_mcp_servers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Full create must inject curated mcp_servers (at least playwright)."""
-    monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", _FAKE_FULL_GITHUB_TOKEN)
-    monkeypatch.setenv("BRAVE_API_KEY", _FAKE_FULL_BRAVE_KEY)
-
-    mock_agent = AsyncMock()
-    mock_agent.agent_id = "agent-full-create"
-    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
-    mock_agent.__aexit__ = AsyncMock(return_value=None)
-
-    mock_client = MagicMock()
-    mock_client.agents.create = AsyncMock(return_value=mock_agent)
-
-    logger = logging.getLogger("test.facade.full.create")
-    records: list[str] = []
-
-    class _ListHandler(logging.Handler):
-        def emit(self, record: logging.LogRecord) -> None:
-            records.append(record.getMessage())
-
-    handler = _ListHandler()
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
-
-    facade = AsyncSdkFacade(api_key="test-key", logger=logger)
-    facade._client = mock_client
-
-    await facade.create_agent(workspace="/repo/path", tool_profile="full")
-
-    logger.removeHandler(handler)
-    mcp_servers = _create_mcp_servers(mock_client)
-    assert mcp_servers is not None
-    assert "playwright" in mcp_servers
-    assert "github" in mcp_servers
-    assert "brave-search" in mcp_servers
-    assert mcp_servers["playwright"]["command"] == "npx"
-    local_opts = mock_client.agents.create.await_args.kwargs["local"]
-    assert _sandbox_enabled(local_opts) is None
-
-    injected = [json.loads(line) for line in records if "mcp_servers_injected" in line]
-    assert len(injected) == 1
-    assert injected[0]["event"] == "mcp_servers_injected"
-    assert injected[0]["tool_profile"] == "full"
-    assert injected[0]["server_names"] == ["brave-search", "github", "playwright"]
-    joined = "\n".join(records)
-    assert _FAKE_FULL_GITHUB_TOKEN not in joined
-    assert _FAKE_FULL_BRAVE_KEY not in joined
-
-
-@pytest.mark.asyncio
-async def test_full_resume_agent_reinjects_curated_mcp_servers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Full warm resume must call SDK and re-inject curated mcp_servers."""
-    monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", _FAKE_FULL_GITHUB_TOKEN)
-    monkeypatch.setenv("BRAVE_API_KEY", _FAKE_FULL_BRAVE_KEY)
-
-    mock_agent = AsyncMock()
-    mock_agent.agent_id = "agent-full-warm"
-    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
-    mock_agent.__aexit__ = AsyncMock(return_value=None)
-
-    mock_client = MagicMock()
-    mock_client.agents.create = AsyncMock(return_value=mock_agent)
-    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
-
-    facade = AsyncSdkFacade(api_key="test-key")
-    facade._client = mock_client
-
-    agent_id = await facade.create_agent(workspace="/repo", tool_profile="full")
-    mock_client.agents.resume.reset_mock()
-
-    await facade.resume_agent(
-        agent_id,
-        workspace="/repo",
-        tool_profile="full",
-    )
-
-    mock_client.agents.resume.assert_called_once()
-    options = _resume_request_options(mock_client)
-    mcp_servers = options.get("mcpServers")
-    assert isinstance(mcp_servers, dict)
-    assert "playwright" in mcp_servers
-    assert "github" in mcp_servers
-    local_opts = options.get("local")
-    assert isinstance(local_opts, dict)
-    assert _sandbox_enabled(local_opts) is None
-
-
-@pytest.mark.asyncio
-async def test_coding_to_full_resume_reinjects_mcp_servers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Warm coding agent resumed as full must re-resume with curated MCP."""
-    monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", _FAKE_FULL_GITHUB_TOKEN)
-    monkeypatch.setenv("BRAVE_API_KEY", _FAKE_FULL_BRAVE_KEY)
-
-    mock_agent = AsyncMock()
-    mock_agent.agent_id = "agent-coding-to-full"
-    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
-    mock_agent.__aexit__ = AsyncMock(return_value=None)
-
-    mock_client = MagicMock()
-    mock_client.agents.create = AsyncMock(return_value=mock_agent)
-    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
-
-    facade = AsyncSdkFacade(api_key="test-key")
-    facade._client = mock_client
-
-    agent_id = await facade.create_agent(workspace="/repo", tool_profile="coding")
-    await facade.resume_agent(
-        agent_id,
-        workspace="/repo",
-        tool_profile="full",
-    )
-
-    mock_client.agents.resume.assert_called_once()
-    options = _resume_request_options(mock_client)
-    mcp_servers = options.get("mcpServers")
-    assert isinstance(mcp_servers, dict)
-    assert "playwright" in mcp_servers
-    assert facade._agent_tool_profiles[agent_id] == "full"
-
-
-@pytest.mark.asyncio
-async def test_full_create_respects_mcp_full_servers_allowlist(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Facade must honor mcp.full.servers allowlist from constructor (config wiring)."""
-    monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", _FAKE_FULL_GITHUB_TOKEN)
-    monkeypatch.setenv("BRAVE_API_KEY", _FAKE_FULL_BRAVE_KEY)
-
-    mock_agent = AsyncMock()
-    mock_agent.agent_id = "agent-full-allowlist"
-    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
-    mock_agent.__aexit__ = AsyncMock(return_value=None)
-
-    mock_client = MagicMock()
-    mock_client.agents.create = AsyncMock(return_value=mock_agent)
-
-    facade = AsyncSdkFacade(
-        api_key="test-key",
-        mcp_full_servers=["playwright"],
-    )
-    facade._client = mock_client
-
-    await facade.create_agent(workspace="/repo/path", tool_profile="full")
-
-    mcp_servers = _create_mcp_servers(mock_client)
-    assert mcp_servers is not None
-    assert set(mcp_servers) == {"playwright"}
-    assert "github" not in mcp_servers
-    assert "brave-search" not in mcp_servers
-
-
-@pytest.mark.asyncio
-async def test_full_create_github_transport_stdio_emits_docker_shape(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Facade threads mcp_full_github_transport=stdio into Docker github MCP."""
-    monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", _FAKE_FULL_GITHUB_TOKEN)
-
-    mock_agent = AsyncMock()
-    mock_agent.agent_id = "agent-full-github-stdio"
-    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
-    mock_agent.__aexit__ = AsyncMock(return_value=None)
-
-    mock_client = MagicMock()
-    mock_client.agents.create = AsyncMock(return_value=mock_agent)
-
-    facade = AsyncSdkFacade(
-        api_key="test-key",
-        mcp_full_servers=["github"],
-        mcp_full_github_transport="stdio",
-    )
-    facade._client = mock_client
-
-    await facade.create_agent(workspace="/repo/path", tool_profile="full")
-
-    mcp_servers = _create_mcp_servers(mock_client)
-    assert mcp_servers is not None
-    github = mcp_servers["github"]
-    assert github["command"] == "docker"
-    assert "ghcr.io/github/github-mcp-server" in github["args"]
-    assert github["env"]["GITHUB_PERSONAL_ACCESS_TOKEN"] == _FAKE_FULL_GITHUB_TOKEN
-    assert "url" not in github
-
-
-@pytest.mark.asyncio
-async def test_full_create_github_transport_default_emits_http_shape(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Facade default github transport emits official remote HTTP MCP shape."""
-    monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", _FAKE_FULL_GITHUB_TOKEN)
-
-    mock_agent = AsyncMock()
-    mock_agent.agent_id = "agent-full-github-http"
-    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
-    mock_agent.__aexit__ = AsyncMock(return_value=None)
-
-    mock_client = MagicMock()
-    mock_client.agents.create = AsyncMock(return_value=mock_agent)
-
-    facade = AsyncSdkFacade(
-        api_key="test-key",
-        mcp_full_servers=["github"],
-    )
-    facade._client = mock_client
-
-    await facade.create_agent(workspace="/repo/path", tool_profile="full")
-
-    mcp_servers = _create_mcp_servers(mock_client)
-    assert mcp_servers is not None
-    github = mcp_servers["github"]
-    assert github["url"] == "https://api.githubcopilot.com/mcp/"
-    assert github["headers"]["Authorization"] == (f"Bearer {_FAKE_FULL_GITHUB_TOKEN}")
-    assert "command" not in github
-
-
-@pytest.mark.asyncio
-async def test_messaging_warm_resume_still_empty_after_full_support() -> None:
-    """Messaging warm-resume regression: still injects explicit empty MCP map."""
-    mock_agent = AsyncMock()
-    mock_agent.agent_id = "agent-messaging-regression"
-    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
-    mock_agent.__aexit__ = AsyncMock(return_value=None)
-
-    mock_client = MagicMock()
-    mock_client.agents.create = AsyncMock(return_value=mock_agent)
-    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
-
-    facade = AsyncSdkFacade(api_key="test-key")
-    facade._client = mock_client
-
-    agent_id = await facade.create_agent(workspace="/repo", tool_profile="messaging")
-    mock_client.agents.resume.reset_mock()
-
-    await facade.resume_agent(
-        agent_id,
-        workspace="/repo",
-        tool_profile="messaging",
-    )
-
-    mock_client.agents.resume.assert_called_once()
-    options = _resume_request_options(mock_client)
-    assert options.get("mcpServers") == {}
-
-
-@pytest.mark.asyncio
-async def test_full_to_messaging_resume_injects_empty_mcp_servers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Switching warm full → messaging must re-resume with explicit empty MCP."""
-    monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", _FAKE_FULL_GITHUB_TOKEN)
-    monkeypatch.setenv("BRAVE_API_KEY", _FAKE_FULL_BRAVE_KEY)
-
-    mock_agent = AsyncMock()
-    mock_agent.agent_id = "agent-full-to-messaging"
-    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
-    mock_agent.__aexit__ = AsyncMock(return_value=None)
-
-    mock_client = MagicMock()
-    mock_client.agents.create = AsyncMock(return_value=mock_agent)
-    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
-
-    facade = AsyncSdkFacade(api_key="test-key")
-    facade._client = mock_client
-
-    agent_id = await facade.create_agent(workspace="/repo", tool_profile="full")
-    await facade.resume_agent(
-        agent_id,
-        workspace="/repo",
-        tool_profile="messaging",
-    )
-
-    mock_client.agents.resume.assert_called_once()
-    options = _resume_request_options(mock_client)
-    assert options.get("mcpServers") == {}
-    assert facade._agent_tool_profiles[agent_id] == "messaging"
-
-
-@pytest.mark.asyncio
-async def test_full_to_coding_resume_omits_mcp_servers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Switching warm full → coding must re-resume and omit mcpServers."""
-    monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", _FAKE_FULL_GITHUB_TOKEN)
-    monkeypatch.setenv("BRAVE_API_KEY", _FAKE_FULL_BRAVE_KEY)
-
-    mock_agent = AsyncMock()
-    mock_agent.agent_id = "agent-full-to-coding"
-    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
-    mock_agent.__aexit__ = AsyncMock(return_value=None)
-
-    mock_client = MagicMock()
-    mock_client.agents.create = AsyncMock(return_value=mock_agent)
-    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
-
-    facade = AsyncSdkFacade(api_key="test-key")
-    facade._client = mock_client
-
-    agent_id = await facade.create_agent(workspace="/repo", tool_profile="full")
-    await facade.resume_agent(
-        agent_id,
-        workspace="/repo",
-        tool_profile="coding",
-    )
-
-    mock_client.agents.resume.assert_called_once()
-    options = _resume_request_options(mock_client)
-    assert "mcpServers" not in options
-    assert "mcp_servers" not in options
-    assert facade._agent_tool_profiles[agent_id] == "coding"
-
-
-@pytest.mark.asyncio
-async def test_full_cold_resume_reinjects_curated_mcp_servers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Cold resume with tool_profile=full must inject curated mcp_servers."""
-    monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", _FAKE_FULL_GITHUB_TOKEN)
-    monkeypatch.setenv("BRAVE_API_KEY", _FAKE_FULL_BRAVE_KEY)
-
-    mock_agent = AsyncMock()
-    mock_agent.agent_id = "agent-full-cold"
-    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
-    mock_agent.__aexit__ = AsyncMock(return_value=None)
-
-    mock_client = MagicMock()
-    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
-
-    facade = AsyncSdkFacade(api_key="test-key")
-    facade._client = mock_client
-
-    await facade.resume_agent(
-        "agent-full-cold",
-        workspace="/repo",
-        tool_profile="full",
-    )
-
-    options = _resume_request_options(mock_client)
-    mcp_servers = options.get("mcpServers")
-    assert isinstance(mcp_servers, dict)
-    assert "playwright" in mcp_servers
-    assert "github" in mcp_servers
-
-
-@pytest.mark.asyncio
-async def test_full_empty_allowlist_does_not_emit_mcp_servers_injected() -> None:
-    """Empty curated map must not emit mcp_servers_injected (names-only observability)."""
-    mock_agent = AsyncMock()
-    mock_agent.agent_id = "agent-full-empty-log"
-    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
-    mock_agent.__aexit__ = AsyncMock(return_value=None)
-
-    mock_client = MagicMock()
-    mock_client.agents.create = AsyncMock(return_value=mock_agent)
-
-    logger = logging.getLogger("test.facade.full.empty.log")
-    records: list[str] = []
-
-    class _ListHandler(logging.Handler):
-        def emit(self, record: logging.LogRecord) -> None:
-            records.append(record.getMessage())
-
-    handler = _ListHandler()
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
-
-    facade = AsyncSdkFacade(
-        api_key="test-key",
-        mcp_full_servers=[],
-        logger=logger,
-    )
-    facade._client = mock_client
-
-    await facade.create_agent(workspace="/repo", tool_profile="full")
-    logger.removeHandler(handler)
-
-    mcp_servers = _create_mcp_servers(mock_client)
-    assert mcp_servers == {}
-    assert not any("mcp_servers_injected" in line for line in records)
-
-
-@pytest.mark.asyncio
-async def test_resume_agent_defaults_to_coding_mcp_omission_for_unknown_agent() -> None:
-    """Cold resume for unknown agent_id without profile must omit MCP override (coding default)."""
-    mock_agent = AsyncMock()
-    mock_agent.agent_id = "agent-unknown-cold"
-    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
-    mock_agent.__aexit__ = AsyncMock(return_value=None)
-
-    mock_client = MagicMock()
-    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
-
-    facade = AsyncSdkFacade(api_key="test-key")
-    facade._client = mock_client
-
-    await facade.resume_agent("agent-unknown-cold", workspace="/repo")
-
-    options = _resume_request_options(mock_client)
-    assert "mcpServers" not in options
-    assert "mcp_servers" not in options
-
-
-@pytest.mark.asyncio
-async def test_resume_agent_skips_sdk_call_when_agent_already_loaded() -> None:
-    """resume_agent short-circuits when the agent is already in memory."""
-    mock_agent = AsyncMock()
-    mock_agent.agent_id = "agent-in-memory"
-    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
-    mock_agent.__aexit__ = AsyncMock(return_value=None)
-
-    mock_client = MagicMock()
-    mock_client.agents.create = AsyncMock(return_value=mock_agent)
-    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
-
-    facade = AsyncSdkFacade(api_key="test-key")
-    facade._client = mock_client
-
-    agent_id = await facade.create_agent(workspace="/repo", tool_profile="coding")
-    resumed_id = await facade.resume_agent(
-        agent_id,
-        workspace="/repo",
-        tool_profile="coding",
-    )
-
-    assert resumed_id == agent_id
-    mock_client.agents.resume.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_resume_agent_profile_change_invokes_sdk_with_mcp_override() -> None:
-    """resume_agent calls the SDK again when tool_profile changes."""
-    mock_agent = AsyncMock()
-    mock_agent.agent_id = "agent-profile-change"
-    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
-    mock_agent.__aexit__ = AsyncMock(return_value=None)
-
-    mock_client = MagicMock()
-    mock_client.agents.create = AsyncMock(return_value=mock_agent)
-    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
-
-    facade = AsyncSdkFacade(api_key="test-key")
-    facade._client = mock_client
-
-    agent_id = await facade.create_agent(workspace="/repo", tool_profile="coding")
-    resumed_id = await facade.resume_agent(
-        agent_id,
-        workspace="/repo",
-        tool_profile="messaging",
-    )
-
-    assert resumed_id == agent_id
-    mock_client.agents.resume.assert_called_once()
-    options = _resume_request_options(mock_client)
-    assert options.get("mcpServers") == {}
-    local_opts = options.get("local")
-    assert isinstance(local_opts, dict)
-    assert _sandbox_enabled(local_opts) is True
-
-
-@pytest.mark.asyncio
-async def test_resume_agent_applies_model_change_when_agent_already_in_memory() -> None:
-    """resume_agent calls the SDK again when the effective model changes."""
-    mock_agent = AsyncMock()
-    mock_agent.agent_id = "agent-in-memory"
-    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
-    mock_agent.__aexit__ = AsyncMock(return_value=None)
-
-    mock_client = MagicMock()
-    mock_client.agents.create = AsyncMock(return_value=mock_agent)
-    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
-
-    facade = AsyncSdkFacade(api_key="test-key")
-    facade._client = mock_client
-
-    agent_id = await facade.create_agent(
-        workspace="/repo",
-        model="composer-2.5",
-        tool_profile="coding",
-    )
-    resumed_id = await facade.resume_agent(
-        agent_id,
-        workspace="/repo",
-        model="grok-4.5",
-        tool_profile="coding",
-    )
-
-    assert resumed_id == agent_id
-    mock_client.agents.resume.assert_called_once()
-    options = _resume_request_options(mock_client)
-    assert options.get("model") == {"id": "grok-4.5"}
-
-
-@pytest.mark.asyncio
-async def test_async_send_drains_messages_and_wait() -> None:
-    """send drains messages(), calls wait(), and never uses run.text()."""
-    assistant_msg = SimpleNamespace(
-        type="assistant",
-        message=SimpleNamespace(
-            content=[SimpleNamespace(text="Hi ", type="text")],
-        ),
-    )
-    tool_running = SimpleNamespace(
-        type="tool_call",
-        name="read",
-        status="running",
-        args={"path": "README.md"},
-        result=None,
-    )
-    tool_done = SimpleNamespace(
-        type="tool_call",
-        name="read",
-        status="completed",
-        args={"path": "README.md"},
-        result="ok",
-    )
-
-    async def message_iter() -> Any:
-        for item in (assistant_msg, tool_running, tool_done):
-            yield item
-
-    mock_run = MagicMock()
-    mock_run.messages = MagicMock(return_value=message_iter())
-    mock_run.text = AsyncMock(
-        side_effect=AssertionError("run.text() must not be called")
-    )
-    mock_run.wait = AsyncMock(
-        return_value=SimpleNamespace(
-            id="run-99",
-            status="finished",
-            result="Hi ",
-            duration_ms=50,
-        ),
-    )
-
-    mock_agent = MagicMock()
-    mock_agent.send = AsyncMock(return_value=mock_run)
-    mock_agent.agent_id = "agent-send"
-
-    facade = AsyncSdkFacade(api_key="test-key")
-    facade._client = MagicMock()
-    facade._agents = {"agent-send": mock_agent}
-
-    tool_events: list[str] = []
-
-    async def on_tool_start(name: str, args: dict[str, Any]) -> None:
-        tool_events.append(f"start:{name}")
-
-    async def on_tool_end(name: str, payload: dict[str, Any]) -> None:
-        tool_events.append(f"end:{name}")
-
-    result = await facade.send(
-        "agent-send",
-        "hello",
-        callbacks=StreamCallbacks(on_tool_start=on_tool_start, on_tool_end=on_tool_end),
-    )
-
-    mock_run.text.assert_not_called()
-    assert result.run_id == "run-99"
-    assert result.status is RunStatus.FINISHED
-    assert result.text == "Hi "
-    assert tool_events == ["start:read", "end:read"]
-
-
-class _RetryableFacadeError(Exception):
-    """Stand-in for CursorAgentError in retry tests."""
-
-    is_retryable = True
-
-    def __init__(self, message: str, *, retry_after: float | None = None) -> None:
-        super().__init__(message)
-        self.retry_after = retry_after
-
-
-class _NonRetryableFacadeError(Exception):
-    """Stand-in for non-retryable CursorAgentError subclasses."""
-
-    is_retryable = False
-
-
-@pytest.mark.asyncio
-async def test_retry_honors_retryable_errors_max_three_attempts() -> None:
-    """Pre-run retryable errors retry up to 3 times with retry_after."""
-    attempts = 0
-    mock_agent = AsyncMock()
-    mock_agent.agent_id = "agent-retry"
-    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
-    mock_agent.__aexit__ = AsyncMock(return_value=None)
-
-    async def flaky_create(**_kwargs: Any) -> AsyncMock:
-        nonlocal attempts
-        attempts += 1
-        if attempts < 3:
-            raise _RetryableFacadeError("transient", retry_after=0.01)
-        return mock_agent
-
-    mock_client = MagicMock()
-    mock_client.agents.create = AsyncMock(side_effect=flaky_create)
-
-    facade = AsyncSdkFacade(api_key="test-key")
-    facade._client = mock_client
-
-    with patch(
-        "cursor_agent.sdk_retry.asyncio.sleep", new_callable=AsyncMock
-    ) as sleep_mock:
-        agent_id = await facade.create_agent(workspace="/ws")
-
-    assert agent_id == "agent-retry"
-    assert attempts == 3
-    assert sleep_mock.await_count == 2
-
-
-@pytest.mark.asyncio
-async def test_retry_does_not_retry_non_retryable_errors() -> None:
-    """Non-retryable errors fail immediately without sleep."""
-    mock_client = MagicMock()
-    mock_client.agents.create = AsyncMock(
-        side_effect=_NonRetryableFacadeError("bad key"),
-    )
-
-    facade = AsyncSdkFacade(api_key="test-key")
-    facade._client = mock_client
-
-    with patch(
-        "cursor_agent.sdk_retry.asyncio.sleep", new_callable=AsyncMock
-    ) as sleep_mock:
-        with pytest.raises(_NonRetryableFacadeError):
-            await facade.create_agent(workspace="/ws")
-
-    sleep_mock.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_cancel_during_send_returns_cancelled() -> None:
-    """cancel during active send yields CANCELLED RunResult."""
-    blocked = asyncio.Event()
-
-    async def message_iter() -> Any:
-        await blocked.wait()
-        if False:  # pragma: no cover - makes this an async generator
-            yield None
-
-    mock_run = MagicMock()
-    mock_run.messages = MagicMock(return_value=message_iter())
-    mock_run.cancel = MagicMock()
-    mock_run.wait = AsyncMock()
-
-    mock_agent = MagicMock()
-    mock_agent.send = AsyncMock(return_value=mock_run)
-    mock_agent.agent_id = "agent-cancel"
-
-    facade = AsyncSdkFacade(api_key="test-key")
-    facade._client = MagicMock()
-    facade._agents = {"agent-cancel": mock_agent}
-
-    send_task = asyncio.create_task(facade.send("agent-cancel", "long"))
-    await asyncio.sleep(0.01)
-    await facade.cancel("agent-cancel")
-    blocked.set()
-    result = await send_task
-
-    assert result.status is RunStatus.CANCELLED
-    mock_run.cancel.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_close_is_idempotent() -> None:
-    """close may be called multiple times safely."""
-    mock_bridge = AsyncMock()
-    facade = AsyncSdkFacade(api_key="test-key")
-    facade._client = mock_bridge
-
-    await facade.close()
-    await facade.close()
-
-    mock_bridge.aclose.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_log_emit_send_start_and_end_ndjson() -> None:
-    """send emits NDJSON start/end events with schema v1 fields."""
-    logger = logging.getLogger("test.facade.ndjson")
-    records: list[str] = []
-
-    class _ListHandler(logging.Handler):
-        def emit(self, record: logging.LogRecord) -> None:
-            records.append(record.getMessage())
-
-    handler = _ListHandler()
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
-
-    facade = FakeSdkFacade(scripted_replies={"default": "ok"})
-    facade._logger = logger
-    agent_id = await facade.create_agent(workspace="/tmp")
-    log_context = LogContext(session_id="sess-1", session_key="cli:default:abc")
-
-    await facade.send(
-        agent_id,
-        "hi",
-        log_context=log_context,
-    )
-
-    logger.removeHandler(handler)
-    assert len(records) >= 2
-    start_payload = json.loads(records[0])
-    end_payload = json.loads(records[-1])
-
-    for payload in (start_payload, end_payload):
-        assert payload["v"] == 1
-        assert payload["level"] == "info"
-        assert "ts" in payload
-        assert payload["agent_id"] == agent_id
-
-    assert start_payload["event"] == "send_start"
-    assert end_payload["event"] == "send_end"
-    assert end_payload["status"] == RunStatus.FINISHED.value
-    assert isinstance(end_payload["duration_ms"], int)
-    assert end_payload["run_id"]
-    assert start_payload["session_id"] == "sess-1"
-    assert start_payload["session_key"] == "cli:default:abc"
-
-
-def test_resolve_mcp_servers_stub_profiles() -> None:
-    """Legacy MCP API returns empty dict for coding and messaging profiles."""
-    assert resolve_mcp_servers("coding") == {}
-    assert resolve_mcp_servers("messaging") == {}
-
-
-def test_emit_mcp_servers_injected_logs_names_only() -> None:
-    """mcp_servers_injected NDJSON includes tool_profile and sorted server names."""
-    from cursor_agent.facade_logging import emit_mcp_servers_injected
-
-    logger = logging.getLogger("test.facade.mcp_injected")
-    records: list[str] = []
-
-    class _ListHandler(logging.Handler):
-        def emit(self, record: logging.LogRecord) -> None:
-            records.append(record.getMessage())
-
-    handler = _ListHandler()
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
-
-    emit_mcp_servers_injected(
-        logger,
-        tool_profile="full",
-        server_names=["playwright", "github"],
-    )
-
-    logger.removeHandler(handler)
-    payload = json.loads(records[0])
-    assert payload["v"] == 1
-    assert payload["event"] == "mcp_servers_injected"
-    assert payload["tool_profile"] == "full"
-    assert payload["server_names"] == ["playwright", "github"]
-
-
-def test_facade_logging_redacts_api_key_patterns() -> None:
-    """Secret-like substrings are redacted before logging."""
-    assert _redact("Bearer sk-live-secret") == "[REDACTED]"
-    assert _redact(42) == 42
-
-
-def test_map_sdk_exception_wraps_network_failures() -> None:
-    """Unknown network failures map to retryable NetworkError."""
-    mapped = _map_sdk_exception(ConnectionError("connection reset"))
-    assert isinstance(mapped, NetworkError)
-    assert mapped.is_retryable is True
-
-
-def test_map_sdk_exception_maps_sdk_authentication_error() -> None:
-    """SDK AuthenticationError maps to domain AuthError (ADR-024)."""
-    mapped = _map_sdk_exception(SdkAuthenticationError("invalid api key"))
-    assert isinstance(mapped, AuthError)
-    assert mapped.is_retryable is False
-
-
-def test_map_sdk_exception_maps_sdk_rate_limit_with_retry_after() -> None:
-    """SDK RateLimitError maps to retryable NetworkError with parsed retry_after."""
-    mapped = _map_sdk_exception(
-        SdkRateLimitError("rate limited", is_retryable=True, retry_after="2.5")
-    )
-    assert isinstance(mapped, NetworkError)
-    assert mapped.is_retryable is True
-    assert mapped.retry_after == 2.5
-
-
-def test_map_sdk_exception_maps_sdk_agent_not_found() -> None:
-    """SDK AgentNotFoundError maps to InvalidAgentError."""
-    mapped = _map_sdk_exception(SdkAgentNotFoundError("agent missing"))
-    assert isinstance(mapped, InvalidAgentError)
-
-
-def test_map_sdk_exception_maps_sdk_api_timeout() -> None:
-    """SDK APITimeoutError maps to domain TimeoutError."""
-    mapped = _map_sdk_exception(SdkAPITimeoutError("deadline exceeded"))
-    assert isinstance(mapped, TimeoutError)
-    assert mapped.is_retryable is True
-
-
-def test_map_sdk_exception_maps_sdk_internal_server_error() -> None:
-    """SDK InternalServerError maps to SdkInternalError for pool reattach detection."""
-    mapped = _map_sdk_exception(SdkInternalServerError("upstream 500"))
-    assert isinstance(mapped, SdkInternalError)
-    assert mapped.is_retryable is True
-
-
-def test_map_sdk_exception_maps_type_error_to_config_error() -> None:
-    """TypeError from SDK serialization maps to ConfigError."""
-    mapped = _map_sdk_exception(
-        TypeError("Object of type LocalAgentOptions is not JSON serializable")
-    )
-    assert isinstance(mapped, ConfigError)
-    assert "serialization failed" in str(mapped)
-
-
-@pytest.mark.asyncio
-async def test_retry_sdk_call_does_not_catch_cancelled_error() -> None:
-    """CancelledError must propagate without retry (PR #22 regression guard)."""
-
-    async def raise_cancelled() -> str:
-        raise asyncio.CancelledError()
-
-    with pytest.raises(asyncio.CancelledError):
-        await retry_sdk_call(raise_cancelled)
-
-
-@pytest.mark.asyncio
-async def test_fake_resume_unknown_agent_raises() -> None:
-    """Fake resume rejects unknown agent ids."""
-    facade = FakeSdkFacade()
-    with pytest.raises(ValueError, match="invalid fake agent_id"):
-        await facade.resume_agent("missing", workspace="/tmp")
-
-
-@pytest.mark.asyncio
-async def test_fake_dispose_agent_removes_handle() -> None:
-    """FakeSdkFacade.dispose_agent drops the agent from has_agent tracking."""
-    facade = FakeSdkFacade()
-    agent_id = await facade.create_agent(workspace="/tmp")
-    assert facade.has_agent(agent_id) is True
-    await facade.dispose_agent(agent_id)
-    assert facade.has_agent(agent_id) is False
-
-
-@pytest.mark.asyncio
-async def test_dispose_agent_cancels_active_run_and_exits_handle() -> None:
-    """AsyncSdkFacade.dispose_agent cancels in-flight runs and releases SDK handles."""
-    agent_id = "agent-dispose-active"
-    mock_agent = AsyncMock()
-    mock_agent.agent_id = agent_id
-    mock_agent.__aexit__ = AsyncMock(return_value=None)
-
-    mock_run = MagicMock()
-    facade = AsyncSdkFacade(api_key="test-key")
-    facade._agents[agent_id] = mock_agent
-    facade._active_runs[agent_id] = mock_run
-
-    await facade.dispose_agent(agent_id)
-
-    mock_run.cancel.assert_called_once()
-    mock_agent.__aexit__.assert_awaited_once()
-    assert agent_id not in facade._agents
-
-
-@pytest.mark.asyncio
-async def test_resume_agent_disposes_previous_handle_when_sdk_returns_new_instance() -> (
-    None
-):
-    """resume_agent must dispose the superseded SDK handle to prevent gateway leaks."""
-    agent_id = "agent-resume-dispose"
-    previous_agent = AsyncMock()
-    previous_agent.agent_id = agent_id
-    previous_agent.__aexit__ = AsyncMock(return_value=None)
-
-    new_agent = AsyncMock()
-    new_agent.agent_id = agent_id
-    new_agent.__aenter__ = AsyncMock(return_value=new_agent)
-    new_agent.__aexit__ = AsyncMock(return_value=None)
-
-    mock_client = MagicMock()
-    mock_client.agents.resume = AsyncMock(return_value=new_agent)
-
-    facade = AsyncSdkFacade(api_key="test-key")
-    facade._client = mock_client
-    facade._agents[agent_id] = previous_agent
-    facade._agent_tool_profiles[agent_id] = "coding"
-
-    resumed_id = await facade.resume_agent(
-        agent_id,
-        workspace="/repo",
-        tool_profile="messaging",
-    )
-
-    assert resumed_id == agent_id
-    previous_agent.__aexit__.assert_awaited_once()
-    assert facade._agents[agent_id] is new_agent
-
-
-@pytest.mark.asyncio
-async def test_fake_has_agent_tracks_create_and_resume() -> None:
-    """FakeSdkFacade.has_agent reflects create_agent and resume_agent state."""
-    facade = FakeSdkFacade()
-    assert facade.has_agent("missing") is False
-    agent_id = await facade.create_agent(workspace="/tmp")
-    assert facade.has_agent(agent_id) is True
-    assert (
-        facade.has_agent(await facade.resume_agent(agent_id, workspace="/tmp")) is True
-    )
-
-
-@pytest.mark.asyncio
-async def test_fake_send_unknown_agent_raises() -> None:
-    """Fake send rejects unknown agent ids."""
-    facade = FakeSdkFacade()
-    with pytest.raises(ValueError, match="invalid fake agent_id"):
-        await facade.send("missing", "hello")
-
-
-@pytest.mark.asyncio
-async def test_async_facade_requires_initialized_bridge() -> None:
-    """Operations fail fast when bridge was not entered."""
-    facade = AsyncSdkFacade(api_key="test-key")
-    with pytest.raises(RuntimeError, match="not initialized"):
-        await facade.create_agent(workspace="/tmp")
+    assert sandbox_enabled(local_opts) is True

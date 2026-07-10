@@ -28,7 +28,6 @@ from cursor_agent.messaging_hooks import (
 from cursor_agent.sdk_facade import RunResult, RunStatus, SdkFacade, StreamCallbacks
 from cursor_agent.tool_profile_policy import (
     effective_tool_profile,
-    passes_mcp_servers_on_resume,
     requires_messaging_hooks,
 )
 from cursor_agent.sessions.models import SessionRecord, title_from_first_user_message
@@ -181,21 +180,19 @@ class SessionAgentPool:
         *,
         model_override: str | None = None,
     ) -> SessionRecord:
-        """Resume when missing, resume-key changed, or profile requires MCP re-inject.
+        """Delegate resume to the facade on every call.
 
-        Coding short-circuits when ``model:tool_profile`` is unchanged. Messaging
-        and ``full`` always call ``facade.resume_agent`` so empty/curated MCP is
-        re-applied (and ``full`` re-reads process environ for omit+warn).
+        Always calls ``facade.resume_agent`` so MCP reinject / coding-warm
+        short-circuit policy lives only in the facade. ``_resumed_models`` is
+        write-only here (last successful ``model:tool_profile`` key) so
+        ``forget_resumed_agent`` can drop stale entries after agent swaps; it is
+        not consulted for resume decisions.
         """
         model = self._resolve_model(model_override)
         tool_profile = effective_tool_profile(
             self._config.tool_profile, row.tool_profile
         )
         resume_key = f"{model}:{tool_profile}"
-        if self._resumed_models.get(
-            row.agent_id
-        ) == resume_key and not passes_mcp_servers_on_resume(tool_profile):
-            return row
         cold_start = not self._facade.has_agent(row.agent_id)
         await self._ensure_messaging_hooks_for_row(row)
         try:
@@ -257,7 +254,12 @@ class SessionAgentPool:
         return updated
 
     def forget_resumed_agent(self, agent_id: str) -> None:
-        """Drop resume cache for ``agent_id`` after agent swaps (e.g. /compress)."""
+        """Clear cold-start tracking after agent swaps (e.g. /compress).
+
+        Also drops any leftover ``_resumed_models`` entry. That dict is write-only
+        and is not consulted for resume decisions — do not reintroduce a
+        pool-level short-circuit against it.
+        """
         self._resumed_models.pop(agent_id, None)
         self._cold_resumed_agent_ids.discard(agent_id)
 

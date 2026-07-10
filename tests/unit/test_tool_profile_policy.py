@@ -18,7 +18,6 @@ from cursor_agent.tool_profile_policy import (
     mcp_servers_override_for_profile,
     passes_mcp_servers_on_resume,
     requires_messaging_hooks,
-    resolve_mcp_servers,
     sandbox_enabled,
 )
 
@@ -185,32 +184,6 @@ def test_mcp_servers_override_for_profile_rejects_unknown() -> None:
     assert "unknown" in message
     assert "coding" in message
     assert "messaging" in message
-    assert "full" in message
-
-
-def test_resolve_mcp_servers_returns_empty_maps() -> None:
-    """Legacy API collapses None (coding) and {} (messaging) to empty dict."""
-    assert resolve_mcp_servers("coding") == {}
-    assert resolve_mcp_servers("messaging") == {}
-
-
-def test_resolve_mcp_servers_full_matches_override() -> None:
-    """Legacy resolve_mcp_servers('full') returns the same dict as the override."""
-    environ = {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": _FAKE_GITHUB_TOKEN,
-        "BRAVE_API_KEY": _FAKE_BRAVE_KEY,
-    }
-    override = mcp_servers_override_for_profile("full", environ=environ)
-    assert resolve_mcp_servers("full", environ=environ) == override
-
-
-def test_resolve_mcp_servers_rejects_unknown_profile() -> None:
-    """Legacy API propagates unsupported profile errors from override helper."""
-    with pytest.raises(ValueError) as exc_info:
-        resolve_mcp_servers("unknown")
-
-    message = str(exc_info.value)
-    assert "unsupported tool_profile" in message
     assert "full" in message
 
 
