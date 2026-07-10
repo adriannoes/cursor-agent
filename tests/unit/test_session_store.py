@@ -1,14 +1,12 @@
-"""Unit tests for SessionStore and session helpers (PRD-002)."""
+"""Unit tests for SessionStore create/resolve/list/touch and session helpers (PRD-002)."""
 
 from __future__ import annotations
 
 import hashlib
 import uuid
-from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
-import aiosqlite
 import pytest
 
 from cursor_agent.sessions.models import (
@@ -16,7 +14,12 @@ from cursor_agent.sessions.models import (
     build_cli_session_key,
     title_from_first_user_message,
 )
-from cursor_agent.sessions.store import CURRENT_SCHEMA_VERSION, SessionStore
+from tests.unit.session_store_test_fakes import (
+    FrozenClock,
+    SteppingClock,
+    initialized_store,
+    iso_utc,
+)
 
 
 def _expected_workspace_hash(cwd: Path | str) -> str:
@@ -87,288 +90,11 @@ def test_title_from_first_user_message_rejects_empty() -> None:
         title_from_first_user_message("   ")
 
 
-_SESSIONS_COLUMNS = frozenset(
-    {
-        "id",
-        "session_key",
-        "agent_id",
-        "title",
-        "workspace",
-        "runtime",
-        "tool_profile",
-        "created_at",
-        "updated_at",
-        "metadata",
-    }
-)
-
-
-def _iso(dt: datetime) -> str:
-    """Format datetime as UTC ISO-8601."""
-    return dt.astimezone(UTC).isoformat()
-
-
-async def _fetch_table_info(db_path: Path, table: str) -> list[tuple[str, str]]:
-    """Return (name, type) pairs from sqlite_master table_info."""
-    async with aiosqlite.connect(db_path) as db:
-        cursor = await db.execute(f"PRAGMA table_info({table})")
-        rows = await cursor.fetchall()
-    return [(str(row[1]), str(row[2])) for row in rows]
-
-
-async def _fetch_index_sql(db_path: Path, index_name: str) -> str | None:
-    """Return CREATE INDEX SQL for a named index."""
-    async with aiosqlite.connect(db_path) as db:
-        cursor = await db.execute(
-            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
-            (index_name,),
-        )
-        row = await cursor.fetchone()
-    if row is None:
-        return None
-    return str(row[0])
-
-
-async def _fetch_user_version(db_path: Path) -> int:
-    """Return SQLite PRAGMA user_version for schema migration baseline checks."""
-    async with aiosqlite.connect(db_path) as db:
-        cursor = await db.execute("PRAGMA user_version")
-        row = await cursor.fetchone()
-    if row is None:
-        return 0
-    return int(row[0])
-
-
-_LEGACY_V0_SESSIONS_DDL = """
-CREATE TABLE IF NOT EXISTS sessions (
-    id TEXT PRIMARY KEY,
-    session_key TEXT NOT NULL,
-    agent_id TEXT NOT NULL,
-    title TEXT,
-    workspace TEXT NOT NULL,
-    runtime TEXT NOT NULL,
-    tool_profile TEXT DEFAULT 'coding',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    metadata JSON
-)
-"""
-
-_LEGACY_V0_IDX_SESSIONS_KEY_DDL = """
-CREATE INDEX IF NOT EXISTS idx_sessions_key
-ON sessions(session_key, updated_at DESC)
-"""
-
-
-async def _seed_legacy_v0_database(
-    db_path: Path,
-    *,
-    session_key: str,
-    agent_id: str,
-    workspace: str,
-) -> str:
-    """Create a pre-version V0 database with one session row (user_version stays 0)."""
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    session_id = str(uuid.uuid4())
-    timestamp = _iso(datetime(2026, 6, 1, 8, 0, 0, tzinfo=UTC))
-    async with aiosqlite.connect(db_path) as db:
-        await db.execute(_LEGACY_V0_SESSIONS_DDL)
-        await db.execute(_LEGACY_V0_IDX_SESSIONS_KEY_DDL)
-        await db.execute(
-            """
-            INSERT INTO sessions (
-                id, session_key, agent_id, title, workspace, runtime,
-                tool_profile, created_at, updated_at, metadata
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                session_id,
-                session_key,
-                agent_id,
-                "legacy session",
-                workspace,
-                "local",
-                "coding",
-                timestamp,
-                timestamp,
-                "{}",
-            ),
-        )
-        await db.commit()
-    assert await _fetch_user_version(db_path) == 0
-    return session_id
-
-
-@pytest.mark.asyncio
-async def test_session_store_schema_initialize_creates_sessions_table(
-    tmp_path: Path,
-) -> None:
-    """initialize() creates sessions table with FR-1 columns."""
-    db_path = tmp_path / "sessions.db"
-    store = SessionStore(db_path)
-    await store.initialize()
-
-    columns = await _fetch_table_info(db_path, "sessions")
-    column_names = {name for name, _type in columns}
-    assert column_names == _SESSIONS_COLUMNS
-
-
-@pytest.mark.asyncio
-async def test_session_store_schema_initialize_creates_idx_sessions_key(
-    tmp_path: Path,
-) -> None:
-    """initialize() creates idx_sessions_key on (session_key, updated_at DESC)."""
-    db_path = tmp_path / "sessions.db"
-    store = SessionStore(db_path)
-    await store.initialize()
-
-    index_sql = await _fetch_index_sql(db_path, "idx_sessions_key")
-    assert index_sql is not None
-    normalized = index_sql.lower().replace("\n", " ")
-    assert "idx_sessions_key" in normalized
-    assert "session_key" in normalized
-    assert "updated_at" in normalized
-
-
-@pytest.mark.asyncio
-async def test_session_store_schema_initialize_is_idempotent(tmp_path: Path) -> None:
-    """Calling initialize() twice does not fail."""
-    db_path = tmp_path / "sessions.db"
-    store = SessionStore(db_path)
-    await store.initialize()
-    await store.initialize()
-
-    columns = await _fetch_table_info(db_path, "sessions")
-    assert len(columns) == len(_SESSIONS_COLUMNS)
-
-
-@pytest.mark.asyncio
-async def test_session_store_schema_version_recorded_on_initialize(
-    tmp_path: Path,
-) -> None:
-    """initialize() records PRAGMA user_version at the V1 baseline."""
-    db_path = tmp_path / "sessions.db"
-    store = SessionStore(db_path)
-    await store.initialize()
-
-    assert await _fetch_user_version(db_path) == CURRENT_SCHEMA_VERSION
-    assert CURRENT_SCHEMA_VERSION == 1
-
-
-@pytest.mark.asyncio
-async def test_session_store_schema_reinitialize_preserves_version(
-    tmp_path: Path,
-) -> None:
-    """Calling initialize() twice keeps schema version at the V1 baseline."""
-    db_path = tmp_path / "sessions.db"
-    store = SessionStore(db_path)
-    await store.initialize()
-    await store.initialize()
-
-    assert await _fetch_user_version(db_path) == CURRENT_SCHEMA_VERSION
-
-
-@pytest.mark.asyncio
-async def test_session_store_schema_legacy_v0_upgrades_to_v1_baseline(
-    tmp_path: Path,
-) -> None:
-    """Legacy V0 databases without version metadata upgrade to V1 on initialize."""
-    db_path = tmp_path / "sessions.db"
-    session_key = build_cli_session_key(tmp_path)
-    await _seed_legacy_v0_database(
-        db_path,
-        session_key=session_key,
-        agent_id="agent-legacy",
-        workspace=str(tmp_path.resolve()),
-    )
-
-    store = SessionStore(db_path)
-    await store.initialize()
-
-    assert await _fetch_user_version(db_path) == CURRENT_SCHEMA_VERSION
-
-
-@pytest.mark.asyncio
-async def test_session_store_schema_legacy_v0_rows_remain_readable(
-    tmp_path: Path,
-) -> None:
-    """Baseline migration preserves existing session rows for public APIs."""
-    db_path = tmp_path / "sessions.db"
-    session_key = build_cli_session_key(tmp_path)
-    legacy_id = await _seed_legacy_v0_database(
-        db_path,
-        session_key=session_key,
-        agent_id="agent-legacy-readable",
-        workspace=str(tmp_path.resolve()),
-    )
-
-    store = SessionStore(db_path)
-    await store.initialize()
-
-    resolved = await store.resolve(session_key, legacy_id)
-    assert resolved is not None
-    assert resolved.id == legacy_id
-    assert resolved.agent_id == "agent-legacy-readable"
-    assert resolved.title == "legacy session"
-
-    rows = await store.list(session_key)
-    assert len(rows) == 1
-    assert rows[0].id == legacy_id
-
-
-@pytest.mark.asyncio
-async def test_session_store_schema_rejects_unsupported_future_version(
-    tmp_path: Path,
-) -> None:
-    """initialize() rejects databases with a user_version above the supported baseline."""
-    db_path = tmp_path / "sessions.db"
-    store = SessionStore(db_path)
-    await store.initialize()
-
-    unsupported_version = CURRENT_SCHEMA_VERSION + 1
-    async with aiosqlite.connect(db_path) as db:
-        await db.execute(f"PRAGMA user_version = {unsupported_version}")
-        await db.commit()
-
-    with pytest.raises(ValueError, match="unsupported schema version"):
-        await store.initialize()
-
-
-class _SteppingClock:
-    """Return predetermined UTC timestamps for deterministic store tests."""
-
-    def __init__(self, times: list[datetime]) -> None:
-        self._times: Iterator[datetime] = iter(times)
-
-    def __call__(self) -> datetime:
-        return next(self._times)
-
-
-class _FrozenClock:
-    """Return the same UTC timestamp for every call (tie-breaker tests)."""
-
-    def __init__(self, moment: datetime) -> None:
-        self._moment = moment
-
-    def __call__(self) -> datetime:
-        return self._moment
-
-
-async def _initialized_store(
-    tmp_path: Path,
-    clock: _SteppingClock,
-) -> SessionStore:
-    """Return an initialized SessionStore with injected clock."""
-    store = SessionStore(tmp_path / "sessions.db", clock=clock)
-    await store.initialize()
-    return store
-
-
 @pytest.mark.asyncio
 async def test_session_store_create_persists_row(tmp_path: Path) -> None:
     """create() stores UUID id, agent_id, workspace, runtime, and tool_profile."""
     t0 = datetime(2026, 6, 16, 12, 0, 0, tzinfo=UTC)
-    store = await _initialized_store(tmp_path, _SteppingClock([t0]))
+    store = await initialized_store(tmp_path, SteppingClock([t0]))
     session_key = build_cli_session_key(tmp_path)
 
     row = await store.create(
@@ -389,8 +115,8 @@ async def test_session_store_create_persists_row(tmp_path: Path) -> None:
     assert row.runtime == "local"
     assert row.tool_profile == "coding"
     assert row.title == "first task"
-    assert row.created_at == _iso(t0)
-    assert row.updated_at == _iso(t0)
+    assert row.created_at == iso_utc(t0)
+    assert row.updated_at == iso_utc(t0)
     assert row.metadata == {}
 
 
@@ -401,7 +127,7 @@ async def test_session_store_resolve_returns_latest_by_updated_at(
     """resolve(session_key) returns the row with greatest updated_at."""
     t1 = datetime(2026, 6, 16, 10, 0, 0, tzinfo=UTC)
     t2 = datetime(2026, 6, 16, 11, 0, 0, tzinfo=UTC)
-    store = await _initialized_store(tmp_path, _SteppingClock([t1, t2]))
+    store = await initialized_store(tmp_path, SteppingClock([t1, t2]))
     session_key = build_cli_session_key(tmp_path)
 
     older = await store.create(
@@ -434,7 +160,7 @@ async def test_session_store_resolve_tiebreaks_equal_updated_at_by_rowid(
 ) -> None:
     """resolve(session_key) picks the most recently inserted row when updated_at ties."""
     frozen = datetime(2026, 6, 16, 10, 0, 0, tzinfo=UTC)
-    store = await _initialized_store(tmp_path, _FrozenClock(frozen))
+    store = await initialized_store(tmp_path, FrozenClock(frozen))
     session_key = build_cli_session_key(tmp_path)
 
     first = await store.create(
@@ -466,7 +192,7 @@ async def test_session_store_resolve_by_session_id(tmp_path: Path) -> None:
     """resolve(session_key, session_id) returns the specific row."""
     t1 = datetime(2026, 6, 16, 10, 0, 0, tzinfo=UTC)
     t2 = datetime(2026, 6, 16, 11, 0, 0, tzinfo=UTC)
-    store = await _initialized_store(tmp_path, _SteppingClock([t1, t2]))
+    store = await initialized_store(tmp_path, SteppingClock([t1, t2]))
     session_key = build_cli_session_key(tmp_path)
 
     older = await store.create(
@@ -498,7 +224,7 @@ async def test_session_store_list_sorted_most_recent_first(tmp_path: Path) -> No
     t1 = datetime(2026, 6, 16, 9, 0, 0, tzinfo=UTC)
     t2 = datetime(2026, 6, 16, 10, 0, 0, tzinfo=UTC)
     t3 = datetime(2026, 6, 16, 11, 0, 0, tzinfo=UTC)
-    store = await _initialized_store(tmp_path, _SteppingClock([t1, t2, t3]))
+    store = await initialized_store(tmp_path, SteppingClock([t1, t2, t3]))
     session_key = build_cli_session_key(tmp_path)
 
     first = await store.create(
@@ -535,9 +261,9 @@ async def test_session_store_touch_updates_updated_at(tmp_path: Path) -> None:
     """touch(session_id) bumps updated_at using the injected clock."""
     t_create = datetime(2026, 6, 16, 8, 0, 0, tzinfo=UTC)
     t_touch = datetime(2026, 6, 16, 12, 30, 0, tzinfo=UTC)
-    store = await _initialized_store(
+    store = await initialized_store(
         tmp_path,
-        _SteppingClock([t_create, t_touch]),
+        SteppingClock([t_create, t_touch]),
     )
     session_key = build_cli_session_key(tmp_path)
 
@@ -549,261 +275,22 @@ async def test_session_store_touch_updates_updated_at(tmp_path: Path) -> None:
             runtime="local",
         )
     )
-    assert created.updated_at == _iso(t_create)
+    assert created.updated_at == iso_utc(t_create)
 
     touched = await store.touch(created.id)
-    assert touched.updated_at == _iso(t_touch)
-    assert touched.created_at == _iso(t_create)
+    assert touched.updated_at == iso_utc(t_touch)
+    assert touched.created_at == iso_utc(t_create)
 
     reloaded = await store.resolve(session_key, created.id)
     assert reloaded is not None
-    assert reloaded.updated_at == _iso(t_touch)
-
-
-@pytest.mark.asyncio
-async def test_session_store_metadata_merge_preserves_existing_keys(
-    tmp_path: Path,
-) -> None:
-    """update_metadata(..., merge=True) shallow-merges into stored metadata."""
-    t0 = datetime(2026, 6, 16, 12, 0, 0, tzinfo=UTC)
-    store = await _initialized_store(tmp_path, _SteppingClock([t0]))
-    session_key = build_cli_session_key(tmp_path)
-
-    created = await store.create(
-        SessionCreateParams(
-            session_key=session_key,
-            agent_id="agent-meta",
-            workspace=str(tmp_path.resolve()),
-            runtime="local",
-            metadata={"memory_injected": False},
-        )
-    )
-
-    updated = await store.update_metadata(
-        created.id,
-        {"status": "idle", "last_run_id": "run-1"},
-        merge=True,
-    )
-    assert updated.metadata == {
-        "memory_injected": False,
-        "status": "idle",
-        "last_run_id": "run-1",
-    }
-
-
-@pytest.mark.asyncio
-async def test_session_store_metadata_replace_overwrites_payload(
-    tmp_path: Path,
-) -> None:
-    """update_metadata(..., merge=False) replaces metadata entirely."""
-    t0 = datetime(2026, 6, 16, 12, 0, 0, tzinfo=UTC)
-    store = await _initialized_store(tmp_path, _SteppingClock([t0]))
-    session_key = build_cli_session_key(tmp_path)
-
-    created = await store.create(
-        SessionCreateParams(
-            session_key=session_key,
-            agent_id="agent-meta",
-            workspace=str(tmp_path.resolve()),
-            runtime="local",
-            metadata={"memory_injected": True, "status": "busy"},
-        )
-    )
-
-    updated = await store.update_metadata(
-        created.id,
-        {"last_status": "finished"},
-        merge=False,
-    )
-    assert updated.metadata == {"last_status": "finished"}
-
-
-@pytest.mark.asyncio
-async def test_session_store_metadata_persists_pool_fields(tmp_path: Path) -> None:
-    """Metadata round-trips pool fields like last_run_id and last_status."""
-    t0 = datetime(2026, 6, 16, 12, 0, 0, tzinfo=UTC)
-    store = await _initialized_store(tmp_path, _SteppingClock([t0]))
-    session_key = build_cli_session_key(tmp_path)
-
-    created = await store.create(
-        SessionCreateParams(
-            session_key=session_key,
-            agent_id="agent-meta",
-            workspace=str(tmp_path.resolve()),
-            runtime="local",
-        )
-    )
-
-    payload = {
-        "memory_injected": True,
-        "status": "running",
-        "last_run_id": "run-abc",
-        "last_status": "error",
-    }
-    await store.update_metadata(created.id, payload, merge=True)
-
-    reloaded = await store.resolve(session_key, created.id)
-    assert reloaded is not None
-    assert reloaded.metadata == payload
-
-
-@pytest.mark.asyncio
-async def test_session_store_metadata_rejects_non_serializable_payload(
-    tmp_path: Path,
-) -> None:
-    """Non-JSON-serializable metadata raises ValueError with offending payload."""
-    t0 = datetime(2026, 6, 16, 12, 0, 0, tzinfo=UTC)
-    store = await _initialized_store(tmp_path, _SteppingClock([t0]))
-    session_key = build_cli_session_key(tmp_path)
-
-    created = await store.create(
-        SessionCreateParams(
-            session_key=session_key,
-            agent_id="agent-meta",
-            workspace=str(tmp_path.resolve()),
-            runtime="local",
-        )
-    )
-
-    bad_payload: dict[str, object] = {"handler": object()}
-    with pytest.raises(ValueError, match="metadata"):
-        await store.update_metadata(created.id, bad_payload, merge=True)
-
-
-@pytest.mark.asyncio
-async def test_session_store_update_title_sets_title(tmp_path: Path) -> None:
-    """update_title(session_id, title) persists a non-empty title."""
-    t0 = datetime(2026, 6, 16, 12, 0, 0, tzinfo=UTC)
-    store = await _initialized_store(tmp_path, _SteppingClock([t0]))
-    session_key = build_cli_session_key(tmp_path)
-
-    created = await store.create(
-        SessionCreateParams(
-            session_key=session_key,
-            agent_id="agent-title",
-            workspace=str(tmp_path.resolve()),
-            runtime="local",
-        )
-    )
-
-    updated = await store.update_title(created.id, "Renamed session")
-    assert updated.title == "Renamed session"
-
-    reloaded = await store.resolve(session_key, created.id)
-    assert reloaded is not None
-    assert reloaded.title == "Renamed session"
-
-
-@pytest.mark.asyncio
-async def test_session_store_update_title_rejects_empty_title(tmp_path: Path) -> None:
-    """update_title rejects empty titles before touching the database."""
-    t0 = datetime(2026, 6, 16, 12, 0, 0, tzinfo=UTC)
-    store = await _initialized_store(tmp_path, _SteppingClock([t0]))
-    session_key = build_cli_session_key(tmp_path)
-
-    created = await store.create(
-        SessionCreateParams(
-            session_key=session_key,
-            agent_id="agent-title",
-            workspace=str(tmp_path.resolve()),
-            runtime="local",
-        )
-    )
-
-    with pytest.raises(ValueError, match="title"):
-        await store.update_title(created.id, "")
-
-
-@pytest.mark.asyncio
-async def test_session_store_update_title_raises_for_missing_session(
-    tmp_path: Path,
-) -> None:
-    """update_title raises when session_id does not exist."""
-    store = await _initialized_store(tmp_path, _SteppingClock([datetime.now(tz=UTC)]))
-    missing_id = str(uuid.uuid4())
-
-    with pytest.raises(ValueError, match="session not found"):
-        await store.update_title(missing_id, "orphan")
-
-
-@pytest.mark.asyncio
-async def test_session_store_update_metadata_raises_for_missing_session(
-    tmp_path: Path,
-) -> None:
-    """update_metadata raises when session_id does not exist."""
-    store = await _initialized_store(tmp_path, _SteppingClock([datetime.now(tz=UTC)]))
-    missing_id = str(uuid.uuid4())
-
-    with pytest.raises(ValueError, match="session not found"):
-        await store.update_metadata(missing_id, {"status": "idle"}, merge=True)
+    assert reloaded.updated_at == iso_utc(t_touch)
 
 
 @pytest.mark.asyncio
 async def test_session_store_touch_raises_for_missing_session(tmp_path: Path) -> None:
     """touch raises when session_id does not exist."""
-    store = await _initialized_store(tmp_path, _SteppingClock([datetime.now(tz=UTC)]))
+    store = await initialized_store(tmp_path, SteppingClock([datetime.now(tz=UTC)]))
     missing_id = str(uuid.uuid4())
 
     with pytest.raises(ValueError, match="session not found"):
         await store.touch(missing_id)
-
-
-@pytest.mark.asyncio
-async def test_session_store_update_agent_id_replaces_agent_id(tmp_path: Path) -> None:
-    """update_agent_id(session_id, agent_id) swaps SDK agent id on the same row."""
-    t0 = datetime(2026, 6, 16, 12, 0, 0, tzinfo=UTC)
-    store = await _initialized_store(tmp_path, _SteppingClock([t0]))
-    session_key = build_cli_session_key(tmp_path)
-
-    created = await store.create(
-        SessionCreateParams(
-            session_key=session_key,
-            agent_id="agent-before-compress",
-            workspace=str(tmp_path.resolve()),
-            runtime="local",
-        )
-    )
-
-    updated = await store.update_agent_id(created.id, "agent-after-compress")
-    assert updated.id == created.id
-    assert updated.agent_id == "agent-after-compress"
-    assert updated.session_key == created.session_key
-
-    reloaded = await store.resolve(session_key, created.id)
-    assert reloaded is not None
-    assert reloaded.id == created.id
-    assert reloaded.agent_id == "agent-after-compress"
-
-
-@pytest.mark.asyncio
-async def test_session_store_update_agent_id_rejects_empty_agent_id(
-    tmp_path: Path,
-) -> None:
-    """update_agent_id rejects empty agent_id before touching the database."""
-    t0 = datetime(2026, 6, 16, 12, 0, 0, tzinfo=UTC)
-    store = await _initialized_store(tmp_path, _SteppingClock([t0]))
-    session_key = build_cli_session_key(tmp_path)
-
-    created = await store.create(
-        SessionCreateParams(
-            session_key=session_key,
-            agent_id="agent-valid",
-            workspace=str(tmp_path.resolve()),
-            runtime="local",
-        )
-    )
-
-    with pytest.raises(ValueError, match="agent_id"):
-        await store.update_agent_id(created.id, "")
-
-
-@pytest.mark.asyncio
-async def test_session_store_update_agent_id_raises_for_missing_session(
-    tmp_path: Path,
-) -> None:
-    """update_agent_id raises when session_id does not exist."""
-    store = await _initialized_store(tmp_path, _SteppingClock([datetime.now(tz=UTC)]))
-    missing_id = str(uuid.uuid4())
-
-    with pytest.raises(ValueError, match="session not found"):
-        await store.update_agent_id(missing_id, "agent-orphan")
