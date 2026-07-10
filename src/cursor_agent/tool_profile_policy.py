@@ -10,15 +10,12 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Mapping, Sequence
-from typing import Any, Final
+from typing import Any
 
 from cursor_agent.mcp_registry import GithubTransport, build_mcp_servers_for_full
+from cursor_agent.tool_profiles import ALLOWED_TOOL_PROFILES
 
 _LOGGER = logging.getLogger(__name__)
-
-_SUPPORTED_TOOL_PROFILES: Final[frozenset[str]] = frozenset(
-    {"coding", "messaging", "full"}
-)
 
 # Q2 / ADR-029: omit+warn once per process for the same omit reason (create/resume).
 _emitted_mcp_omit_warnings: set[str] = set()
@@ -92,7 +89,7 @@ def mcp_servers_override_for_profile(
             environ=environ,
             github_transport=github_transport,
         )
-    allowed = ", ".join(sorted(_SUPPORTED_TOOL_PROFILES))
+    allowed = ", ".join(sorted(ALLOWED_TOOL_PROFILES))
     raise ValueError(
         f"unsupported tool_profile for MCP override: received {tool_profile!r}, "
         f"expected one of {{{allowed}}}"

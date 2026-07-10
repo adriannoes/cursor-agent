@@ -29,7 +29,6 @@ from cursor_agent.first_party_models import (
     DEFAULT_AGENT_MODEL,
     WIZARD_MODEL_OTHER_ESCAPE_LABEL,
     resolve_wizard_model_choice,
-    resolve_wizard_tool_profile_choice,
     wizard_model_radio_options,
 )
 from cursor_agent.product_copy import (
@@ -57,6 +56,7 @@ from cursor_agent.product_copy import (
     SETUP_TITLE_WORKSPACE,
     SETUP_TOOL_PROFILE_OPTIONS,
 )
+from cursor_agent.tool_profiles import resolve_wizard_tool_profile_choice
 
 # Monkeypatch targets for unit tests (ADR-027 injectable prompt style).
 _getpass_fn: Callable[[str], str] = getpass

@@ -11,6 +11,7 @@ import re
 import pytest
 
 from cursor_agent.errors import ConfigError
+import cursor_agent.first_party_models as first_party_models_mod
 from cursor_agent.first_party_models import (
     COMPOSER_AGENT_MODEL,
     DEFAULT_AGENT_MODEL,
@@ -20,7 +21,6 @@ from cursor_agent.first_party_models import (
     format_first_party_model_help,
     recommended_agent_model_ids,
     resolve_wizard_model_choice,
-    resolve_wizard_tool_profile_choice,
     wizard_model_radio_options,
 )
 
@@ -133,38 +133,7 @@ def test_resolve_wizard_model_choice_rejects_out_of_range_index(raw: str) -> Non
     assert "expected" in message.lower()
 
 
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [
-        ("", None),
-        ("   ", None),
-        ("1", "coding"),
-        ("coding", "coding"),
-        ("2", "messaging"),
-        ("messaging", "messaging"),
-        ("3", "full"),
-        ("full", "full"),
-    ],
-)
-def test_resolve_wizard_tool_profile_choice_maps_empty_index_and_names(
-    raw: str,
-    expected: str | None,
-) -> None:
-    """Empty → None; 1/2/3 and profile names map to ToolProfile values."""
-    assert resolve_wizard_tool_profile_choice(raw) == expected
-
-
-@pytest.mark.parametrize("raw", ["4", "0", "bogus", "admin", "-1", "+1", "01"])
-def test_resolve_wizard_tool_profile_choice_rejects_garbage(raw: str) -> None:
-    """Garbage profile choice raises ConfigError citing value and 1/2/3 choices."""
-    with pytest.raises(ConfigError, match=re.escape(raw)) as exc_info:
-        resolve_wizard_tool_profile_choice(raw)
-    message = str(exc_info.value)
-    assert raw in message
-    assert "1" in message and "2" in message and "3" in message
-    assert (
-        "coding" in message
-        or "messaging" in message
-        or "full" in message
-        or "tool_profile" in message.lower()
-    )
+def test_first_party_models_does_not_export_tool_profile_resolve() -> None:
+    """Model catalog module must not own wizard tool-profile resolve (Wave C 8.2)."""
+    assert not hasattr(first_party_models_mod, "resolve_wizard_tool_profile_choice")
+    assert not hasattr(first_party_models_mod, "_WIZARD_TOOL_PROFILE_INDEX_TO_NAME")
