@@ -19,7 +19,10 @@ import yaml
 
 from cursor_agent.config.loader import ToolProfile
 from cursor_agent.errors import ConfigError
-from cursor_agent.tool_profiles import ALLOWED_TOOL_PROFILES
+from cursor_agent.tool_profiles import (
+    ALLOWED_TOOL_PROFILES,
+    format_allowed_tool_profiles_expected,
+)
 
 CONFIG_HOME_MODE: Final[int] = 0o700
 ENV_FILE_MODE: Final[int] = 0o600
@@ -237,7 +240,7 @@ def validate_tool_profile(value: object) -> ToolProfile:
     if not isinstance(value, str) or value not in ALLOWED_TOOL_PROFILES:
         raise ConfigError(
             f"invalid tool_profile: received {value!r}, "
-            "expected 'coding', 'messaging', or 'full'",
+            f"expected {format_allowed_tool_profiles_expected()}",
         )
     return value  # type: ignore[return-value]
 

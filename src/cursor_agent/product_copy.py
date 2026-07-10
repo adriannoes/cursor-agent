@@ -104,9 +104,9 @@ SETUP_HINT_TOOL_PROFILE: Final[str] = (
 )
 SETUP_PROMPT_TOOL_PROFILE: Final[str] = "Tool profile [1 / 2 / 3 / name]:"
 
-# Labels only — indexes, names, and default flags come from tool_profiles.
+# Base labels only — "(default)" suffix is appended from is_default on entries.
 _SETUP_TOOL_PROFILE_LABELS: Final[dict[str, str]] = {
-    "coding": "Local development (default)",
+    "coding": "Local development",
     "messaging": "Gateways / bots — read-only posture",
     "full": "Coding + curated MCP servers",
 }
@@ -114,7 +114,11 @@ SETUP_TOOL_PROFILE_OPTIONS: Final[tuple[tuple[int, str, str, bool], ...]] = tupl
     (
         index,
         profile_name,
-        _SETUP_TOOL_PROFILE_LABELS[profile_name],
+        (
+            f"{_SETUP_TOOL_PROFILE_LABELS[profile_name]} (default)"
+            if is_default
+            else _SETUP_TOOL_PROFILE_LABELS[profile_name]
+        ),
         is_default,
     )
     for index, (profile_name, is_default) in enumerate(

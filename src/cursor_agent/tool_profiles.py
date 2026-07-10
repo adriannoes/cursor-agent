@@ -7,9 +7,12 @@ and wizard resolve import this module so membership and indexes cannot drift.
 from __future__ import annotations
 
 import re
-from typing import Final
+from typing import TYPE_CHECKING, Final, cast
 
 from cursor_agent.errors import ConfigError
+
+if TYPE_CHECKING:
+    from cursor_agent.config.loader import ToolProfile
 
 # Ordered wizard radio entries: (profile_name, is_default). Indexes are 1-based.
 WIZARD_TOOL_PROFILE_ENTRIES: Final[tuple[tuple[str, bool], ...]] = (
@@ -61,12 +64,30 @@ _TOOL_PROFILE_CHOICE_EXPECTED_SHAPE: Final[str] = (
 _SIGNED_OR_DIGIT_INDEX_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[+-]?\d+$")
 
 
+def format_allowed_tool_profiles_expected() -> str:
+    """Human-readable allowed profiles for ``ConfigError`` expected-shape text.
+
+    Example:
+        >>> format_allowed_tool_profiles_expected()
+        "'coding', 'full', or 'messaging'"
+    """
+    names = sorted(ALLOWED_TOOL_PROFILES)
+    if not names:
+        return "(none)"
+    quoted = [f"'{name}'" for name in names]
+    if len(quoted) == 1:
+        return quoted[0]
+    if len(quoted) == 2:
+        return f"{quoted[0]} or {quoted[1]}"
+    return ", ".join(quoted[:-1]) + f", or {quoted[-1]}"
+
+
 def _looks_like_wizard_numeric_index(stripped: str) -> bool:
     """True when ``stripped`` is a pure integer token (digits, sign, leading zeros)."""
     return _SIGNED_OR_DIGIT_INDEX_PATTERN.fullmatch(stripped) is not None
 
 
-def resolve_wizard_tool_profile_choice(raw: str) -> str | None:
+def resolve_wizard_tool_profile_choice(raw: str) -> ToolProfile | None:
     """Map wizard tool-profile input to a profile name, ``None``, or raise.
 
     Empty/whitespace → ``None``. ``1``/``2``/``3`` map to coding/messaging/full.
@@ -82,7 +103,7 @@ def resolve_wizard_tool_profile_choice(raw: str) -> str | None:
         return None
     mapped = WIZARD_TOOL_PROFILE_INDEX_TO_NAME.get(stripped)
     if mapped is not None:
-        return mapped
+        return cast("ToolProfile", mapped)
     if _looks_like_wizard_numeric_index(stripped):
         raise ConfigError(
             f"invalid tool_profile choice: received {stripped!r}, "
@@ -93,4 +114,4 @@ def resolve_wizard_tool_profile_choice(raw: str) -> str | None:
             f"invalid tool_profile choice: received {stripped!r}, "
             f"expected {_TOOL_PROFILE_CHOICE_EXPECTED_SHAPE}",
         )
-    return stripped
+    return cast("ToolProfile", stripped)
