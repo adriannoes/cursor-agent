@@ -1,8 +1,9 @@
-"""First-party Cursor agent model catalog and wizard resolve helpers (v1.1.0).
+"""First-party Cursor agent model catalog and wizard model resolve (v1.1.0).
 
 Soft catalog only: recommended ids for UX/docs. Do not call these from
 ``load_config`` to reject unknown model strings (D8). Bare string ids only —
 no ``ModelSelection`` / fast params (D12). Wizard chrome wiring is G3.
+Tool-profile wizard resolve lives in ``tool_profiles`` (Wave C 8.2).
 """
 
 from __future__ import annotations
@@ -15,15 +16,6 @@ from cursor_agent.errors import ConfigError
 
 DEFAULT_AGENT_MODEL: Final[str] = "grok-4.5"
 
-_WIZARD_TOOL_PROFILE_INDEX_TO_NAME: Final[dict[str, str]] = {
-    "1": "coding",
-    "2": "messaging",
-    "3": "full",
-}
-_TOOL_PROFILE_CHOICE_EXPECTED_SHAPE: Final[str] = (
-    "empty (default), '1' (coding), '2' (messaging), '3' (full), "
-    "or a profile name ('coding', 'messaging', 'full')"
-)
 _SIGNED_OR_DIGIT_INDEX_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[+-]?\d+$")
 
 
@@ -158,37 +150,3 @@ def resolve_wizard_model_choice(raw: str) -> str | None:
             f"expected {_MODEL_CHOICE_EXPECTED_SHAPE}",
         )
     return stripped
-
-
-def resolve_wizard_tool_profile_choice(raw: str) -> str | None:
-    """Map wizard tool-profile input to a profile name, ``None``, or raise.
-
-    Empty/whitespace → ``None``. ``1``/``2``/``3`` map to coding/messaging/full.
-    Profile names are validated via ``validate_tool_profile``. Invalid choices
-    raise ``ConfigError`` mentioning numeric indexes and profile names.
-
-    Example:
-        >>> resolve_wizard_tool_profile_choice("2")
-        'messaging'
-    """
-    stripped = raw.strip()
-    if not stripped:
-        return None
-    mapped = _WIZARD_TOOL_PROFILE_INDEX_TO_NAME.get(stripped)
-    if mapped is not None:
-        return mapped
-    if _looks_like_wizard_numeric_index(stripped):
-        raise ConfigError(
-            f"invalid tool_profile choice: received {stripped!r}, "
-            f"expected {_TOOL_PROFILE_CHOICE_EXPECTED_SHAPE}",
-        )
-    # Deferred: writer → loader → first_party_models would cycle at import time.
-    from cursor_agent.config.writer import validate_tool_profile
-
-    try:
-        return validate_tool_profile(stripped)
-    except ConfigError as exc:
-        raise ConfigError(
-            f"invalid tool_profile choice: received {stripped!r}, "
-            f"expected {_TOOL_PROFILE_CHOICE_EXPECTED_SHAPE}",
-        ) from exc

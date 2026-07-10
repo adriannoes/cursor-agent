@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Final
 
+from cursor_agent.tool_profiles import WIZARD_TOOL_PROFILE_ENTRIES
+
 GATEWAY_BUSY_MESSAGE: Final[str] = (
     "I'm still processing your previous message. Please wait or send /stop."
 )
@@ -101,10 +103,24 @@ SETUP_HINT_TOOL_PROFILE: Final[str] = (
     "Controls tool posture for this config.\nEnter keeps the default (coding)."
 )
 SETUP_PROMPT_TOOL_PROFILE: Final[str] = "Tool profile [1 / 2 / 3 / name]:"
-SETUP_TOOL_PROFILE_OPTIONS: Final[tuple[tuple[int, str, str, bool], ...]] = (
-    (1, "coding", "Local development (default)", True),
-    (2, "messaging", "Gateways / bots — read-only posture", False),
-    (3, "full", "Coding + curated MCP servers", False),
+
+# Labels only — indexes, names, and default flags come from tool_profiles.
+_SETUP_TOOL_PROFILE_LABELS: Final[dict[str, str]] = {
+    "coding": "Local development (default)",
+    "messaging": "Gateways / bots — read-only posture",
+    "full": "Coding + curated MCP servers",
+}
+SETUP_TOOL_PROFILE_OPTIONS: Final[tuple[tuple[int, str, str, bool], ...]] = tuple(
+    (
+        index,
+        profile_name,
+        _SETUP_TOOL_PROFILE_LABELS[profile_name],
+        is_default,
+    )
+    for index, (profile_name, is_default) in enumerate(
+        WIZARD_TOOL_PROFILE_ENTRIES,
+        start=1,
+    )
 )
 
 SETUP_SUMMARY_HEADER: Final[str] = "Summary"

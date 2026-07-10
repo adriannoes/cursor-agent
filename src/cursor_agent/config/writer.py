@@ -19,6 +19,7 @@ import yaml
 
 from cursor_agent.config.loader import ToolProfile
 from cursor_agent.errors import ConfigError
+from cursor_agent.tool_profiles import ALLOWED_TOOL_PROFILES
 
 CONFIG_HOME_MODE: Final[int] = 0o700
 ENV_FILE_MODE: Final[int] = 0o600
@@ -28,7 +29,6 @@ _ALLOWED_ENV_KEYS: Final[frozenset[str]] = frozenset(
         "CURSOR_AGENT_SESSIONS_DB",
     }
 )
-_VALID_TOOL_PROFILES: Final[frozenset[str]] = frozenset({"coding", "messaging", "full"})
 _MEMORY_PLACEHOLDER_FILES: Final[tuple[str, ...]] = ("USER.md", "MEMORY.md")
 _ENV_KEY_LINE_PATTERN = re.compile(r"^(\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*=)(.*)$")
 
@@ -234,7 +234,7 @@ def validate_tool_profile(value: object) -> ToolProfile:
         >>> validate_tool_profile("coding")
         'coding'
     """
-    if not isinstance(value, str) or value not in _VALID_TOOL_PROFILES:
+    if not isinstance(value, str) or value not in ALLOWED_TOOL_PROFILES:
         raise ConfigError(
             f"invalid tool_profile: received {value!r}, "
             "expected 'coding', 'messaging', or 'full'",
