@@ -25,6 +25,7 @@ from cursor_agent.cli.rich_display import (
 from cursor_agent.agent_cleanup import cancel_agent_quietly
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.errors import ConfigError, CursorAgentError
+from cursor_agent.first_party_models import format_first_party_model_help
 from cursor_agent.product_copy import FIRST_COMMANDS_HINT
 from cursor_agent.memory import (
     MEMORY_FILENAME,
@@ -70,7 +71,6 @@ _NO_ACTIVE_SESSION = "No active session. Use /new or /resume to continue."
 _NO_PREVIOUS_MESSAGE = "No previous message to retry."
 _NO_USAGE_DATA = "No usage data from the last run."
 _RUN_FAILED_NOTICE = "Run failed (status=error). You can retry or continue."
-_MODEL_USAGE = "Usage: /model <id>"
 _COMPRESSING_MESSAGE = "Compressing context..."
 _COMPRESS_SUCCESS = "Context compressed. New agent active."
 _MEMORY_USAGE = "Usage: /memory show"
@@ -236,7 +236,7 @@ async def _route_model(
 ) -> CommandResult:
     """Store an in-memory model override and resume the active agent."""
     if arg is None or not arg.strip():
-        writer(_MODEL_USAGE)
+        writer(format_first_party_model_help())
         return CommandHandled()
     model_id = arg.strip()
     ctx.state.model_override = model_id

@@ -59,12 +59,18 @@ def test_wizard_model_indexes_match_catalog_order() -> None:
         assert resolve_wizard_model_choice(str(index)) == row.id
 
 
+# Align with FIRST_RUN / product_copy REPL width budget (PRD-011).
+_REPL_HELP_MAX_LINE_WIDTH: int = 60
+
+
 def test_format_first_party_model_help_includes_ids_and_default() -> None:
     """Flat /model help lists both ids and marks the default."""
     help_text = format_first_party_model_help()
     assert "grok-4.5" in help_text
     assert "composer-2.5" in help_text
     assert "default" in help_text.lower()
+    # Keep bare /model help within the same TTY width budget as welcome copy.
+    assert max(len(line) for line in help_text.splitlines()) <= _REPL_HELP_MAX_LINE_WIDTH
 
 
 def test_wizard_model_radio_options_are_glyph_free_structured_rows() -> None:
