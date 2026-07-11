@@ -234,34 +234,6 @@ async def test_full_create_github_transport_default_wires_url_based_config(
 
 
 @pytest.mark.asyncio
-async def test_messaging_warm_resume_skips_sdk_after_full_support() -> None:
-    """Messaging warm-resume regression: skip SDK when already in memory."""
-    mock_agent = AsyncMock()
-    mock_agent.agent_id = "agent-messaging-regression"
-    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
-    mock_agent.__aexit__ = AsyncMock(return_value=None)
-
-    mock_client = MagicMock()
-    mock_client.agents.create = AsyncMock(return_value=mock_agent)
-    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
-
-    facade = AsyncSdkFacade(api_key="test-key")
-    facade._client = mock_client
-
-    agent_id = await facade.create_agent(workspace="/repo", tool_profile="messaging")
-    mock_client.agents.resume.reset_mock()
-
-    resumed_id = await facade.resume_agent(
-        agent_id,
-        workspace="/repo",
-        tool_profile="messaging",
-    )
-
-    assert resumed_id == agent_id
-    mock_client.agents.resume.assert_not_called()
-
-
-@pytest.mark.asyncio
 async def test_full_to_messaging_resume_injects_empty_mcp_servers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

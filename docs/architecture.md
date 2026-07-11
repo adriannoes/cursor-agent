@@ -99,7 +99,7 @@ All `cursor_sdk` imports are confined to `src/cursor_agent/sdk_facade.py` and `s
 - `FakeSdkFacade` — unit tests without `CURSOR_API_KEY`
 - Sync CLI paths use `asyncio.run()` per command or a single async REPL
 
-Bridge lifecycle, retry, dispose, and MCP re-injection on resume live in the facade. See [ADR-002](decisions/ADR-002-async-sdk-facade.md).
+Bridge lifecycle, retry, dispose, and MCP re-injection on **cold** resume live in the facade. See [ADR-002](decisions/ADR-002-async-sdk-facade.md).
 
 ---
 
@@ -117,13 +117,13 @@ Three profiles are available: `coding` and `messaging` ([ADR-014](decisions/ADR-
 
 ### MCP and sandbox by profile (create and resume)
 
-The SDK facade applies profile policy on **both** agent create and resume — not only on first launch.
+The SDK facade applies profile MCP/sandbox policy on **agent create** and on **cold resume** (agent not already in the facade process). Warm agents already loaded with the same `model:tool_profile` short-circuit inside `resume_agent` without calling SDK `agents.resume` — warm SDK resume invalidates the in-memory handle (`Unknown agent`). Pool still calls `facade.resume_agent` on every get/send; the facade owns the warm skip.
 
-| Profile | Agent create | Agent resume |
-|---------|--------------|--------------|
-| `coding` | Omits `mcp_servers` (`None`) so Cursor **project** (`.cursor/mcp.json`) and **user** MCP settings apply | Omits `mcp_servers` so persisted SDK/project MCP settings apply |
-| `messaging` | Passes `mcp_servers: {}` and enables sandbox (network off) | Re-injects `mcp_servers: {}` and sandbox for defense in depth |
-| `full` | Passes curated allowlist map from `mcp_registry` (sandbox off) | Re-injects the curated allowlist map (sandbox off) |
+| Profile | Agent create | Cold resume (not in memory) | Warm resume (same model:profile in memory) |
+|---------|--------------|-----------------------------|--------------------------------------------|
+| `coding` | Omits `mcp_servers` (`None`) so Cursor **project** (`.cursor/mcp.json`) and **user** MCP settings apply | Omits `mcp_servers` so persisted SDK/project MCP settings apply | Short-circuit; no SDK resume |
+| `messaging` | Passes `mcp_servers: {}` and enables sandbox (network off) | Re-injects `mcp_servers: {}` and sandbox (defense in depth) | Short-circuit; empty MCP from create remains |
+| `full` | Passes curated allowlist map from `mcp_registry` (sandbox off) | Re-injects the curated allowlist map (sandbox off; re-reads process environ) | Short-circuit; mid-process env/allowlist changes apply only after cold resume |
 
 See [ADR-029](decisions/ADR-029-mcp-registry-full-profile.md) for registry path, secrets, and gateway refuse rules.
 
