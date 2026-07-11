@@ -139,7 +139,7 @@ For bots and gateways, use `tool_profile: messaging` as specified in [SECURITY.m
 
 **v1.0** (tagged) ships the first-run welcome banner, one-time getting-started hints, and a [setup docs index](docs/setup.md). Interactive local configuration is available via `cursor-agent setup` — see [Interactive setup](docs/setup.md#interactive-setup).
 
-**v1.1.0** (package `1.1.0`; git tag pending until this train merges to `main`): the **`full`** tool profile (curated MCP: GitHub, Brave Search, Playwright) is implemented — enable it via [Setup](docs/setup.md); see [SECURITY.md](SECURITY.md) and [Architecture](docs/architecture.md) for the three-profile matrix. The unset default model is **Grok 4.5** (`grok-4.5`); pin **Composer 2.5** via setup index `2`, YAML, `CURSOR_AGENT__MODEL`, or `/model`. Interactive setup uses guided step chrome (model + tool profile including `full` when local).
+**v1.1.0** (tagged) ships the **`full`** tool profile (curated MCP: GitHub, Brave Search, Playwright) — enable it via [Setup](docs/setup.md); see [SECURITY.md](SECURITY.md) and [Architecture](docs/architecture.md) for the three-profile matrix. The unset default model is **Grok 4.5** (`grok-4.5`); pin **Composer 2.5** via setup index `2`, YAML, `CURSOR_AGENT__MODEL`, or `/model`. Interactive setup uses guided step chrome (model + tool profile including `full` when local).
 
 Further roadmap:
 
@@ -150,6 +150,7 @@ Further roadmap:
 ## Contributing
 
 Bug reports, feature ideas and PRs are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for issue templates and the local verification gate.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
