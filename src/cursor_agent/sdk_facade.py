@@ -13,9 +13,16 @@ import logging
 import os
 import time
 import uuid
+from collections.abc import Sequence
 from typing import Any
 
-from cursor_agent.facade_logging import LogContext, emit_send_end, emit_send_start
+from cursor_agent.facade_logging import (
+    LogContext,
+    emit_mcp_servers_injected,
+    emit_send_end,
+    emit_send_start,
+)
+from cursor_agent.first_party_models import DEFAULT_AGENT_MODEL
 from cursor_agent.sdk_error_mapping import map_sdk_exception
 from cursor_agent.sdk_facade_models import RunResult, RunStatus, StreamCallbacks
 from cursor_agent.sdk_facade_protocol import SdkFacade
@@ -27,9 +34,10 @@ from cursor_agent.sdk_streaming import (
     extract_text_from_messages,
     map_run_result,
 )
+from cursor_agent.mcp_registry import GithubTransport
 from cursor_agent.tool_profile_policy import (
     mcp_servers_override_for_profile,
-    passes_mcp_servers_on_resume,
+    passes_mcp_servers_on_cold_resume,
     sandbox_enabled,
 )
 
@@ -84,6 +92,26 @@ def _resume_cache_key(
     return f"{model}:{tool_profile}"
 
 
+def _emit_full_mcp_injection(
+    logger: logging.Logger,
+    *,
+    tool_profile: str,
+    mcp_override: dict[str, Any] | None,
+) -> None:
+    """Emit mcp_servers_injected for full when servers were actually injected.
+
+    Empty maps (explicit empty allowlist or every server omitted) stay silent —
+    ADR-029 observability is about injected server names, not empty payloads.
+    """
+    if tool_profile != "full" or not mcp_override:
+        return
+    emit_mcp_servers_injected(
+        logger,
+        tool_profile=tool_profile,
+        server_names=sorted(mcp_override),
+    )
+
+
 class AsyncSdkFacade:
     """Production SdkFacade backed by the Cursor Python SDK bridge."""
 
@@ -93,11 +121,17 @@ class AsyncSdkFacade:
         api_key: str | None = None,
         bridge_options: dict[str, Any] | None = None,
         local_setting_sources: list[str] | None = None,
+        mcp_full_servers: Sequence[str] | None = None,
+        mcp_full_github_transport: GithubTransport = "http",
         logger: logging.Logger | None = None,
     ) -> None:
         self._api_key = api_key
         self._bridge_options = bridge_options or {}
         self._local_setting_sources = local_setting_sources
+        # From config.mcp.full.servers; None means all curated ids (ADR-029 Q3).
+        self._mcp_full_servers: Sequence[str] | None = mcp_full_servers
+        # From config.mcp.full.github_transport; default http (Wave 5).
+        self._mcp_full_github_transport: GithubTransport = mcp_full_github_transport
         self._logger = logger or _MODULE_LOGGER
         self._client: AsyncClient | None = None
         self._agents: dict[str, Any] = {}
@@ -106,6 +140,15 @@ class AsyncSdkFacade:
         self._active_runs: dict[str, Any] = {}
         self._cancelled_agents: set[str] = set()
         self._closed = False
+
+    def _mcp_override_for_facade(self, tool_profile: str) -> dict[str, Any] | None:
+        """Resolve MCP override; full uses constructor allowlist + process environ."""
+        return mcp_servers_override_for_profile(
+            tool_profile,
+            allowlist=self._mcp_full_servers,
+            environ=os.environ,
+            github_transport=self._mcp_full_github_transport,
+        )
 
     async def __aenter__(self) -> AsyncSdkFacade:
         """Launch the SDK bridge and return this facade."""
@@ -136,7 +179,7 @@ class AsyncSdkFacade:
         self,
         *,
         workspace: str,
-        model: str = "composer-2.5",
+        model: str = DEFAULT_AGENT_MODEL,
         tool_profile: str = "coding",
         runtime_mode: str = "local",
     ) -> str:
@@ -146,10 +189,15 @@ class AsyncSdkFacade:
             self._local_setting_sources if runtime_mode == "local" else None
         )
 
-        mcp_override = mcp_servers_override_for_profile(tool_profile)
+        mcp_override = self._mcp_override_for_facade(tool_profile)
         create_options: dict[str, Any] | None = None
         if mcp_override is not None:
             create_options = {"mcp_servers": mcp_override}
+            _emit_full_mcp_injection(
+                self._logger,
+                tool_profile=tool_profile,
+                mcp_override=mcp_override,
+            )
 
         async def _create() -> str:
             local_options = _build_local_agent_options(
@@ -190,7 +238,15 @@ class AsyncSdkFacade:
         tool_profile: str | None = None,
         runtime_mode: str = "local",
     ) -> str:
-        """Resume an SDK agent and re-inject MCP servers for the profile."""
+        """Resume an SDK agent; reinject MCP on cold resume for messaging/full.
+
+        Warm agents already in ``_agents`` with the same ``model:tool_profile``
+        short-circuit for every profile. SDK ``agents.resume`` on an in-memory
+        handle returns a new object; disposing the previous one (or the warm
+        resume itself) invalidates the server agent (``Unknown agent`` /
+        internal error). MCP overrides were applied on create; cold resume
+        (agent not in memory) still reinjects via ``passes_mcp_servers_on_cold_resume``.
+        """
         profile = tool_profile or self._agent_tool_profiles.get(agent_id, "coding")
         effective_model = (
             model if model is not None else self._agent_models.get(agent_id)
@@ -201,9 +257,7 @@ class AsyncSdkFacade:
                 model=self._agent_models.get(agent_id),
                 tool_profile=self._agent_tool_profiles.get(agent_id, "coding"),
             )
-            if cached_key == requested_key and not passes_mcp_servers_on_resume(
-                profile
-            ):
+            if cached_key == requested_key:
                 self._agent_tool_profiles[agent_id] = profile
                 return agent_id
 
@@ -217,10 +271,15 @@ class AsyncSdkFacade:
             tool_profile=profile,
         )
         resume_payload: dict[str, Any] = {}
-        if passes_mcp_servers_on_resume(profile):
-            mcp_override = mcp_servers_override_for_profile(profile)
+        if passes_mcp_servers_on_cold_resume(profile):
+            mcp_override = self._mcp_override_for_facade(profile)
             if mcp_override is not None:
                 resume_payload["mcp_servers"] = mcp_override
+                _emit_full_mcp_injection(
+                    self._logger,
+                    tool_profile=profile,
+                    mcp_override=mcp_override,
+                )
         request_options = options_to_json(
             resume_payload,
             local=local_options,

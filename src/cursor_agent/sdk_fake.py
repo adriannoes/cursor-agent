@@ -9,6 +9,7 @@ import uuid
 from typing import Any
 
 from cursor_agent.facade_logging import LogContext, emit_send_end, emit_send_start
+from cursor_agent.first_party_models import DEFAULT_AGENT_MODEL
 from cursor_agent.sdk_facade_models import RunResult, RunStatus, StreamCallbacks
 from cursor_agent.sdk_streaming import invoke_callback
 
@@ -41,7 +42,7 @@ class FakeSdkFacade:
         self,
         *,
         workspace: str,
-        model: str = "composer-2.5",
+        model: str = DEFAULT_AGENT_MODEL,
         tool_profile: str = "coding",
         runtime_mode: str = "local",
     ) -> str:

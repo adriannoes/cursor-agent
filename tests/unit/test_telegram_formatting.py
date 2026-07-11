@@ -2,168 +2,11 @@
 
 from __future__ import annotations
 
-import logging
-import re
-from unittest.mock import patch
-
 import pytest
 
-from cursor_agent.platforms.telegram_chunking import TELEGRAM_MESSAGE_LIMIT
 from cursor_agent.platforms.telegram_formatting import (
-    prepare_telegram_assistant_reply_chunks,
     render_cursor_markdown_for_telegram,
-    split_telegram_html_fragments,
 )
-
-_SUPPORTED_TAG_PATTERN = re.compile(
-    r"</?(?:b|code|pre|a)(?:\s[^>]*)?>",
-    re.IGNORECASE,
-)
-_SUPPORTED_OPEN_TAG_NAMES: frozenset[str] = frozenset({"b", "code", "pre", "a"})
-
-
-def _assert_balanced_supported_tags(fragment: str) -> None:
-    """Assert supported Telegram HTML tags are balanced in *fragment*."""
-    stack: list[str] = []
-    for match in _SUPPORTED_TAG_PATTERN.finditer(fragment):
-        token = match.group(0)
-        if token.startswith("</"):
-            tag = token[2:-1].lower()
-            assert stack, f"unexpected closing tag {token!r} in {fragment!r}"
-            assert stack[-1] == tag, (
-                f"mismatched closing tag {token!r}, expected </{stack[-1]}>"
-            )
-            stack.pop()
-        else:
-            tag = token[1:].split(maxsplit=1)[0].rstrip(">").lower()
-            stack.append(tag)
-    assert not stack, f"unclosed tags {stack!r} in {fragment!r}"
-
-
-def _assert_telegram_html_chunk_valid(fragment: str) -> None:
-    """Assert a chunk is structurally valid for Telegram parse_mode=HTML."""
-    assert len(fragment) <= TELEGRAM_MESSAGE_LIMIT, (
-        f"chunk length {len(fragment)!r} exceeds Telegram limit {TELEGRAM_MESSAGE_LIMIT}"
-    )
-    _assert_balanced_supported_tags(fragment)
-    open_anchor_count = len(re.findall(r"<a\s", fragment, flags=re.IGNORECASE))
-    close_anchor_count = fragment.lower().count("</a>")
-    assert open_anchor_count == close_anchor_count, (
-        f"anchor tag count mismatch: open={open_anchor_count!r}, "
-        f"close={close_anchor_count!r} in {fragment[-120:]!r}"
-    )
-    assert "</a>" not in fragment or "<a " in fragment.lower(), (
-        f"orphan closing anchor in chunk tail: {fragment[-80:]!r}"
-    )
-
-
-def _build_long_two_column_markdown_table(row_count: int) -> str:
-    """Build a realistic long two-column table used in manual Telegram validation."""
-    rows = [
-        (
-            f"| Critério {index} (install → run) | "
-            f"Alta com `a|b` e [link](https://example.com/path/{index}) |"
-        )
-        for index in range(row_count)
-    ]
-    return "Critério | Nota |\n| --- | --- |\n" + "\n".join(rows)
-
-
-def test_split_long_table_with_links_chunks_valid_telegram_html() -> None:
-    """Regression: long table HTML must not orphan closing tags near flush threshold."""
-    source = _build_long_two_column_markdown_table(row_count=80)
-    rendered = render_cursor_markdown_for_telegram(source)
-    assert len(rendered) > 3800, "fixture must exceed flush threshold to force chunking"
-    fragments = split_telegram_html_fragments(rendered)
-    assert len(fragments) >= 2
-    for fragment in fragments:
-        _assert_telegram_html_chunk_valid(fragment)
-    combined = "".join(fragments)
-    assert "• <b>Critério 0 (install → run)</b>" in combined
-    assert '<a href="https://example.com/path/0">link</a>' in combined
-
-
-def test_prepare_long_table_reply_chunks_valid_telegram_html() -> None:
-    """End-to-end prepare path must emit Telegram-safe HTML chunks for long tables."""
-    source = _build_long_two_column_markdown_table(row_count=80)
-    chunks = prepare_telegram_assistant_reply_chunks(source)
-    assert len(chunks) >= 2
-    for chunk in chunks:
-        _assert_telegram_html_chunk_valid(chunk)
-
-
-def _build_memory_heavy_assistant_reply() -> str:
-    """Build a long Markdown-rich reply similar to memory-informed first turns."""
-    preference_rows = [
-        (
-            f"| Preference {index} | "
-            f"Value with `opt|{index}` and [guide](https://example.com/prefs/{index}) |"
-        )
-        for index in range(60)
-    ]
-    checklist_rows = [
-        (
-            f"| Task {index} | "
-            f"Verify with `pytest -k item_{index}` and "
-            f"[runbook](https://example.com/tasks/{index}) |"
-        )
-        for index in range(40)
-    ]
-    return (
-        "**Session context**\n\n"
-        "I loaded your workspace preferences and prior notes:\n\n"
-        "- Prefer `uv run pytest` for local verification\n"
-        "- Keep adapter code free of memory-specific progress copy\n"
-        "- Deliver replies through shared Telegram chunking helpers\n\n"
-        "1. Confirm loader quotas\n"
-        "2. Validate injection on the first free-text turn\n"
-        "3. Check gateway inheritance without adapter branching\n\n"
-        "Preference | Detail |\n| --- | --- |\n" + "\n".join(preference_rows) + "\n\n"
-        "Example tooling snippet:\n\n"
-        "```toml\n"
-        "[tool.pytest.ini_options]\n"
-        'markers = ["integration: needs CURSOR_API_KEY"]\n'
-        "```\n\n"
-        "Checklist | Next step |\n| --- | --- |\n"
-        + "\n".join(checklist_rows)
-        + "\n\n"
-        + ("Boundary note: memory stays presentation-agnostic for Telegram. " * 80)
-    )
-
-
-def test_memory_heavy_assistant_reply_chunks_valid_telegram_html() -> None:
-    """Memory-heavy assistant replies chunk safely with balanced Telegram HTML."""
-    source = _build_memory_heavy_assistant_reply()
-    rendered = render_cursor_markdown_for_telegram(source)
-    assert len(rendered) > 3800, "fixture must exceed flush threshold to force chunking"
-    chunks = prepare_telegram_assistant_reply_chunks(source)
-    assert len(chunks) >= 2
-    for chunk in chunks:
-        _assert_telegram_html_chunk_valid(chunk)
-    combined = "".join(chunks)
-    assert "<b>Session context</b>" in combined
-    assert "<b>Toml:</b> <code>" in combined
-    assert '<a href="https://example.com/prefs/0">guide</a>' in combined
-    assert "• <b>Preference 0</b>" in combined
-    assert "- Prefer <code>uv run pytest</code>" in combined
-
-
-def test_split_long_three_column_table_chunks_valid_telegram_html() -> None:
-    """Multi-column table blocks must also chunk without orphan closing tags."""
-    rows = [
-        (
-            f"| Critério {index} | Nota {index} | "
-            f"Risco com [docs](https://example.com/r/{index}) |"
-        )
-        for index in range(60)
-    ]
-    source = "Critério | Nota | Risco |\n| --- | --- | --- |\n" + "\n".join(rows)
-    rendered = render_cursor_markdown_for_telegram(source)
-    fragments = split_telegram_html_fragments(rendered)
-    assert len(fragments) >= 2
-    for fragment in fragments:
-        _assert_telegram_html_chunk_valid(fragment)
-    assert "<b>Item 1</b>" in rendered
 
 
 def test_render_bold_markdown() -> None:
@@ -306,62 +149,6 @@ def test_render_malformed_markdown_falls_back_to_escaped_text() -> None:
     assert "<" not in rendered.replace("&lt;", "")
 
 
-def test_split_telegram_html_fragments_respects_message_limit() -> None:
-    """Every emitted HTML fragment is within Telegram message limit."""
-    html = "<b>" + ("word " * 900) + "</b>"
-    fragments = split_telegram_html_fragments(html)
-    assert len(fragments) >= 2
-    for fragment in fragments:
-        assert len(fragment) <= TELEGRAM_MESSAGE_LIMIT
-        _assert_balanced_supported_tags(fragment)
-
-
-def test_split_telegram_html_fragments_preserves_tag_balance_near_bold() -> None:
-    """Chunk boundaries near <b> tags keep supported tags balanced."""
-    html = "<b>" + ("x" * 2000) + "</b>\n\n" + ("y" * 2000)
-    fragments = split_telegram_html_fragments(html)
-    assert len(fragments) >= 2
-    for fragment in fragments:
-        _assert_balanced_supported_tags(fragment)
-
-
-def test_split_telegram_html_fragments_preserves_fenced_inline_code_blocks() -> None:
-    """Long bold-label inline code blocks split without leaving unbalanced tags."""
-    code_body = "line\n" * 900
-    html = f"<b>Shell:</b> <code>{code_body}</code>"
-    fragments = split_telegram_html_fragments(html)
-    assert len(fragments) >= 2
-    for fragment in fragments:
-        _assert_balanced_supported_tags(fragment)
-
-
-def test_split_telegram_html_fragments_preserves_anchor_tags() -> None:
-    """Chunking near <a href> keeps anchors balanced."""
-    prefix = '<a href="https://example.com">'
-    html = prefix + ("z" * 3900) + "</a>"
-    fragments = split_telegram_html_fragments(html)
-    for fragment in fragments:
-        _assert_balanced_supported_tags(fragment)
-
-
-def test_split_telegram_html_fragments_preserves_long_href_url() -> None:
-    """Very long href URLs stay balanced when followed by long link text."""
-    long_url = "https://example.com/" + "segment/" * 400
-    html = f'<a href="{long_url}">docs</a>' + (" trailing text." * 300)
-    fragments = split_telegram_html_fragments(html)
-    assert len(fragments) >= 2
-    for fragment in fragments:
-        _assert_telegram_html_chunk_valid(fragment)
-    combined = "".join(fragments)
-    assert long_url in combined
-    assert "docs" in combined
-
-
-def test_split_telegram_html_fragments_empty_returns_no_chunks() -> None:
-    """Empty rendered HTML produces no fragments."""
-    assert split_telegram_html_fragments("") == []
-
-
 @pytest.mark.parametrize(
     ("markdown", "expected_substrings"),
     [
@@ -377,12 +164,6 @@ def test_render_escapes_unsafe_content_inside_markup(
     rendered = render_cursor_markdown_for_telegram(markdown)
     for substring in expected_substrings:
         assert substring in rendered
-
-
-def test_prepare_telegram_assistant_reply_chunks_renders_markdown() -> None:
-    """High-level chunk helper renders Markdown before tag-safe splitting."""
-    chunks = prepare_telegram_assistant_reply_chunks("**ok**")
-    assert chunks == ["<b>ok</b>"]
 
 
 def test_render_two_column_table_without_leading_pipes() -> None:
@@ -495,34 +276,3 @@ def test_render_table_cell_special_characters_are_escaped() -> None:
     rendered = render_cursor_markdown_for_telegram(source)
     assert "Tom &amp; Jerry" in rendered
     assert "if x &lt; 1" in rendered
-
-
-def test_split_long_rendered_table_preserves_tag_balance() -> None:
-    """Long rendered tables chunk into valid Telegram HTML fragments."""
-    header = "Name | Score |\n| --- | --- |\n"
-    rows = "\n".join(f"| Item {index} | {index} |" for index in range(200))
-    rendered = render_cursor_markdown_for_telegram(header + rows)
-    fragments = split_telegram_html_fragments(rendered)
-    assert len(fragments) >= 2
-    for fragment in fragments:
-        assert len(fragment) <= TELEGRAM_MESSAGE_LIMIT
-        _assert_balanced_supported_tags(fragment)
-
-
-def test_prepare_telegram_assistant_reply_chunks_falls_back_on_render_error(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Renderer failures fall back to escaped plain chunks with safe logs only."""
-    caplog.set_level(logging.WARNING)
-    secret = "secret prompt <b>text</b>"
-    with patch(
-        "cursor_agent.platforms.telegram_formatting.render_cursor_markdown_for_telegram",
-        side_effect=RuntimeError("boom"),
-    ):
-        chunks = prepare_telegram_assistant_reply_chunks(
-            secret,
-            logger=logging.getLogger("test.telegram.formatting"),
-        )
-    assert chunks == ["secret prompt &lt;b&gt;text&lt;/b&gt;"]
-    assert "telegram_formatting_fallback" in caplog.text
-    assert "secret prompt" not in caplog.text

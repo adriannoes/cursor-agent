@@ -10,7 +10,14 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -20,12 +27,18 @@ from pydantic_settings.sources import InitSettingsSource
 
 from cursor_agent.config.yaml_io import expand_vars, load_yaml_dict, normalize_keys
 from cursor_agent.errors import ConfigError
+from cursor_agent.first_party_models import DEFAULT_AGENT_MODEL
+from cursor_agent.mcp_registry import (
+    ALLOWED_GITHUB_TRANSPORTS,
+    CURATED_MCP_SERVER_IDS,
+    GithubTransport as GithubTransport,
+)
 
 DEFAULT_CONFIG_PATH = Path.home() / ".cursor-agent" / "config.yaml"
 _ENV_PREFIX = "CURSOR_AGENT__"
 
 RuntimeMode = Literal["local", "cloud"]
-ToolProfile = Literal["coding", "messaging"]
+ToolProfile = Literal["coding", "messaging", "full"]
 
 
 class LocalRuntimeConfig(BaseModel):
@@ -46,6 +59,74 @@ class RuntimeConfig(BaseModel):
     local: LocalRuntimeConfig = Field(default_factory=LocalRuntimeConfig)
 
 
+class McpFullConfig(BaseModel):
+    """Allowlist and github transport for curated MCP under ``tool_profile: full``.
+
+    ``servers=None`` means enable every curated id. Unknown ids raise with the
+    received value and the allowed set from ``CURATED_MCP_SERVER_IDS``.
+    ``github_transport`` defaults to official remote HTTP; ``stdio`` selects
+    Docker (Wave 5 / ADR-029).
+
+    Example:
+        >>> McpFullConfig(servers=["github", "playwright"]).servers
+        ['github', 'playwright']
+        >>> McpFullConfig().github_transport
+        'http'
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    servers: list[str] | None = None
+    github_transport: GithubTransport = "http"
+
+    @field_validator("servers")
+    @classmethod
+    def _reject_unknown_curated_server_ids(
+        cls,
+        value: list[str] | None,
+    ) -> list[str] | None:
+        """Reject unknown or duplicate allowlist entries outside the curated set."""
+        if value is None:
+            return None
+        allowed = sorted(CURATED_MCP_SERVER_IDS)
+        seen: set[str] = set()
+        for server_id in value:
+            if server_id not in CURATED_MCP_SERVER_IDS:
+                raise ValueError(
+                    f"unknown mcp.full.servers id: received {server_id!r}, "
+                    f"expected one of {allowed!r}",
+                )
+            if server_id in seen:
+                raise ValueError(
+                    f"duplicate mcp.full.servers id: received {server_id!r}, "
+                    f"expected unique ids from {allowed!r}",
+                )
+            seen.add(server_id)
+        return value
+
+    @field_validator("github_transport", mode="before")
+    @classmethod
+    def _reject_invalid_github_transport(cls, value: object) -> object:
+        """Normalize case then reject transports outside {http, stdio}."""
+        # Operators often type HTTP/STDIO; lowercase before the allowlist check.
+        normalized: object = value.lower() if isinstance(value, str) else value
+        if normalized not in ALLOWED_GITHUB_TRANSPORTS:
+            allowed = ", ".join(sorted(ALLOWED_GITHUB_TRANSPORTS))
+            raise ValueError(
+                f"invalid mcp.full.github_transport: received {value!r}, "
+                f"expected one of {{{allowed}}}",
+            )
+        return normalized
+
+
+class McpConfig(BaseModel):
+    """Nested MCP configuration block (required under ``extra='forbid'``)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    full: McpFullConfig = Field(default_factory=McpFullConfig)
+
+
 class CursorAgentConfig(BaseSettings):
     """Validated cursor-agent configuration (FR-10 minimal fields).
 
@@ -54,7 +135,7 @@ class CursorAgentConfig(BaseSettings):
     Example:
         >>> config = load_config(config_path=Path("/tmp/missing.yaml"))
         >>> config.model
-        'composer-2.5'
+        'grok-4.5'
     """
 
     model_config = SettingsConfigDict(
@@ -66,10 +147,11 @@ class CursorAgentConfig(BaseSettings):
         nested_model_default_partial_update=True,
     )
 
-    model: str = "composer-2.5"
+    model: str = DEFAULT_AGENT_MODEL
     tool_profile: ToolProfile = "coding"
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     memory_root: str | None = None
+    mcp: McpConfig = Field(default_factory=McpConfig)
 
     @model_validator(mode="before")
     @classmethod

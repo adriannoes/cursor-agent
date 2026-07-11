@@ -1,7 +1,7 @@
 [project]
 name = "cursor-agent"
-version = "1.0.0"
-description = "Clean-room orchestration layer for the Cursor Python SDK and Composer 2.5"
+version = "1.1.0"
+description = "Clean-room orchestration layer for the Cursor Python SDK (Grok 4.5 default, Composer 2.5 available)"
 readme = "README.md"
 license = "MIT"
 authors = [{name = "cursor-agent authors"}]

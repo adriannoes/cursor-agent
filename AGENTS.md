@@ -6,7 +6,7 @@
 
 ## What is cursor-agent
 
-**cursor-agent** is a clean-room orchestration layer for the [Cursor Python SDK](https://cursor.com/docs/sdk/python) and **Composer 2.5**. It delegates the agentic loop, tools, and inference to the SDK, and implements sessions, configuration, concurrency, CLI UX, and security policy (hooks, tool profiles, allowlists).
+**cursor-agent** is a clean-room orchestration layer for the [Cursor Python SDK](https://cursor.com/docs/sdk/python) and first-party models (**Grok 4.5** default, **Composer 2.5** available). It delegates the agentic loop, tools, and inference to the SDK, and implements sessions, configuration, concurrency, CLI UX, and security policy (hooks, tool profiles, allowlists).
 
 You may study reference projects (for example [Hermes Agent](https://github.com/NousResearch/hermes-agent) or [OpenClaw](https://github.com/openclaw/openclaw)) for **behavior patterns only** — **zero copied code**; reimplement in `cursor_agent`.
 
@@ -16,12 +16,13 @@ You may study reference projects (for example [Hermes Agent](https://github.com/
 
 | Profile | Use case | Posture |
 |---------|----------|---------|
-| `coding` | Local development, trusted operator | SDK auto-approve; optional dev hooks only |
+| `coding` | Local development, trusted operator | SDK auto-approve; optional dev hooks only; project/user MCP preserved |
 | `messaging` | Gateways, bots, untrusted input | Read-only workspace; deny hooks; empty MCP; sandbox network off |
+| `full` | Trusted local operator with curated MCP | SDK auto-approve; curated allowlist from `mcp_registry`; sandbox off; **local-only** |
 
-For gateways and bots, **always** use `tool_profile: messaging`. Do not rely on `coding` + auto-approve outside a trusted local session. With `messaging`, the CLI deploys deny hooks into the active workspace at `{workspace}/.cursor/hooks/messaging/` (manifest at `{workspace}/.cursor/hooks.json`) at runtime — not editor-local config. See [SECURITY.md](SECURITY.md) for the threat model, hook layout, and acceptance probes.
+For gateways and bots, **always** use `tool_profile: messaging`. Do not rely on `coding` or `full` + auto-approve outside a trusted local session — the gateway refuses any profile other than `messaging`. With `messaging`, the CLI deploys deny hooks into the active workspace at `{workspace}/.cursor/hooks/messaging/` (manifest at `{workspace}/.cursor/hooks.json`) at runtime — not editor-local config. See [SECURITY.md](SECURITY.md) for the threat model, hook layout, and acceptance probes. Three-profile MCP matrix: [ADR-029](docs/decisions/ADR-029-mcp-registry-full-profile.md).
 
-CLI override: `cursor-agent --profile messaging`
+CLI override: `cursor-agent --profile messaging` (or `--profile full` for local curated MCP)
 
 ---
 

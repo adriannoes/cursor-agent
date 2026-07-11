@@ -8,6 +8,7 @@ from cursor_agent.cli.command_router import BuiltinMatch
 from cursor_agent.cli.slash_commands import build_repl_command_router
 from cursor_agent.cli.startup import session_key_for
 from cursor_agent.config.loader import CursorAgentConfig
+from cursor_agent.first_party_models import format_first_party_model_help
 from cursor_agent.pool import SessionAgentPool
 from cursor_agent.sdk_facade import FakeSdkFacade, RunStatus
 from cursor_agent.sessions.store import SessionStore
@@ -149,16 +150,84 @@ async def test_model_sets_override_and_resumes_agent(
         store,
         config,
         facade,
-        lines=("/model composer-2.5-fast", "/quit"),
+        lines=("/model opaque-override-model", "/quit"),
         writer=output.append,
         auto_resume=True,
     )
 
     model_calls = [
-        call for call in facade.resume_calls if call["model"] == "composer-2.5-fast"
+        call for call in facade.resume_calls if call["model"] == "opaque-override-model"
     ]
     assert len(model_calls) == 1
     assert model_calls[0]["agent_id"] == row.agent_id
+
+
+async def test_model_resume_uses_effective_tool_profile_under_messaging_config(
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """/model resumes with messaging when config is messaging and the row is coding."""
+    messaging_config = config.model_copy(update={"tool_profile": "messaging"})
+    facade = ResumeTrackingFacade(scripted_replies={"default": "ok"})
+    store = SessionStore(tmp_path / "sessions.db")
+    await store.initialize()
+    session_key = session_key_for(messaging_config)
+    session_id = await seed_session(store, facade, session_key)
+    row = await store.resolve(session_key, session_id=session_id)
+    assert row is not None
+    assert row.tool_profile == "coding"
+    pool = SessionAgentPool(store=store, facade=facade, config=messaging_config)
+    output: list[str] = []
+
+    await drive_repl(
+        pool,
+        session_key,
+        store,
+        messaging_config,
+        facade,
+        lines=("/model opaque-override-model", "/quit"),
+        writer=output.append,
+        auto_resume=True,
+    )
+
+    model_calls = [
+        call for call in facade.resume_calls if call["model"] == "opaque-override-model"
+    ]
+    assert len(model_calls) == 1
+    assert model_calls[0]["tool_profile"] == "messaging"
+    assert model_calls[0]["agent_id"] == row.agent_id
+
+
+async def test_model_bare_lists_first_party_ids(
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """/model with no argument lists first-party ids via soft-catalog help."""
+    facade = FakeSdkFacade(scripted_replies={"default": "ok"})
+    store = SessionStore(tmp_path / "sessions.db")
+    await store.initialize()
+    session_key = session_key_for(config)
+    await seed_session(store, facade, session_key)
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    output: list[str] = []
+
+    await drive_repl(
+        pool,
+        session_key,
+        store,
+        config,
+        facade,
+        lines=("/model", "/quit"),
+        writer=output.append,
+        auto_resume=True,
+    )
+
+    joined = "\n".join(output)
+    expected_help = format_first_party_model_help()
+    assert expected_help in joined
+    assert "grok-4.5" in joined
+    assert "composer-2.5" in joined
+    assert "Usage: /model <id>" in joined
 
 
 async def test_model_override_applies_to_new_session(
@@ -179,13 +248,13 @@ async def test_model_override_applies_to_new_session(
         store,
         config,
         facade,
-        lines=("/model composer-2.5-fast", "/new", "/quit"),
+        lines=("/model opaque-override-model", "/new", "/quit"),
         writer=output.append,
         auto_resume=False,
     )
 
     assert len(facade.create_agent_calls) == 1
-    assert facade.create_agent_calls[0]["model"] == "composer-2.5-fast"
+    assert facade.create_agent_calls[0]["model"] == "opaque-override-model"
 
 
 async def test_repl_free_text_passes_model_override_to_pool(
@@ -207,13 +276,13 @@ async def test_repl_free_text_passes_model_override_to_pool(
         store,
         config,
         facade,
-        lines=("/model composer-2.5-fast", "hello", "/quit"),
+        lines=("/model opaque-override-model", "hello", "/quit"),
         writer=output.append,
         auto_resume=True,
     )
 
     assert len(pool.send_calls) == 1
-    assert pool.send_calls[0]["model_override"] == "composer-2.5-fast"
+    assert pool.send_calls[0]["model_override"] == "opaque-override-model"
 
 
 async def test_post_compress_free_text_targets_new_agent(

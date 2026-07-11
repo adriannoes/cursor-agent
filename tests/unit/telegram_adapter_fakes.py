@@ -12,6 +12,7 @@ from typing import Any
 from unittest.mock import patch
 
 from cursor_agent.config.loader import CursorAgentConfig
+from cursor_agent.first_party_models import DEFAULT_AGENT_MODEL
 from cursor_agent.gateway.config import GatewayConfig
 from cursor_agent.gateway.runner import gateway_runtime
 from cursor_agent.platforms.telegram import TelegramAdapter
@@ -162,7 +163,7 @@ def runtime_handles(
     )
     cursor_cfg = CursorAgentConfig.model_validate(
         {
-            "model": "composer-2.5",
+            "model": "grok-4.5",
             "tool_profile": "messaging",
             "runtime": {
                 "mode": "local",
@@ -273,7 +274,7 @@ class SideEffectTrackingFacade(FakeSdkFacade):
         self,
         *,
         workspace: str,
-        model: str = "composer-2.5",
+        model: str = DEFAULT_AGENT_MODEL,
         tool_profile: str = "coding",
         runtime_mode: str = "local",
     ) -> str:

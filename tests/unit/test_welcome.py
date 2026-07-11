@@ -90,7 +90,7 @@ def test_first_run_shows_getting_started_and_first_commands_hint() -> None:
     assert wrote is True
     output = _joined_output(lines)
 
-    assert "powered by Composer" in output
+    assert "powered by Cursor" in output
     assert "Installation complete" in output
     for marker in (
         "plain language",
@@ -115,7 +115,7 @@ def test_recurring_shows_compact_logo_tagline_ready_only() -> None:
     assert WELCOME_READY_LINE in output
     assert WELCOME_LOGO.splitlines()[0] in output
 
-    assert "powered by Composer" not in output
+    assert "powered by Cursor" not in output
     assert "Installation complete" not in output
     assert "Get started:" not in output
     assert FIRST_COMMANDS_HINT.strip() not in output

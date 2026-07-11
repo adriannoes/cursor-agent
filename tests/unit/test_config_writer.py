@@ -413,6 +413,7 @@ def test_write_config_yaml_memory_root_does_not_clobber_existing_files(
     [
         ("model", "gpt-test-model"),
         ("tool_profile", "messaging"),
+        ("tool_profile", "full"),
     ],
 )
 def test_write_config_yaml_flag_matrix_model_and_tool_profile(
@@ -428,16 +429,28 @@ def test_write_config_yaml_flag_matrix_model_and_tool_profile(
     assert _load_yaml(config_path)[field] == value
 
 
+def test_write_config_yaml_accepts_full_tool_profile(tmp_path: Path) -> None:
+    """FR-1: tool_profile full is a valid persisted profile (PRD-012)."""
+    config_path = tmp_path / "config.yaml"
+
+    result = write_config_yaml(config_path, {"tool_profile": "full"})
+
+    assert result.changed is True
+    assert _load_yaml(config_path)["tool_profile"] == "full"
+
+
 def test_write_config_yaml_rejects_invalid_tool_profile(tmp_path: Path) -> None:
-    """Invalid tool_profile (not coding|messaging) raises ConfigError."""
+    """Invalid tool_profile (not coding|messaging|full) raises ConfigError."""
     config_path = tmp_path / "config.yaml"
 
     with pytest.raises(ConfigError, match="tool_profile") as exc_info:
-        write_config_yaml(config_path, {"tool_profile": "full"})
+        write_config_yaml(config_path, {"tool_profile": "garbage"})
 
     message = str(exc_info.value)
     assert "coding" in message
     assert "messaging" in message
+    assert "full" in message
+    assert "garbage" in message
     assert not config_path.exists()
 
 

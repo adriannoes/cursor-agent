@@ -180,14 +180,21 @@ class SessionAgentPool:
         *,
         model_override: str | None = None,
     ) -> SessionRecord:
-        """Resume the SDK agent when missing or when the effective resume key changed."""
+        """Delegate resume to the facade on every call.
+
+        Always calls ``facade.resume_agent`` so warm short-circuit (all profiles)
+        and cold MCP reinject policy live only in the facade. ``_resumed_models``
+        is write-only here (last successful ``model:tool_profile`` key) so
+        ``forget_resumed_agent`` can drop stale entries after agent swaps; it is
+        not consulted for resume decisions. ``InvalidAgentError`` always triggers
+        ``_reattach_agent`` (cold missing handle or warm-but-stale after a
+        model/profile switch).
+        """
         model = self._resolve_model(model_override)
         tool_profile = effective_tool_profile(
             self._config.tool_profile, row.tool_profile
         )
         resume_key = f"{model}:{tool_profile}"
-        if self._resumed_models.get(row.agent_id) == resume_key:
-            return row
         cold_start = not self._facade.has_agent(row.agent_id)
         await self._ensure_messaging_hooks_for_row(row)
         try:
@@ -199,8 +206,8 @@ class SessionAgentPool:
                 runtime_mode=row.runtime,
             )
         except InvalidAgentError:
-            if not cold_start:
-                raise
+            # Reattach whether cold (not in memory) or warm-but-stale (in memory
+            # but SDK resume rejected after model/profile change).
             return await self._reattach_agent(
                 row,
                 model_override=model_override,
@@ -249,7 +256,12 @@ class SessionAgentPool:
         return updated
 
     def forget_resumed_agent(self, agent_id: str) -> None:
-        """Drop resume cache for ``agent_id`` after agent swaps (e.g. /compress)."""
+        """Clear cold-start tracking after agent swaps (e.g. /compress).
+
+        Also drops any leftover ``_resumed_models`` entry. That dict is write-only
+        and is not consulted for resume decisions — do not reintroduce a
+        pool-level short-circuit against it.
+        """
         self._resumed_models.pop(agent_id, None)
         self._cold_resumed_agent_ids.discard(agent_id)
 
@@ -304,10 +316,15 @@ class SessionAgentPool:
         *,
         model_override: str | None = None,
     ) -> SessionRecord:
-        """Resolve and lazily resume the session for ``session_key``."""
+        """Resolve and lazily resume the session for ``session_key``.
+
+        Shares the per-key lock with ``send`` so concurrent cold resumes cannot
+        double-call SDK ``agents.resume`` under overlapping CLI callers.
+        """
         row = await self._resolve_or_raise(session_key, session_id)
         self._assert_runtime_match(row)
-        row = await self._ensure_resumed(row, model_override=model_override)
+        async with self._lock_for(session_key):
+            row = await self._ensure_resumed(row, model_override=model_override)
         return row
 
     async def send(

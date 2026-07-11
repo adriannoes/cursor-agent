@@ -2,7 +2,7 @@
 
 Curated **Architecture Decision Records (ADRs)** for external contributors. Each ADR captures context, the decision, and consequences in a concise MADR-style format.
 
-Status values: **Accepted** means the decision is in effect in the current codebase.
+Status values: **Accepted** means the decision is in effect in the current codebase. **Proposed** means the decision is locked for implementation but not yet reflected in shipped code (e.g. a release-train design gate).
 
 | ADR | Summary |
 |-----|---------|
@@ -11,10 +11,11 @@ Status values: **Accepted** means the decision is in effect in the current codeb
 | [ADR-004](ADR-004-session-key-workspace.md) | Composite `session_key` includes workspace hash for project isolation |
 | [ADR-007](ADR-007-config-loader.md) | Typed config via pydantic-settings with CLI > env > YAML precedence |
 | [ADR-010](ADR-010-memory-v1.md) | Memory v1: 8 KB first-turn injection with `memory_injected` flag |
-| [ADR-014](ADR-014-tool-profiles-mvp.md) | MVP ships `coding` and `messaging` profiles only |
+| [ADR-014](ADR-014-tool-profiles-mvp.md) | MVP shipped `coding` + `messaging`; three-profile matrix superseded by [ADR-029](ADR-029-mcp-registry-full-profile.md) |
 | [ADR-022](ADR-022-tdd.md) | Mandatory test-first development for functional changes |
 | [ADR-027](ADR-027-onboarding-first-run.md) | First-run banner suppression, marker semantics, width limits |
 | [ADR-028](ADR-028-config-persistence-setup.md) | Setup wizard persistence: env-only secrets, atomic writes, permissions, idempotency |
+| [ADR-029](ADR-029-mcp-registry-full-profile.md) | MCP registry + `full` profile; coding/messaging/full matrix; no FastMCP dep |
 
 For system overview and diagrams, see [architecture.md](../architecture.md).
 

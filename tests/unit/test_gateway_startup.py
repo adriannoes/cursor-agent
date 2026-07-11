@@ -44,6 +44,16 @@ def test_resolve_gateway_startup_config_rejects_coding_profile() -> None:
         resolve_gateway_startup_config(config)
 
 
+def test_resolve_gateway_startup_config_rejects_full_profile() -> None:
+    """FR-2: full tool_profile raises ConfigError expecting messaging (PRD-012)."""
+    config = gateway_config(tool_profile="full")
+    with pytest.raises(ConfigError) as exc_info:
+        resolve_gateway_startup_config(config)
+    message = str(exc_info.value)
+    assert "expected 'messaging'" in message
+    assert "received 'full'" in message
+
+
 def test_resolve_gateway_startup_config_accepts_messaging_profile() -> None:
     """Messaging tool_profile converts to CursorAgentConfig."""
     config = gateway_config(tool_profile="messaging")
@@ -75,6 +85,35 @@ async def test_gateway_profile_coding_fails_before_hooks_store_and_adapters(
                 store_path=tmp_path / "sessions.db",
             ):
                 pytest.fail("gateway_runtime must not start with coding profile")
+
+        mock_hooks.assert_not_called()
+        mock_init.assert_not_called()
+        assert adapter.lifecycle == []
+
+
+async def test_gateway_profile_full_fails_before_hooks_store_and_adapters(
+    tmp_path: Path,
+) -> None:
+    """FR-2: full profile aborts before hooks, store, or adapters start."""
+    config_file = tmp_path / "gateway.yaml"
+    write_gateway_yaml(config_file, tool_profile="full")
+    adapter = FakePlatformAdapter()
+    facade = FakeSdkFacade()
+
+    with (
+        patch(
+            "cursor_agent.gateway.runner.bootstrap_messaging_hooks",
+        ) as mock_hooks,
+        patch.object(SessionStore, "initialize", autospec=True) as mock_init,
+    ):
+        with pytest.raises(ConfigError, match="full"):
+            async with gateway_runtime(
+                config_path=config_file,
+                adapters=[adapter],
+                facade=facade,
+                store_path=tmp_path / "sessions.db",
+            ):
+                pytest.fail("gateway_runtime must not start with full profile")
 
         mock_hooks.assert_not_called()
         mock_init.assert_not_called()

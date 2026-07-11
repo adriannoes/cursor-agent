@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -18,9 +19,16 @@ from cursor_agent.errors import (
     SupersededSessionError,
 )
 from cursor_agent.facade_logging import LogContext
+from cursor_agent.first_party_models import DEFAULT_AGENT_MODEL
 from cursor_agent.messaging_hooks import ensure_messaging_hooks
 from cursor_agent.pool import SessionAgentPool
-from cursor_agent.sdk_facade import FakeSdkFacade, RunResult, RunStatus, StreamCallbacks
+from cursor_agent.sdk_facade import (
+    AsyncSdkFacade,
+    FakeSdkFacade,
+    RunResult,
+    RunStatus,
+    StreamCallbacks,
+)
 from cursor_agent.sessions.models import SessionCreateParams
 from cursor_agent.sessions.store import SessionStore
 
@@ -103,6 +111,59 @@ class ResumeTrackingFacade(FakeSdkFacade):
             tool_profile=tool_profile,
             runtime_mode=runtime_mode,
         )
+
+
+class SdkResumeCountingFacade(FakeSdkFacade):
+    """Fake that separates facade ``resume_agent`` entry from SDK resume attempts.
+
+    Mimics AsyncSdkFacade ownership: pool may call ``resume_agent`` on every warm
+    get/send, but any profile with the same ``model:tool_profile`` short-circuits
+    without an SDK attempt. Cold resume (first call per agent) still records an
+    SDK attempt so MCP reinjection remains observable.
+
+    Authority for resume policy is production ``AsyncSdkFacade`` (see
+    ``test_coding_warm_pool_get_skips_sdk_via_real_facade`` and
+    ``test_facade_resume_send.py``). This fake only locks pool→facade call counts.
+    """
+
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(**kwargs)  # type: ignore[arg-type]
+        self.resume_calls: list[dict[str, object]] = []
+        self.sdk_resume_attempts: list[dict[str, object]] = []
+        self._warm_resume_keys: dict[str, str] = {}
+
+    async def resume_agent(
+        self,
+        agent_id: str,
+        *,
+        workspace: str,
+        model: str | None = None,
+        tool_profile: str | None = None,
+        runtime_mode: str = "local",
+    ) -> str:
+        """Record facade entry; count SDK attempts unless warm key matches."""
+        call: dict[str, object] = {
+            "agent_id": agent_id,
+            "workspace": workspace,
+            "model": model,
+            "tool_profile": tool_profile,
+            "runtime_mode": runtime_mode,
+        }
+        self.resume_calls.append(call)
+        profile = tool_profile if tool_profile is not None else "coding"
+        resume_key = f"{model}:{profile}"
+        if self._warm_resume_keys.get(agent_id) == resume_key:
+            return agent_id
+        self.sdk_resume_attempts.append(call)
+        result = await super().resume_agent(
+            agent_id,
+            workspace=workspace,
+            model=model,
+            tool_profile=tool_profile,
+            runtime_mode=runtime_mode,
+        )
+        self._warm_resume_keys[agent_id] = resume_key
+        return result
 
 
 class SendCapturingFacade(FakeSdkFacade):
@@ -247,16 +308,218 @@ async def test_lazy_resume_get_is_idempotent_per_agent_and_model(
     store: SessionStore,
     config: CursorAgentConfig,
 ) -> None:
-    """Repeated get() for the same agent_id and model resumes only once."""
+    """Repeated get() always delegates to facade; SDK resume stays once for coding.
+
+    Pool no longer short-circuits coding warm — facade owns MCP/SDK policy.
+    ``resume_calls == 2`` proves pool always calls ``facade.resume_agent``;
+    ``sdk_resume_attempts == 1`` proves facade skips SDK on the warm second get.
+    """
     session_key = "cli:default:abc12345"
-    facade = ResumeTrackingFacade()
+    facade = SdkResumeCountingFacade()
     await _seed_session(store, facade, session_key)
 
     pool = SessionAgentPool(store=store, facade=facade, config=config)
     await pool.get(session_key)
     await pool.get(session_key)
 
-    assert len(facade.resume_calls) == 1
+    assert len(facade.resume_calls) == 2
+    assert len(facade.sdk_resume_attempts) == 1
+    assert facade.sdk_resume_attempts[0]["tool_profile"] == "coding"
+
+
+@pytest.mark.asyncio
+async def test_coding_warm_pool_get_skips_sdk_via_real_facade(
+    store: SessionStore,
+    config: CursorAgentConfig,
+) -> None:
+    """Pool get() uses real AsyncSdkFacade; coding warm must not call SDK resume.
+
+    Guards against drift where ``SdkResumeCountingFacade`` stays green while
+    production ``resume_agent`` short-circuit changes.
+    """
+    session_key = "cli:default:codingwarm1"
+    workspace = "/tmp/ws-real-facade"
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-pool-coding-warm"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.create = AsyncMock(return_value=mock_agent)
+    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(api_key="test-key")
+    facade._client = mock_client
+    agent_id = await facade.create_agent(
+        workspace=workspace,
+        model=config.model,
+        tool_profile="coding",
+    )
+    await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id=agent_id,
+            workspace=workspace,
+            runtime="local",
+            tool_profile="coding",
+        )
+    )
+
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    await pool.get(session_key)
+    await pool.get(session_key)
+
+    mock_client.agents.resume.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_messaging_warm_pool_get_skips_sdk_via_real_facade(
+    store: SessionStore,
+) -> None:
+    """Pool get() + real AsyncSdkFacade: messaging warm must not call SDK resume."""
+    session_key = "cli:default:messagingwarm-real"
+    workspace = "/tmp/ws-real-facade-messaging"
+    config = _config_with_tool_profile("messaging")
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-pool-messaging-warm"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.create = AsyncMock(return_value=mock_agent)
+    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(api_key="test-key")
+    facade._client = mock_client
+    agent_id = await facade.create_agent(
+        workspace=workspace,
+        model=config.model,
+        tool_profile="messaging",
+    )
+    await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id=agent_id,
+            workspace=workspace,
+            runtime="local",
+            tool_profile="messaging",
+        )
+    )
+
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    await pool.get(session_key)
+    await pool.get(session_key)
+
+    mock_client.agents.resume.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_full_warm_pool_get_skips_sdk_via_real_facade(
+    store: SessionStore,
+) -> None:
+    """Pool get() + real AsyncSdkFacade: full warm must not call SDK resume."""
+    session_key = "cli:default:fullwarm-real"
+    workspace = "/tmp/ws-real-facade-full"
+    config = _config_with_tool_profile("full")
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-pool-full-warm"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.create = AsyncMock(return_value=mock_agent)
+    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(api_key="test-key")
+    facade._client = mock_client
+    agent_id = await facade.create_agent(
+        workspace=workspace,
+        model=config.model,
+        tool_profile="full",
+    )
+    await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id=agent_id,
+            workspace=workspace,
+            runtime="local",
+            tool_profile="full",
+        )
+    )
+
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    await pool.get(session_key)
+    await pool.get(session_key)
+
+    mock_client.agents.resume.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_coding_warm_send_skips_sdk_resume_on_repeated_send(
+    store: SessionStore,
+    config: CursorAgentConfig,
+) -> None:
+    """Repeated send() always hits facade.resume_agent; coding warm skips SDK.
+
+    Pool always calls ``facade.resume_agent``; facade skips SDK on coding warm
+    (mirrored here). Covers the hot CLI/gateway path through ``_ensure_resumed``.
+    """
+    session_key = "cli:default:codingwarmsend"
+    facade = SdkResumeCountingFacade(default_reply="ok")
+    await _seed_session(store, facade, session_key, tool_profile="coding")
+
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    await pool.send(session_key, "first")
+    await pool.send(session_key, "second")
+
+    assert len(facade.resume_calls) == 2
+    assert len(facade.sdk_resume_attempts) == 1
+    assert facade.sdk_resume_attempts[0]["tool_profile"] == "coding"
+
+
+@pytest.mark.asyncio
+async def test_full_profile_get_calls_facade_but_warm_skips_sdk(
+    store: SessionStore,
+) -> None:
+    """full: pool always calls resume_agent; warm second get skips SDK resume."""
+    session_key = "cli:default:fullmcp1"
+    facade = SdkResumeCountingFacade()
+    await _seed_session(store, facade, session_key, tool_profile="full")
+
+    pool = SessionAgentPool(
+        store=store,
+        facade=facade,
+        config=_config_with_tool_profile("full"),
+    )
+    await pool.get(session_key)
+    await pool.get(session_key)
+
+    assert len(facade.resume_calls) == 2
+    assert len(facade.sdk_resume_attempts) == 1
+    assert facade.resume_calls[0]["tool_profile"] == "full"
+    assert facade.resume_calls[1]["tool_profile"] == "full"
+
+
+@pytest.mark.asyncio
+async def test_messaging_profile_get_calls_facade_but_warm_skips_sdk(
+    store: SessionStore,
+) -> None:
+    """messaging: pool always calls resume_agent; warm second get skips SDK resume."""
+    session_key = "cli:default:msgmcp1"
+    facade = SdkResumeCountingFacade()
+    await _seed_session(store, facade, session_key, tool_profile="messaging")
+
+    pool = SessionAgentPool(
+        store=store,
+        facade=facade,
+        config=_config_with_tool_profile("messaging"),
+    )
+    await pool.get(session_key)
+    await pool.get(session_key)
+
+    assert len(facade.resume_calls) == 2
+    assert len(facade.sdk_resume_attempts) == 1
+    assert all(call["tool_profile"] == "messaging" for call in facade.resume_calls)
 
 
 @pytest.mark.asyncio
@@ -271,10 +534,10 @@ async def test_get_re_resumes_when_model_override_changes(
 
     pool = SessionAgentPool(store=store, facade=facade, config=config)
     await pool.get(session_key)
-    await pool.get(session_key, model_override="composer-2.5-fast")
+    await pool.get(session_key, model_override="opaque-override-model")
 
     assert len(facade.resume_calls) == 2
-    assert facade.resume_calls[1]["model"] == "composer-2.5-fast"
+    assert facade.resume_calls[1]["model"] == "opaque-override-model"
 
 
 @pytest.mark.asyncio
@@ -316,10 +579,10 @@ async def test_send_uses_model_override_on_resume(
     await _seed_session(store, facade, session_key)
 
     pool = SessionAgentPool(store=store, facade=facade, config=config)
-    await pool.send(session_key, "hello", model_override="composer-2.5-fast")
+    await pool.send(session_key, "hello", model_override="opaque-override-model")
 
     assert len(facade.resume_calls) == 1
-    assert facade.resume_calls[0]["model"] == "composer-2.5-fast"
+    assert facade.resume_calls[0]["model"] == "opaque-override-model"
 
 
 @pytest.mark.asyncio
@@ -409,6 +672,67 @@ async def test_lock_gateway_nonblocking_raises_agent_busy_error(
 
     send_release.set()
     await first_task
+
+
+@pytest.mark.asyncio
+async def test_lock_concurrent_get_serializes_cold_resume(
+    store: SessionStore,
+    config: CursorAgentConfig,
+) -> None:
+    """Concurrent get() shares the session lock so cold resume runs once."""
+    session_key = "cli:default:lockget1"
+    resume_release = asyncio.Event()
+    resume_entered = asyncio.Event()
+
+    class GatedResumeCountingFacade(SdkResumeCountingFacade):
+        """Hold the first resume until released; track concurrent in-flight peak."""
+
+        def __init__(self, **kwargs: object) -> None:
+            super().__init__(**kwargs)
+            self.concurrent_peak = 0
+            self._in_flight = 0
+
+        async def resume_agent(
+            self,
+            agent_id: str,
+            *,
+            workspace: str,
+            model: str | None = None,
+            tool_profile: str | None = None,
+            runtime_mode: str = "local",
+        ) -> str:
+            self._in_flight += 1
+            self.concurrent_peak = max(self.concurrent_peak, self._in_flight)
+            resume_entered.set()
+            await resume_release.wait()
+            try:
+                return await super().resume_agent(
+                    agent_id,
+                    workspace=workspace,
+                    model=model,
+                    tool_profile=tool_profile,
+                    runtime_mode=runtime_mode,
+                )
+            finally:
+                self._in_flight -= 1
+
+    facade = GatedResumeCountingFacade()
+    await _seed_session(store, facade, session_key)
+
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    first_task = asyncio.create_task(pool.get(session_key))
+    await resume_entered.wait()
+    second_task = asyncio.create_task(pool.get(session_key))
+    await asyncio.sleep(0.05)
+    assert not second_task.done()
+    assert facade.concurrent_peak == 1
+
+    resume_release.set()
+    await first_task
+    await second_task
+
+    assert facade.concurrent_peak == 1
+    assert len(facade.sdk_resume_attempts) == 1
 
 
 @pytest.mark.asyncio
@@ -570,13 +894,17 @@ async def test_messaging_hook_deploy_does_not_corrupt_resume_cache_or_metadata(
     config: CursorAgentConfig,
     tmp_path: Path,
 ) -> None:
-    """Workspace hook deploy must not change pool resume caching or session metadata."""
+    """Workspace hook deploy must not change SDK resume caching or session metadata.
+
+    Pool always delegates to ``facade.resume_agent``; coding warm still skips SDK.
+    Hook deploy must not force a second SDK resume or mutate session metadata.
+    """
     from cursor_agent import messaging_hooks
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     session_key = "cli:default:hookdep1"
-    facade = ResumeTrackingFacade()
+    facade = SdkResumeCountingFacade()
     session_id = await _seed_session(
         store,
         facade,
@@ -587,6 +915,7 @@ async def test_messaging_hook_deploy_does_not_corrupt_resume_cache_or_metadata(
     pool = SessionAgentPool(store=store, facade=facade, config=config)
     await pool.get(session_key)
     assert len(facade.resume_calls) == 1
+    assert len(facade.sdk_resume_attempts) == 1
 
     user_hooks = tmp_path / "user-hooks" / "messaging"
     messaging_hooks.install_messaging_hooks(target_dir=user_hooks)
@@ -596,7 +925,8 @@ async def test_messaging_hook_deploy_does_not_corrupt_resume_cache_or_metadata(
     )
 
     await pool.get(session_key)
-    assert len(facade.resume_calls) == 1
+    assert len(facade.resume_calls) == 2
+    assert len(facade.sdk_resume_attempts) == 1
 
     row = await store.resolve(session_key, session_id=session_id)
     assert row is not None
@@ -889,6 +1219,76 @@ async def test_send_reattaches_agent_after_invalid_agent_cold_resume(
     assert row.agent_id.startswith("fake-")
 
 
+class InvalidWarmStaleResumeFacade(FakeSdkFacade):
+    """Raises InvalidAgentError when resuming agents listed as warm-stale."""
+
+    def __init__(
+        self,
+        *,
+        fail_resume_for: set[str] | None = None,
+        **kwargs: object,
+    ) -> None:
+        super().__init__(**kwargs)  # type: ignore[arg-type]
+        self._fail_resume_for: set[str] = (
+            set(fail_resume_for) if fail_resume_for is not None else set()
+        )
+
+    async def resume_agent(
+        self,
+        agent_id: str,
+        *,
+        workspace: str,
+        model: str | None = None,
+        tool_profile: str | None = None,
+        runtime_mode: str = "local",
+    ) -> str:
+        """Fail resume for warm-stale ids; otherwise delegate to the parent fake."""
+        if agent_id in self._fail_resume_for:
+            raise InvalidAgentError(f"invalid agent_id: received {agent_id!r}")
+        return await super().resume_agent(
+            agent_id,
+            workspace=workspace,
+            model=model,
+            tool_profile=tool_profile,
+            runtime_mode=runtime_mode,
+        )
+
+
+@pytest.mark.asyncio
+async def test_send_reattaches_agent_after_invalid_agent_warm_stale_resume(
+    store: SessionStore,
+    config: CursorAgentConfig,
+) -> None:
+    """InvalidAgentError on warm-but-stale resume (agent in memory) reattaches."""
+    session_key = "cli:default:reattach-warm-stale"
+    facade = InvalidWarmStaleResumeFacade(default_reply="ok-after-warm-stale")
+    warm_agent_id = await facade.create_agent(
+        workspace="/tmp/workspace",
+        tool_profile="coding",
+    )
+    facade._fail_resume_for.add(warm_agent_id)
+    await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id=warm_agent_id,
+            workspace="/tmp/workspace",
+            runtime="local",
+            tool_profile="coding",
+        )
+    )
+
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    result = await pool.send(session_key, "hello after warm-stale resume")
+
+    assert result.status is RunStatus.FINISHED
+    assert result.text == "ok-after-warm-stale"
+    row = await store.resolve(session_key)
+    assert row is not None
+    assert row.agent_id != warm_agent_id
+    assert row.agent_id.startswith("fake-")
+    assert facade.has_agent(row.agent_id)
+
+
 class ReattachTrackingFacade(ColdStartSendFailFacade):
     """Cold-start send failure facade that records create_agent keyword arguments."""
 
@@ -900,7 +1300,7 @@ class ReattachTrackingFacade(ColdStartSendFailFacade):
         self,
         *,
         workspace: str,
-        model: str = "composer-2.5",
+        model: str = DEFAULT_AGENT_MODEL,
         tool_profile: str = "coding",
         runtime_mode: str = "local",
     ) -> str:

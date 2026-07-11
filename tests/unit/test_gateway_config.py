@@ -215,11 +215,55 @@ def test_load_gateway_config_tool_profile_coding(tmp_path: Path) -> None:
 def test_load_gateway_config_invalid_tool_profile_raises_config_error(
     tmp_path: Path,
 ) -> None:
-    """Invalid tool_profile values raise ConfigError."""
+    """Invalid tool_profile values raise ConfigError at load time."""
+    config_file = tmp_path / "gateway.yaml"
+    _write_gateway_yaml(config_file, _minimal_gateway_yaml(tool_profile="garbage"))
+    with pytest.raises(ConfigError, match="tool_profile|garbage"):
+        load_gateway_config(config_path=config_file)
+
+
+def test_load_gateway_config_tool_profile_full(tmp_path: Path) -> None:
+    """Gateway YAML may load tool_profile full; startup gate refuses it (FR-2)."""
     config_file = tmp_path / "gateway.yaml"
     _write_gateway_yaml(config_file, _minimal_gateway_yaml(tool_profile="full"))
-    with pytest.raises(ConfigError, match="tool_profile|full"):
-        load_gateway_config(config_path=config_file)
+    config = load_gateway_config(config_path=config_file)
+    assert config.tool_profile == "full"
+
+
+def test_resolve_gateway_startup_config_rejects_full_profile(tmp_path: Path) -> None:
+    """FR-2: startup rejects full with expected messaging (same shape as coding)."""
+    config_file = tmp_path / "gateway.yaml"
+    _write_gateway_yaml(config_file, _minimal_gateway_yaml(tool_profile="full"))
+    gateway_config = load_gateway_config(config_path=config_file)
+    with pytest.raises(ConfigError) as exc_info:
+        resolve_gateway_startup_config(gateway_config)
+    message = str(exc_info.value)
+    assert "expected 'messaging'" in message
+    assert "received 'full'" in message
+
+
+def test_to_cursor_agent_config_rejects_full_profile(tmp_path: Path) -> None:
+    """Converter itself refuses non-messaging so direct callers cannot bypass the gate."""
+    config_file = tmp_path / "gateway.yaml"
+    _write_gateway_yaml(config_file, _minimal_gateway_yaml(tool_profile="full"))
+    gateway_config = load_gateway_config(config_path=config_file)
+    with pytest.raises(ConfigError) as exc_info:
+        to_cursor_agent_config(gateway_config)
+    message = str(exc_info.value)
+    assert "expected 'messaging'" in message
+    assert "received 'full'" in message
+
+
+def test_to_cursor_agent_config_rejects_coding_profile(tmp_path: Path) -> None:
+    """Converter refuses coding the same way resolve_gateway_startup_config does."""
+    config_file = tmp_path / "gateway.yaml"
+    _write_gateway_yaml(config_file, _minimal_gateway_yaml(tool_profile="coding"))
+    gateway_config = load_gateway_config(config_path=config_file)
+    with pytest.raises(ConfigError) as exc_info:
+        to_cursor_agent_config(gateway_config)
+    message = str(exc_info.value)
+    assert "expected 'messaging'" in message
+    assert "received 'coding'" in message
 
 
 def test_to_cursor_agent_config_maps_workspace_and_profile(tmp_path: Path) -> None:
@@ -246,7 +290,7 @@ def test_to_cursor_agent_config_preserves_cli_compatible_defaults(
     gateway_config_loaded = load_gateway_config(config_path=config_file)
     agent_config = to_cursor_agent_config(gateway_config_loaded)
 
-    assert agent_config.model == "composer-2.5"
+    assert agent_config.model == "grok-4.5"
     assert agent_config.runtime.mode == "local"
     assert agent_config.runtime.local.setting_sources == ["project", "user"]
 
@@ -263,7 +307,7 @@ def test_to_cursor_agent_config_ignores_cursor_agent_env(
     gateway_config_loaded = load_gateway_config(config_path=config_file)
     agent_config = to_cursor_agent_config(gateway_config_loaded)
 
-    assert agent_config.model == "composer-2.5"
+    assert agent_config.model == "grok-4.5"
     assert agent_config.tool_profile == "messaging"
 
 

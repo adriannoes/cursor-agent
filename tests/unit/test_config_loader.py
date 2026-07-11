@@ -13,10 +13,10 @@ from cursor_agent.cli.startup import load_cwd_dotenv
 from cursor_agent.errors import ConfigError
 
 
-def test_defaults_model_is_composer_2_5() -> None:
-    """FR-10: default model matches STRATEGY §8 minimal config."""
+def test_defaults_model_is_grok_4_5() -> None:
+    """FR-10: default model is first-party Grok 4.5 (v1.1.0)."""
     config = load_config(config_path=Path("/nonexistent/config.yaml"))
-    assert config.model == "composer-2.5"
+    assert config.model == "grok-4.5"
 
 
 def test_defaults_tool_profile_is_coding() -> None:
@@ -330,3 +330,200 @@ def test_precedence_cli_over_dotenv_yaml_and_exported_env(
     cli_overrides: dict[str, Any] = {"model": "from-cli"}
     config = load_config(config_path=config_file, cli_overrides=cli_overrides)
     assert config.model == "from-cli"
+
+
+def test_yaml_tool_profile_full_is_accepted(tmp_path: Path) -> None:
+    """FR-1: loader accepts tool_profile full (PRD-012 / ADR-029)."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("tool_profile: full\n", encoding="utf-8")
+    config = load_config(config_path=config_file)
+    assert config.tool_profile == "full"
+
+
+def test_defaults_mcp_full_servers_is_none(tmp_path: Path) -> None:
+    """FR-9: omitted mcp.full.servers means default all curated (None)."""
+    config = load_config(config_path=tmp_path / "missing.yaml")
+    assert config.mcp.full.servers is None
+
+
+def test_defaults_mcp_full_github_transport_is_http(tmp_path: Path) -> None:
+    """Wave 5: omitted mcp.full.github_transport defaults to http (never Docker)."""
+    config = load_config(config_path=tmp_path / "missing.yaml")
+    assert config.mcp.full.github_transport == "http"
+
+
+def test_yaml_mcp_full_github_transport_stdio_round_trip(tmp_path: Path) -> None:
+    """Wave 5: mcp.full.github_transport: stdio loads as operator Docker choice."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        "mcp:\n  full:\n    github_transport: stdio\n",
+        encoding="utf-8",
+    )
+    config = load_config(config_path=config_file)
+    assert config.mcp.full.github_transport == "stdio"
+
+
+def test_yaml_mcp_full_github_transport_invalid_raises_config_error(
+    tmp_path: Path,
+) -> None:
+    """Invalid github_transport raises ConfigError with received value and allowed set."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        "mcp:\n  full:\n    github_transport: websocket\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError) as exc_info:
+        load_config(config_path=config_file)
+    message = str(exc_info.value)
+    assert "websocket" in message
+    assert "http" in message
+    assert "stdio" in message
+
+
+def test_env_mcp_full_github_transport_stdio_loads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CURSOR_AGENT__MCP__FULL__GITHUB_TRANSPORT=stdio loads as stdio."""
+    monkeypatch.setenv("CURSOR_AGENT__MCP__FULL__GITHUB_TRANSPORT", "stdio")
+    config = load_config(config_path=tmp_path / "missing.yaml")
+    assert config.mcp.full.github_transport == "stdio"
+
+
+def test_yaml_mcp_full_github_transport_case_normalized(tmp_path: Path) -> None:
+    """Loader lowercases github_transport so HTTP/STDIO match the allowed set."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        "mcp:\n  full:\n    github_transport: HTTP\n",
+        encoding="utf-8",
+    )
+    config = load_config(config_path=config_file)
+    assert config.mcp.full.github_transport == "http"
+
+
+def test_env_mcp_full_github_transport_case_normalized(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Env github_transport is case-normalized (STDIO → stdio)."""
+    monkeypatch.setenv("CURSOR_AGENT__MCP__FULL__GITHUB_TRANSPORT", "STDIO")
+    config = load_config(config_path=tmp_path / "missing.yaml")
+    assert config.mcp.full.github_transport == "stdio"
+
+
+def test_yaml_mcp_full_servers_allowlist_round_trip(tmp_path: Path) -> None:
+    """FR-9 / Q3: mcp.full.servers allowlist loads as a curated id list."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        "tool_profile: full\n"
+        "mcp:\n"
+        "  full:\n"
+        "    servers:\n"
+        "      - github\n"
+        "      - playwright\n",
+        encoding="utf-8",
+    )
+    config = load_config(config_path=config_file)
+    assert config.tool_profile == "full"
+    assert config.mcp.full.servers == ["github", "playwright"]
+
+
+def test_yaml_mcp_full_servers_unknown_id_raises_config_error(tmp_path: Path) -> None:
+    """Q3: unknown curated server id raises ConfigError with value and allowed set."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        "mcp:\n  full:\n    servers:\n      - not-a-curated-server\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError) as exc_info:
+        load_config(config_path=config_file)
+    message = str(exc_info.value)
+    assert "not-a-curated-server" in message
+    assert "github" in message
+    assert "brave-search" in message
+    assert "playwright" in message
+
+
+def test_yaml_mcp_full_servers_duplicate_id_raises_config_error(tmp_path: Path) -> None:
+    """Duplicate allowlist ids are rejected at load time (not silently deduped)."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        "mcp:\n  full:\n    servers:\n      - github\n      - github\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError) as exc_info:
+        load_config(config_path=config_file)
+    message = str(exc_info.value)
+    assert "duplicate" in message.lower()
+    assert "github" in message
+
+
+def test_yaml_mcp_full_servers_empty_list_is_empty_not_none(tmp_path: Path) -> None:
+    """Explicit empty allowlist loads as [] (all curated is None / omitted only)."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        "tool_profile: full\nmcp:\n  full:\n    servers: []\n",
+        encoding="utf-8",
+    )
+    config = load_config(config_path=config_file)
+    assert config.mcp.full.servers == []
+    assert config.mcp.full.servers is not None
+
+
+def test_env_mcp_full_servers_json_list_loads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CURSOR_AGENT__MCP__FULL__SERVERS JSON list loads as curated allowlist."""
+    monkeypatch.setenv(
+        "CURSOR_AGENT__MCP__FULL__SERVERS",
+        '["playwright","github"]',
+    )
+    config = load_config(config_path=tmp_path / "missing.yaml")
+    assert config.mcp.full.servers == ["playwright", "github"]
+
+
+def test_env_mcp_full_servers_empty_json_list_is_empty_not_none(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Env SERVERS=[] is explicit empty allowlist; unset remains None (all curated)."""
+    monkeypatch.setenv("CURSOR_AGENT__MCP__FULL__SERVERS", "[]")
+    empty_config = load_config(config_path=tmp_path / "missing.yaml")
+    assert empty_config.mcp.full.servers == []
+
+    monkeypatch.delenv("CURSOR_AGENT__MCP__FULL__SERVERS", raising=False)
+    unset_config = load_config(config_path=tmp_path / "missing.yaml")
+    assert unset_config.mcp.full.servers is None
+
+
+def test_env_mcp_full_servers_duplicate_id_raises_config_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Duplicate ids via env raise ConfigError with the repeated id."""
+    monkeypatch.setenv(
+        "CURSOR_AGENT__MCP__FULL__SERVERS",
+        '["playwright","playwright"]',
+    )
+    with pytest.raises(ConfigError) as exc_info:
+        load_config(config_path=tmp_path / "missing.yaml")
+    message = str(exc_info.value)
+    assert "duplicate" in message.lower()
+    assert "playwright" in message
+
+
+def test_env_mcp_full_servers_unknown_id_raises_config_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unknown id via env raises ConfigError with received value and allowed set."""
+    monkeypatch.setenv(
+        "CURSOR_AGENT__MCP__FULL__SERVERS",
+        '["not-a-curated-server"]',
+    )
+    with pytest.raises(ConfigError) as exc_info:
+        load_config(config_path=tmp_path / "missing.yaml")
+    message = str(exc_info.value)
+    assert "not-a-curated-server" in message
+    assert "playwright" in message

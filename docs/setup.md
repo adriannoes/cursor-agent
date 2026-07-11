@@ -18,10 +18,118 @@ At startup the CLI loads a gitignored `.env` file from the **current working dir
 | `CURSOR_AGENT__RUNTIME__LOCAL__CWD` | Default workspace directory for local agents |
 | `CURSOR_AGENT__MEMORY_ROOT` | Directory containing `USER.md` and `MEMORY.md` |
 | `CURSOR_AGENT_SESSIONS_DB` | SQLite session store path |
-| `CURSOR_AGENT__MODEL` | Model id (default: `composer-2.5`) |
-| `CURSOR_AGENT__TOOL_PROFILE` | `coding` or `messaging` (default: `coding`) |
+| `CURSOR_AGENT__MODEL` | Model id (default: `grok-4.5`; pin Composer with `composer-2.5`) |
+| `CURSOR_AGENT__TOOL_PROFILE` | `coding`, `messaging`, or `full` (default: `coding`) |
+| `CURSOR_AGENT__MCP__FULL__SERVERS` | JSON list of curated MCP server ids for `full` (default: all curated) |
+| `CURSOR_AGENT__MCP__FULL__GITHUB_TRANSPORT` | `github` transport for `full`: `http` (default) or `stdio` (case-insensitive) |
 
 Legacy flat names `CURSOR_AGENT_WORKSPACE` and `CURSOR_AGENT_CONFIG` are **not supported** — use `CURSOR_AGENT__RUNTIME__LOCAL__CWD` and `~/.cursor-agent/config.yaml` instead.
+
+### Choosing a model
+
+When `model` is unset, the default is **Grok 4.5** (`grok-4.5`). Recommended first-party options:
+
+| Id | Role |
+|----|------|
+| `grok-4.5` | Default when unset |
+| `composer-2.5` | Alternate — pin for cost or preference |
+
+Choose a model via:
+
+- Interactive `cursor-agent setup` — model step accepts `1` (Grok), `2` (Composer), or a Cursor SDK model id
+- YAML: `model: composer-2.5` in `~/.cursor-agent/config.yaml`
+- Env: `CURSOR_AGENT__MODEL=composer-2.5`
+- REPL: `/model composer-2.5` (bare `/model` lists first-party options)
+
+Other Cursor SDK model ids are accepted (advanced). Existing YAML or env that already pins `composer-2.5` is preserved ([ADR-007](decisions/ADR-007-config-loader.md)).
+
+### Tool profile `full` (curated MCP allowlist)
+
+`full` injects a curated MCP allowlist for trusted **local** operators (`github` defaults to remote HTTP; Brave/Playwright stay local stdio). It is **local-only** — the Telegram gateway refuses to start with `full` (use `messaging` there). There is no `cursor-agent mcp *` CLI; enable the profile and set secrets via env. Design details: [ADR-029](decisions/ADR-029-mcp-registry-full-profile.md) and [Architecture — Tool profiles](architecture.md#tool-profiles).
+
+**Effective profile:** if config or session is `messaging`, messaging wins. Otherwise, among `coding` / `full`, the **session** profile wins over config (example: `config=full` + `session=coding` → `coding`).
+
+Enable with any of:
+
+```bash
+cursor-agent setup --tool-profile full --yes
+```
+
+```bash
+export CURSOR_AGENT__TOOL_PROFILE=full
+```
+
+Or in `~/.cursor-agent/config.yaml`:
+
+```yaml
+tool_profile: full
+```
+
+Curated servers and required env (secrets stay in env — never put tokens in YAML plaintext):
+
+| Server id | Required env | Launch notes |
+|-----------|--------------|--------------|
+| `github` | `GITHUB_PERSONAL_ACCESS_TOKEN` | **Default:** official remote HTTP (`https://api.githubcopilot.com/mcp/`). **Opt-in:** Docker stdio via `mcp.full.github_transport: stdio` |
+| `brave-search` | `BRAVE_API_KEY` | `npx -y @brave/brave-search-mcp-server` |
+| `playwright` | _(none)_ | `npx -y @playwright/mcp@0.0.78` (pinned; bump deliberately) |
+
+**Default path — `github` without Docker** (PAT required; omit+warn if missing):
+
+```bash
+export CURSOR_AGENT__TOOL_PROFILE=full
+export CURSOR_AGENT__MCP__FULL__SERVERS='["github"]'
+export GITHUB_PERSONAL_ACCESS_TOKEN="your-github-pat"
+# CURSOR_AGENT__MCP__FULL__GITHUB_TRANSPORT defaults to http — no Docker needed
+cursor-agent
+```
+
+**Operator choice — local Docker stdio** (air-gapped / remote blocked hosts):
+
+```bash
+export CURSOR_AGENT__TOOL_PROFILE=full
+export CURSOR_AGENT__MCP__FULL__SERVERS='["github"]'
+export GITHUB_PERSONAL_ACCESS_TOKEN="your-github-pat"
+export CURSOR_AGENT__MCP__FULL__GITHUB_TRANSPORT=stdio
+# requires a running Docker daemon and image ghcr.io/github/github-mcp-server
+cursor-agent
+```
+
+YAML equivalent for the transport choice:
+
+```yaml
+tool_profile: full
+mcp:
+  full:
+    github_transport: stdio  # default is http when omitted
+```
+
+Example local `.env` placeholders for the full curated set (see [.env.example](../.env.example)):
+
+```bash
+export CURSOR_AGENT__TOOL_PROFILE=full
+export GITHUB_PERSONAL_ACCESS_TOKEN="your-github-pat"
+export BRAVE_API_KEY="your-brave-api-key"
+```
+
+**Missing env (omit, do not hard-fail):** if a curated server’s required env is unset, that server is omitted and a one-time warning is emitted. The REPL still starts; secret values are never logged.
+
+Optional allowlist. When the key is **omitted** / unset (`null`), all curated ids are enabled. An **explicit empty list** is different — it injects an empty MCP map and does **not** emit omit-missing-env warnings:
+
+```yaml
+mcp:
+  full:
+    servers: [github, brave-search, playwright]  # subset or all curated ids
+# servers: []   # empty map on purpose — not the same as omitting the key
+```
+
+Env form (JSON list):
+
+```bash
+export CURSOR_AGENT__MCP__FULL__SERVERS='["github","playwright"]'
+# export CURSOR_AGENT__MCP__FULL__SERVERS='[]'  # empty map; no omit warnings
+```
+
+Ops may use `npx mcporter` for MCP discovery outside this project; it is **not** a `cursor-agent` dependency.
 
 ## Interactive setup
 
@@ -31,13 +139,15 @@ Setup does **not** export variables into the current shell. After apply, run `so
 
 ### Humans (interactive)
 
-On a TTY, run without value-bearing flags:
+On a TTY, run without value-bearing flags (opt-in — setup is never forced on first REPL launch):
 
 ```bash
 cursor-agent setup
 ```
 
-This command walks through API key (hidden input), workspace, and optional paths, then writes configuration after confirmation.
+Interactive setup uses a guided step UI: API key (hidden input), workspace, optional memory/sessions paths, model choice (`1` / `2` / SDK id), and tool profile (`1` / `2` / `3` / name — including `full` for trusted local use). After a summary confirmation it writes configuration.
+
+Non-interactive `setup apply` (value-bearing flags + `--yes`) stays terse and unchanged — no step chrome.
 
 Verify and inspect:
 

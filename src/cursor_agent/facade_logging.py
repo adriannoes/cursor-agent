@@ -280,6 +280,32 @@ def emit_hook_deploy(
     logger.info(json.dumps(payload, separators=(",", ":")))
 
 
+def emit_mcp_servers_injected(
+    logger: logging.Logger,
+    *,
+    tool_profile: str,
+    server_names: list[str],
+) -> None:
+    """Emit NDJSON ``mcp_servers_injected`` with server names only (never tokens).
+
+    Example:
+        emit_mcp_servers_injected(
+            logger,
+            tool_profile="full",
+            server_names=["github", "playwright"],
+        )
+    """
+    payload: dict[str, Any] = {
+        "v": _LOG_SCHEMA_VERSION,
+        "ts": _utc_timestamp(),
+        "level": "info",
+        "event": "mcp_servers_injected",
+        "tool_profile": tool_profile,
+        "server_names": list(server_names),
+    }
+    logger.info(json.dumps(payload, separators=(",", ":")))
+
+
 def emit_pool_agent_reattach(
     logger: logging.Logger,
     *,

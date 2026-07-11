@@ -1,6 +1,6 @@
 # Architecture
 
-High-level design of **Cursor Agent** — an orchestration layer on the [Cursor SDK (Python)](https://cursor.com/docs/sdk/python) and **Composer 2.5**. For install and operations, see [setup.md](setup.md). For recorded design choices, see [Architecture decisions](decisions/README.md).
+High-level design of **Cursor Agent** — an orchestration layer on the [Cursor SDK (Python)](https://cursor.com/docs/sdk/python) and first-party models (**Grok 4.5** default, **Composer 2.5** available). For install and operations, see [setup.md](setup.md). For recorded design choices, see [Architecture decisions](decisions/README.md).
 
 ---
 
@@ -32,7 +32,7 @@ Reference projects may inform **behavior patterns** — reimplement in `cursor_a
                              ▼
                     AsyncSdkFacade  ← cursor_sdk via sdk_facade + sdk_error_mapping
                              ▼
-                    Cursor SDK (Composer 2.5 + tools)
+                    Cursor SDK (Grok 4.5 / Composer 2.5 + tools)
                              ▼
                   Local cwd  |  Cloud VM
 ```
@@ -99,7 +99,7 @@ All `cursor_sdk` imports are confined to `src/cursor_agent/sdk_facade.py` and `s
 - `FakeSdkFacade` — unit tests without `CURSOR_API_KEY`
 - Sync CLI paths use `asyncio.run()` per command or a single async REPL
 
-Bridge lifecycle, retry, dispose, and MCP re-injection on resume live in the facade. See [ADR-002](decisions/ADR-002-async-sdk-facade.md).
+Bridge lifecycle, retry, dispose, and MCP re-injection on **cold** resume live in the facade. See [ADR-002](decisions/ADR-002-async-sdk-facade.md).
 
 ---
 
@@ -109,21 +109,25 @@ The SDK does not disable native tools (`shell`, `edit`, …). Real control comes
 
 | Profile | Use case | Posture |
 |---------|----------|---------|
-| `coding` | Local development, trusted operator | SDK auto-approve; optional dev hooks; project/user MCP preserved |
+| `coding` | Local development, trusted operator | SDK auto-approve; optional dev hooks; project/user MCP preserved; sandbox off |
 | `messaging` | Gateways, bots, untrusted input | Read-only workspace; deny hooks; empty MCP; sandbox network off |
+| `full` | Trusted local operator with curated MCP | SDK auto-approve; curated allowlist from `mcp_registry`; sandbox off; **local-only** |
 
-MVP ships only `coding` and `messaging` ([ADR-014](decisions/ADR-014-tool-profiles-mvp.md)). Gateways **must** use `messaging` and refuse to start with `coding`.
+Three profiles are available: `coding` and `messaging` ([ADR-014](decisions/ADR-014-tool-profiles-mvp.md)), plus `full` (curated MCP allowlist — `github` defaults to remote HTTP; other servers remain local stdio) per [ADR-029](decisions/ADR-029-mcp-registry-full-profile.md). Curated MVP servers: `github` (default remote HTTP; Docker stdio opt-in), `brave-search`, `playwright`. Gateways **must** use `messaging` and refuse to start with any other profile (including `full`).
 
 ### MCP and sandbox by profile (create and resume)
 
-The SDK facade applies profile policy on **both** agent create and resume — not only on first launch.
+The SDK facade applies profile MCP/sandbox policy on **agent create** and on **cold resume** (agent not already in the facade process). Warm agents already loaded with the same `model:tool_profile` short-circuit inside `resume_agent` without calling SDK `agents.resume` — warm SDK resume invalidates the in-memory handle (`Unknown agent`). Pool still calls `facade.resume_agent` on every get/send; the facade owns the warm skip.
 
-| Profile | Agent create | Agent resume |
-|---------|--------------|--------------|
-| `coding` | Omits `mcp_servers` so Cursor **project** (`.cursor/mcp.json`) and **user** MCP settings apply | Omits `mcp_servers` so persisted SDK/project MCP settings apply |
-| `messaging` | Passes `mcp_servers: {}` and enables sandbox (network off) | Re-injects `mcp_servers: {}` and sandbox for defense in depth |
+| Profile | Agent create | Cold resume (not in memory) | Warm resume (same model:profile in memory) |
+|---------|--------------|-----------------------------|--------------------------------------------|
+| `coding` | Omits `mcp_servers` (`None`) so Cursor **project** (`.cursor/mcp.json`) and **user** MCP settings apply | Omits `mcp_servers` so persisted SDK/project MCP settings apply | Short-circuit; no SDK resume |
+| `messaging` | Passes `mcp_servers: {}` and enables sandbox (network off) | Re-injects `mcp_servers: {}` and sandbox (defense in depth) | Short-circuit; empty MCP from create remains |
+| `full` | Passes curated allowlist map from `mcp_registry` (sandbox off) | Re-injects the curated allowlist map (sandbox off; re-reads process environ) | Short-circuit; mid-process env/allowlist changes apply only after cold resume |
 
-Local `coding` runs also pass `setting_sources: ["project", "user"]` so workspace and user-level Cursor settings load. `messaging` still deploys deny hooks to the workspace before the first pool use.
+See [ADR-029](decisions/ADR-029-mcp-registry-full-profile.md) for registry path, secrets, and gateway refuse rules.
+
+Local `coding` runs also pass `setting_sources: ["project", "user"]` so workspace and user-level Cursor settings load. `messaging` still deploys deny hooks to the workspace before the first pool use. `full` is local-only and never used on the gateway.
 
 Threat model, hook layout and acceptance probes: [SECURITY.md](../SECURITY.md).
 

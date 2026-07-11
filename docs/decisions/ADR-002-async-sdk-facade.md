@@ -22,7 +22,7 @@ Sync CLI entry points call `asyncio.run()` per command or run a single async REP
 
 - Stable contract isolated from SDK breaking changes.
 - Fast, deterministic unit tests in CI without API keys.
-- Bridge lifecycle, retry, dispose, and MCP re-injection on resume are centralized.
+- Bridge lifecycle, retry, dispose, and MCP re-injection on cold resume are centralized.
 
 **Negative**
 

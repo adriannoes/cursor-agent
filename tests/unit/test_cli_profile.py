@@ -73,6 +73,35 @@ def test_profile_coding_passes_cli_override_to_load_config(
     assert captured["cli_overrides"] == {"tool_profile": "coding"}
 
 
+def test_profile_full_passes_cli_override_to_load_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--profile full reaches load_config with tool_profile CLI override (PRD-012)."""
+    captured: dict[str, object] = {"cli_overrides": None}
+
+    def stub_load_config(
+        config_path: object = None,
+        cli_overrides: Mapping[str, object] | None = None,
+    ) -> CursorAgentConfig:
+        captured["cli_overrides"] = dict(cli_overrides) if cli_overrides else None
+        return load_config(config_path=config_path, cli_overrides=cli_overrides)
+
+    async def stub_run_default(
+        _config: CursorAgentConfig,
+        *,
+        no_banner: bool = False,
+    ) -> RunStatus | None:
+        _ = no_banner
+        return None
+
+    monkeypatch.setattr("cursor_agent.cli.app.load_config", stub_load_config)
+    monkeypatch.setattr("cursor_agent.cli.app.run_default", stub_run_default)
+
+    result = CliRunner().invoke(app, ["--profile", "full"])
+    assert result.exit_code == 0
+    assert captured["cli_overrides"] == {"tool_profile": "full"}
+
+
 def test_profile_invalid_fails_before_startup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

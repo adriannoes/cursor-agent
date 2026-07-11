@@ -72,7 +72,7 @@ ApplyToolProfileOpt = Annotated[
     str | None,
     typer.Option(
         "--tool-profile",
-        help="Tool profile: coding or messaging (YAML).",
+        help="Tool profile: coding, messaging, or full (YAML).",
     ),
 ]
 ApplyConfigPathOpt = Annotated[

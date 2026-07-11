@@ -414,6 +414,55 @@ async def test_gateway_runtime_passes_dotenv_cursor_api_key_to_facade(
 
 
 @pytest.mark.asyncio
+async def test_gateway_runtime_omits_mcp_full_kwargs_from_facade(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gateway production facade must not receive curated MCP allowlist kwargs."""
+    captured_kwargs: list[dict[str, object]] = []
+
+    class RecordingSdkFacade:
+        """Capture constructor kwargs for messaging-path hygiene assertions."""
+
+        def __init__(
+            self,
+            *,
+            api_key: str | None = None,
+            local_setting_sources: list[str] | None = None,
+            **kwargs: object,
+        ) -> None:
+            captured_kwargs.append(
+                {
+                    "api_key": api_key,
+                    "local_setting_sources": local_setting_sources,
+                    **kwargs,
+                }
+            )
+
+        async def __aenter__(self) -> RecordingSdkFacade:
+            return self
+
+        async def __aexit__(self, *_exc: object) -> None:
+            return None
+
+    monkeypatch.setenv("CURSOR_API_KEY", "gateway-test-key")
+    monkeypatch.setattr(
+        "cursor_agent.gateway.runner.AsyncSdkFacade", RecordingSdkFacade
+    )
+
+    async with gateway_runtime(
+        gateway_config(),
+        adapters=[FakePlatformAdapter()],
+        store_path=tmp_path / "gateway-sessions.db",
+    ):
+        pass
+
+    assert len(captured_kwargs) == 1
+    assert "mcp_full_servers" not in captured_kwargs[0]
+    assert "mcp_full_github_transport" not in captured_kwargs[0]
+
+
+@pytest.mark.asyncio
 async def test_run_default_welcome_before_repl_bootstrap(
     config: CursorAgentConfig,
     tmp_path: Path,

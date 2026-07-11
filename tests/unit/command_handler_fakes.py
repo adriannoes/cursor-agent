@@ -7,6 +7,7 @@ import logging
 from typing import Any
 
 from cursor_agent.errors import InvalidAgentError
+from cursor_agent.first_party_models import DEFAULT_AGENT_MODEL
 from cursor_agent.sdk_facade import FakeSdkFacade, RunResult, RunStatus, StreamCallbacks
 from cursor_agent.sessions.store import SessionStore
 
@@ -219,7 +220,7 @@ class _CompressSendSpyFacade(FakeSdkFacade):
         self,
         *,
         workspace: str,
-        model: str = "composer-2.5",
+        model: str = DEFAULT_AGENT_MODEL,
         tool_profile: str = "coding",
         runtime_mode: str = "local",
     ) -> str:

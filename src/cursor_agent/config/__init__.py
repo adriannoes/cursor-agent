@@ -2,7 +2,10 @@
 
 from cursor_agent.config.loader import (
     CursorAgentConfig,
+    GithubTransport,
     LocalRuntimeConfig,
+    McpConfig,
+    McpFullConfig,
     RuntimeConfig,
     ToolProfile,
     load_config,
@@ -10,7 +13,10 @@ from cursor_agent.config.loader import (
 
 __all__ = [
     "CursorAgentConfig",
+    "GithubTransport",
     "LocalRuntimeConfig",
+    "McpConfig",
+    "McpFullConfig",
     "RuntimeConfig",
     "ToolProfile",
     "load_config",

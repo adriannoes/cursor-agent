@@ -189,7 +189,7 @@ def cli_entry(
         ToolProfile | None,
         typer.Option(
             "--profile",
-            help="Tool profile override (coding or messaging).",
+            help="Tool profile override (coding, messaging, or full).",
         ),
     ] = None,
     no_banner: Annotated[
