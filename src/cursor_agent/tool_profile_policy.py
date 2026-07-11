@@ -117,18 +117,21 @@ def _mcp_servers_for_full(
     return servers
 
 
-def passes_mcp_servers_on_resume(tool_profile: str) -> bool:
-    """Return True when resume must inject explicit ``mcp_servers``.
+def passes_mcp_servers_on_cold_resume(tool_profile: str) -> bool:
+    """Return True when cold resume must inject explicit ``mcp_servers``.
 
+    Cold resume means the agent is not already loaded in the facade process.
     Coding omits the field so persisted SDK/project MCP settings apply.
-    Messaging and full pass an explicit map for defense in depth on resume.
+    Messaging and full pass an explicit map on cold resume only. Warm agents
+    short-circuit in ``AsyncSdkFacade.resume_agent`` (same ``model:tool_profile``)
+    because SDK warm resume invalidates the in-memory handle.
 
     Example:
-        >>> passes_mcp_servers_on_resume("messaging")
+        >>> passes_mcp_servers_on_cold_resume("messaging")
         True
-        >>> passes_mcp_servers_on_resume("full")
+        >>> passes_mcp_servers_on_cold_resume("full")
         True
-        >>> passes_mcp_servers_on_resume("coding")
+        >>> passes_mcp_servers_on_cold_resume("coding")
         False
     """
     return tool_profile in {"messaging", "full"}

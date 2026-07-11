@@ -6,21 +6,25 @@
 >
 > **Amendment (2026-07-09):** Curated `github` **default** = official remote HTTP (`https://api.githubcopilot.com/mcp/`) with `Authorization: Bearer <PAT>` from `GITHUB_PERSONAL_ACCESS_TOKEN`. Docker **stdio** is an **operator opt-in** (`mcp.full.github_transport: stdio` / `CURSOR_AGENT__MCP__FULL__GITHUB_TRANSPORT`), not a silent fallback. Unset → always `http`. Messaging / gateway rules unchanged ([SECURITY.md](../../SECURITY.md)). No interactive OAuth; no FastMCP/`mcp` runtime dep. Detailed spike evidence lives in the internal ADR Appendix B.
 
+> **Amendment (2026-07-10):** Warm `resume_agent` short-circuits for every profile when the agent is already in the facade with the same `model:tool_profile` (SDK warm resume invalidates the live handle). Messaging/full MCP re-inject applies on **create** and **cold resume** only — not on every warm get/send. Mid-process `full` env/allowlist changes take effect on the next cold resume.
+
 ## Context
 
 v1.0 ships two tool profiles ([ADR-014](ADR-014-tool-profiles-mvp.md)): `coding` (omit `mcp_servers` so project/user `.cursor/mcp.json` applies) and `messaging` (force empty MCP + sandbox + deny hooks). Trusted local operators need a documented, product-owned MCP allowlist (search / GitHub / browser) without weakening the gateway-safe messaging invariant.
 
-The Cursor SDK is already the MCP host via `mcp_servers` on create/resume. This ADR locks the registry path, three-profile matrix, secrets, and gateway rules before implementation (PRD-012).
+The Cursor SDK is already the MCP host via `mcp_servers` on create and cold resume. This ADR locks the registry path, three-profile matrix, secrets, and gateway rules before implementation (PRD-012).
 
 ## Decision
 
 **Thin in-repo `mcp_registry` → Cursor SDK `mcp_servers`.** No FastMCP, official `mcp` package, or mcporter as a runtime dependency.
 
-| Profile | MCP create/resume | Sandbox | Where |
-|---------|-------------------|---------|-------|
-| `messaging` | always `{}` | on | Gateway / untrusted |
-| `coding` | omit (`None`) — preserve project/user MCP | off | Trusted local |
-| `full` | curated allowlist map (re-inject on resume) | off | **Local-only**; never on gateway |
+| Profile | MCP create | MCP cold resume | Sandbox | Where |
+|---------|------------|-----------------|---------|-------|
+| `messaging` | always `{}` | re-inject `{}` | on | Gateway / untrusted |
+| `coding` | omit (`None`) — preserve project/user MCP | omit | off | Trusted local |
+| `full` | curated allowlist map | re-inject curated map (re-read environ) | off | **Local-only**; never on gateway |
+
+Warm resume (agent already in facade, same `model:tool_profile`) short-circuits without SDK `agents.resume` for all profiles; create-time MCP remains until cold resume.
 
 **Key rules**
 
@@ -45,6 +49,7 @@ The Cursor SDK is already the MCP host via `mcp_servers` on create/resume. This 
 **Negative**
 
 - `full` still needs Node/`npx` for Brave and Playwright; Docker only if the operator chooses github `stdio`. Partial maps when env is incomplete; no merge of curated + custom mcp.json under `full` in v1.1.
+- Warm `full` sessions do not re-read process environ/allowlist until cold resume (intentional tradeoff vs SDK warm-resume invalidation).
 
 ## See also
 

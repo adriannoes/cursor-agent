@@ -16,7 +16,7 @@ from cursor_agent.tool_profile_policy import (
     clear_mcp_omit_warning_cache_for_tests,
     effective_tool_profile,
     mcp_servers_override_for_profile,
-    passes_mcp_servers_on_resume,
+    passes_mcp_servers_on_cold_resume,
     requires_messaging_hooks,
     sandbox_enabled,
 )
@@ -194,16 +194,16 @@ def test_sandbox_enabled_only_for_messaging() -> None:
     assert sandbox_enabled("full") is False
 
 
-def test_passes_mcp_servers_on_resume_coding_omits_override() -> None:
-    """Coding resume must omit mcp_servers so SDK/project MCP settings apply."""
-    assert passes_mcp_servers_on_resume("coding") is False
+def test_passes_mcp_servers_on_cold_resume_coding_omits_override() -> None:
+    """Coding cold resume must omit mcp_servers so SDK/project MCP settings apply."""
+    assert passes_mcp_servers_on_cold_resume("coding") is False
 
 
-def test_passes_mcp_servers_on_resume_messaging_injects_empty_map() -> None:
-    """Messaging resume must pass explicit empty mcp_servers for defense in depth."""
-    assert passes_mcp_servers_on_resume("messaging") is True
+def test_passes_mcp_servers_on_cold_resume_messaging_injects_empty_map() -> None:
+    """Messaging cold resume must pass explicit empty mcp_servers for defense in depth."""
+    assert passes_mcp_servers_on_cold_resume("messaging") is True
 
 
-def test_passes_mcp_servers_on_resume_full_reinjects() -> None:
-    """Full resume must re-inject curated mcp_servers (same posture as messaging)."""
-    assert passes_mcp_servers_on_resume("full") is True
+def test_passes_mcp_servers_on_cold_resume_full_reinjects() -> None:
+    """Full cold resume must re-inject curated mcp_servers (same posture as messaging)."""
+    assert passes_mcp_servers_on_cold_resume("full") is True

@@ -80,9 +80,9 @@ hooks/messaging/                          # repo source of truth
 
 ### MCP and sandbox on create and resume
 
-Profile policy applies on **both** agent create and resume — see [Architecture — MCP and sandbox by profile](docs/architecture.md#mcp-and-sandbox-by-profile-create-and-resume).
+Profile policy applies on **agent create** and on **cold resume** (agent not already in the facade process). Warm agents with the same `model:tool_profile` short-circuit without SDK `agents.resume` — see [Architecture — MCP and sandbox by profile](docs/architecture.md#mcp-and-sandbox-by-profile-create-and-resume).
 
-`coding` is not gateway-safe even when MCP is preserved. `full` injects a curated allowlist (`github`, `brave-search`, `playwright`) and is **local-only** — the gateway refuses any `tool_profile != messaging` (including `full`). Default `github` transport is official remote HTTPS (`Authorization: Bearer` from `GITHUB_PERSONAL_ACCESS_TOKEN`); Docker stdio is an explicit operator opt-in. `messaging` keeps empty MCP (`{}`), sandbox, and deny hooks; curated MCP never reaches gateway or messaging sessions ([ADR-029](docs/decisions/ADR-029-mcp-registry-full-profile.md)).
+`coding` is not gateway-safe even when MCP is preserved. `full` injects a curated allowlist (`github`, `brave-search`, `playwright`) and is **local-only** — the gateway refuses any `tool_profile != messaging` (including `full`). Default `github` transport is official remote HTTPS (`Authorization: Bearer` from `GITHUB_PERSONAL_ACCESS_TOKEN`); Docker stdio is an explicit operator opt-in. `messaging` keeps empty MCP (`{}`), sandbox, and deny hooks on create and cold resume; curated MCP never reaches gateway or messaging sessions ([ADR-029](docs/decisions/ADR-029-mcp-registry-full-profile.md)). Warm messaging/full sessions rely on create-time injection until the next cold resume (process restart or agent not in memory).
 
 ---
 

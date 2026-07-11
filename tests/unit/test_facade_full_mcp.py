@@ -68,10 +68,14 @@ async def test_full_create_agent_passes_curated_mcp_servers(
 
 
 @pytest.mark.asyncio
-async def test_full_resume_agent_reinjects_curated_mcp_servers(
+async def test_full_warm_resume_skips_sdk_when_already_in_memory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Full warm resume must call SDK and re-inject curated mcp_servers."""
+    """Full warm resume must not call SDK (create already injected curated MCP).
+
+    Warm ``agents.resume`` invalidates the in-memory server agent; cold resume
+    still reinjects curated MCP (see ``test_full_cold_resume_reinjects_curated_mcp_servers``).
+    """
     monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", FAKE_FULL_GITHUB_TOKEN)
     monkeypatch.setenv("BRAVE_API_KEY", FAKE_FULL_BRAVE_KEY)
 
@@ -90,21 +94,14 @@ async def test_full_resume_agent_reinjects_curated_mcp_servers(
     agent_id = await facade.create_agent(workspace="/repo", tool_profile="full")
     mock_client.agents.resume.reset_mock()
 
-    await facade.resume_agent(
+    resumed_id = await facade.resume_agent(
         agent_id,
         workspace="/repo",
         tool_profile="full",
     )
 
-    mock_client.agents.resume.assert_called_once()
-    options = resume_request_options(mock_client)
-    mcp_servers = options.get("mcpServers")
-    assert isinstance(mcp_servers, dict)
-    assert "playwright" in mcp_servers
-    assert "github" in mcp_servers
-    local_opts = options.get("local")
-    assert isinstance(local_opts, dict)
-    assert sandbox_enabled(local_opts) is None
+    assert resumed_id == agent_id
+    mock_client.agents.resume.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -234,35 +231,6 @@ async def test_full_create_github_transport_default_wires_url_based_config(
     github = mcp_servers["github"]
     assert "url" in github
     assert "command" not in github
-
-
-@pytest.mark.asyncio
-async def test_messaging_warm_resume_still_empty_after_full_support() -> None:
-    """Messaging warm-resume regression: still injects explicit empty MCP map."""
-    mock_agent = AsyncMock()
-    mock_agent.agent_id = "agent-messaging-regression"
-    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
-    mock_agent.__aexit__ = AsyncMock(return_value=None)
-
-    mock_client = MagicMock()
-    mock_client.agents.create = AsyncMock(return_value=mock_agent)
-    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
-
-    facade = AsyncSdkFacade(api_key="test-key")
-    facade._client = mock_client
-
-    agent_id = await facade.create_agent(workspace="/repo", tool_profile="messaging")
-    mock_client.agents.resume.reset_mock()
-
-    await facade.resume_agent(
-        agent_id,
-        workspace="/repo",
-        tool_profile="messaging",
-    )
-
-    mock_client.agents.resume.assert_called_once()
-    options = resume_request_options(mock_client)
-    assert options.get("mcpServers") == {}
 
 
 @pytest.mark.asyncio

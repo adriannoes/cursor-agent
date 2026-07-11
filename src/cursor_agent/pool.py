@@ -182,9 +182,9 @@ class SessionAgentPool:
     ) -> SessionRecord:
         """Delegate resume to the facade on every call.
 
-        Always calls ``facade.resume_agent`` so MCP reinject / coding-warm
-        short-circuit policy lives only in the facade. ``_resumed_models`` is
-        write-only here (last successful ``model:tool_profile`` key) so
+        Always calls ``facade.resume_agent`` so warm short-circuit (all profiles)
+        and cold MCP reinject policy live only in the facade. ``_resumed_models``
+        is write-only here (last successful ``model:tool_profile`` key) so
         ``forget_resumed_agent`` can drop stale entries after agent swaps; it is
         not consulted for resume decisions.
         """

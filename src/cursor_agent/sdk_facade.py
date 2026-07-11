@@ -37,7 +37,7 @@ from cursor_agent.sdk_streaming import (
 from cursor_agent.mcp_registry import GithubTransport
 from cursor_agent.tool_profile_policy import (
     mcp_servers_override_for_profile,
-    passes_mcp_servers_on_resume,
+    passes_mcp_servers_on_cold_resume,
     sandbox_enabled,
 )
 
@@ -238,7 +238,15 @@ class AsyncSdkFacade:
         tool_profile: str | None = None,
         runtime_mode: str = "local",
     ) -> str:
-        """Resume an SDK agent and re-inject MCP servers for the profile."""
+        """Resume an SDK agent; reinject MCP on cold resume for messaging/full.
+
+        Warm agents already in ``_agents`` with the same ``model:tool_profile``
+        short-circuit for every profile. SDK ``agents.resume`` on an in-memory
+        handle returns a new object; disposing the previous one (or the warm
+        resume itself) invalidates the server agent (``Unknown agent`` /
+        internal error). MCP overrides were applied on create; cold resume
+        (agent not in memory) still reinjects via ``passes_mcp_servers_on_cold_resume``.
+        """
         profile = tool_profile or self._agent_tool_profiles.get(agent_id, "coding")
         effective_model = (
             model if model is not None else self._agent_models.get(agent_id)
@@ -249,9 +257,7 @@ class AsyncSdkFacade:
                 model=self._agent_models.get(agent_id),
                 tool_profile=self._agent_tool_profiles.get(agent_id, "coding"),
             )
-            if cached_key == requested_key and not passes_mcp_servers_on_resume(
-                profile
-            ):
+            if cached_key == requested_key:
                 self._agent_tool_profiles[agent_id] = profile
                 return agent_id
 
@@ -265,7 +271,7 @@ class AsyncSdkFacade:
             tool_profile=profile,
         )
         resume_payload: dict[str, Any] = {}
-        if passes_mcp_servers_on_resume(profile):
+        if passes_mcp_servers_on_cold_resume(profile):
             mcp_override = self._mcp_override_for_facade(profile)
             if mcp_override is not None:
                 resume_payload["mcp_servers"] = mcp_override

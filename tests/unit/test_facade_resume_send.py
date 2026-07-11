@@ -15,8 +15,12 @@ from tests.unit.facade_test_fakes import resume_request_options, sandbox_enabled
 
 
 @pytest.mark.asyncio
-async def test_messaging_warm_resume_reinjects_empty_mcp_servers() -> None:
-    """Messaging warm resume still calls SDK to enforce empty MCP servers."""
+async def test_messaging_warm_resume_skips_sdk_when_already_in_memory() -> None:
+    """Messaging warm resume must not call SDK resume (create already set empty MCP).
+
+    Warm ``agents.resume`` on an in-memory handle invalidates the server agent
+    (Unknown agent / internal error). Cold resume still reinjects empty MCP.
+    """
     mock_agent = AsyncMock()
     mock_agent.agent_id = "agent-warm-messaging"
     mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
@@ -32,8 +36,32 @@ async def test_messaging_warm_resume_reinjects_empty_mcp_servers() -> None:
     agent_id = await facade.create_agent(workspace="/repo", tool_profile="messaging")
     mock_client.agents.resume.reset_mock()
 
-    await facade.resume_agent(
+    resumed_id = await facade.resume_agent(
         agent_id,
+        workspace="/repo",
+        tool_profile="messaging",
+    )
+
+    assert resumed_id == agent_id
+    mock_client.agents.resume.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_messaging_cold_resume_reinjects_empty_mcp_servers() -> None:
+    """Cold messaging resume (agent not in memory) still injects explicit empty MCP."""
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-cold-messaging"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(api_key="test-key")
+    facade._client = mock_client
+
+    await facade.resume_agent(
+        "agent-cold-messaging",
         workspace="/repo",
         tool_profile="messaging",
     )
