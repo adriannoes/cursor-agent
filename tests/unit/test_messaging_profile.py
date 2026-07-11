@@ -181,10 +181,10 @@ async def test_resume_in_memory_profile_change_invokes_sdk_with_messaging_mcp(
 
 
 @pytest.mark.asyncio
-async def test_messaging_create_then_resume_in_memory_reinjects_empty_mcp_servers(
+async def test_messaging_create_then_resume_in_memory_skips_sdk(
     facade_with_client: tuple[AsyncSdkFacade, MagicMock],
 ) -> None:
-    """Messaging warm resume still calls SDK to enforce empty MCP servers."""
+    """Messaging warm resume skips SDK; empty MCP was applied on create."""
     facade, mock_client = facade_with_client
 
     agent_id = await facade.create_agent(
@@ -193,13 +193,12 @@ async def test_messaging_create_then_resume_in_memory_reinjects_empty_mcp_server
     )
     mock_client.agents.resume.reset_mock()
 
-    await facade.resume_agent(
+    resumed_id = await facade.resume_agent(
         agent_id,
         workspace="/repo/path",
         tool_profile="messaging",
     )
 
+    assert resumed_id == agent_id
     mock_client.agents.create.assert_called_once()
-    mock_client.agents.resume.assert_called_once()
-    options = _resume_options(mock_client)
-    assert options.get("mcpServers") == {}
+    mock_client.agents.resume.assert_not_called()

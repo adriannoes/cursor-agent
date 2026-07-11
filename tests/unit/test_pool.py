@@ -31,7 +31,6 @@ from cursor_agent.sdk_facade import (
 )
 from cursor_agent.sessions.models import SessionCreateParams
 from cursor_agent.sessions.store import SessionStore
-from cursor_agent.tool_profile_policy import passes_mcp_servers_on_resume
 
 
 @pytest.fixture
@@ -118,9 +117,9 @@ class SdkResumeCountingFacade(FakeSdkFacade):
     """Fake that separates facade ``resume_agent`` entry from SDK resume attempts.
 
     Mimics AsyncSdkFacade ownership: pool may call ``resume_agent`` on every warm
-    get/send, but coding warm (same ``model:tool_profile``) short-circuits without
-    an SDK attempt. Messaging and ``full`` always record an SDK attempt so MCP
-    reinjection remains observable at the facade boundary.
+    get/send, but any profile with the same ``model:tool_profile`` short-circuits
+    without an SDK attempt. Cold resume (first call per agent) still records an
+    SDK attempt so MCP reinjection remains observable.
 
     Authority for resume policy is production ``AsyncSdkFacade`` (see
     ``test_coding_warm_pool_get_skips_sdk_via_real_facade`` and
@@ -142,7 +141,7 @@ class SdkResumeCountingFacade(FakeSdkFacade):
         tool_profile: str | None = None,
         runtime_mode: str = "local",
     ) -> str:
-        """Record facade entry; count SDK attempts unless coding warm short-circuits."""
+        """Record facade entry; count SDK attempts unless warm key matches."""
         call: dict[str, object] = {
             "agent_id": agent_id,
             "workspace": workspace,
@@ -153,9 +152,7 @@ class SdkResumeCountingFacade(FakeSdkFacade):
         self.resume_calls.append(call)
         profile = tool_profile if tool_profile is not None else "coding"
         resume_key = f"{model}:{profile}"
-        if self._warm_resume_keys.get(
-            agent_id
-        ) == resume_key and not passes_mcp_servers_on_resume(profile):
+        if self._warm_resume_keys.get(agent_id) == resume_key:
             return agent_id
         self.sdk_resume_attempts.append(call)
         result = await super().resume_agent(
@@ -399,10 +396,10 @@ async def test_coding_warm_send_skips_sdk_resume_on_repeated_send(
 
 
 @pytest.mark.asyncio
-async def test_full_profile_get_re_resumes_for_mcp_reinjection(
+async def test_full_profile_get_calls_facade_but_warm_skips_sdk(
     store: SessionStore,
 ) -> None:
-    """full must re-call resume_agent on repeated get so MCP/environ re-apply."""
+    """full: pool always calls resume_agent; warm second get skips SDK resume."""
     session_key = "cli:default:fullmcp1"
     facade = SdkResumeCountingFacade()
     await _seed_session(store, facade, session_key, tool_profile="full")
@@ -416,16 +413,16 @@ async def test_full_profile_get_re_resumes_for_mcp_reinjection(
     await pool.get(session_key)
 
     assert len(facade.resume_calls) == 2
-    assert len(facade.sdk_resume_attempts) == 2
+    assert len(facade.sdk_resume_attempts) == 1
     assert facade.resume_calls[0]["tool_profile"] == "full"
     assert facade.resume_calls[1]["tool_profile"] == "full"
 
 
 @pytest.mark.asyncio
-async def test_messaging_profile_get_re_resumes_for_empty_mcp_reinjection(
+async def test_messaging_profile_get_calls_facade_but_warm_skips_sdk(
     store: SessionStore,
 ) -> None:
-    """messaging must re-call resume_agent on repeated get (empty MCP defense)."""
+    """messaging: pool always calls resume_agent; warm second get skips SDK resume."""
     session_key = "cli:default:msgmcp1"
     facade = SdkResumeCountingFacade()
     await _seed_session(store, facade, session_key, tool_profile="messaging")
@@ -439,7 +436,7 @@ async def test_messaging_profile_get_re_resumes_for_empty_mcp_reinjection(
     await pool.get(session_key)
 
     assert len(facade.resume_calls) == 2
-    assert len(facade.sdk_resume_attempts) == 2
+    assert len(facade.sdk_resume_attempts) == 1
     assert all(call["tool_profile"] == "messaging" for call in facade.resume_calls)
 
 
