@@ -242,6 +242,30 @@ def test_resolve_gateway_startup_config_rejects_full_profile(tmp_path: Path) -> 
     assert "received 'full'" in message
 
 
+def test_to_cursor_agent_config_rejects_full_profile(tmp_path: Path) -> None:
+    """Converter itself refuses non-messaging so direct callers cannot bypass the gate."""
+    config_file = tmp_path / "gateway.yaml"
+    _write_gateway_yaml(config_file, _minimal_gateway_yaml(tool_profile="full"))
+    gateway_config = load_gateway_config(config_path=config_file)
+    with pytest.raises(ConfigError) as exc_info:
+        to_cursor_agent_config(gateway_config)
+    message = str(exc_info.value)
+    assert "expected 'messaging'" in message
+    assert "received 'full'" in message
+
+
+def test_to_cursor_agent_config_rejects_coding_profile(tmp_path: Path) -> None:
+    """Converter refuses coding the same way resolve_gateway_startup_config does."""
+    config_file = tmp_path / "gateway.yaml"
+    _write_gateway_yaml(config_file, _minimal_gateway_yaml(tool_profile="coding"))
+    gateway_config = load_gateway_config(config_path=config_file)
+    with pytest.raises(ConfigError) as exc_info:
+        to_cursor_agent_config(gateway_config)
+    message = str(exc_info.value)
+    assert "expected 'messaging'" in message
+    assert "received 'coding'" in message
+
+
 def test_to_cursor_agent_config_maps_workspace_and_profile(tmp_path: Path) -> None:
     """Bridge maps workspace to runtime.local.cwd and carries tool_profile."""
     config_file = tmp_path / "gateway.yaml"

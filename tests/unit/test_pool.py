@@ -1076,6 +1076,76 @@ async def test_send_reattaches_agent_after_invalid_agent_cold_resume(
     assert row.agent_id.startswith("fake-")
 
 
+class InvalidWarmStaleResumeFacade(FakeSdkFacade):
+    """Raises InvalidAgentError when resuming agents listed as warm-stale."""
+
+    def __init__(
+        self,
+        *,
+        fail_resume_for: set[str] | None = None,
+        **kwargs: object,
+    ) -> None:
+        super().__init__(**kwargs)  # type: ignore[arg-type]
+        self._fail_resume_for: set[str] = (
+            set(fail_resume_for) if fail_resume_for is not None else set()
+        )
+
+    async def resume_agent(
+        self,
+        agent_id: str,
+        *,
+        workspace: str,
+        model: str | None = None,
+        tool_profile: str | None = None,
+        runtime_mode: str = "local",
+    ) -> str:
+        """Fail resume for warm-stale ids; otherwise delegate to the parent fake."""
+        if agent_id in self._fail_resume_for:
+            raise InvalidAgentError(f"invalid agent_id: received {agent_id!r}")
+        return await super().resume_agent(
+            agent_id,
+            workspace=workspace,
+            model=model,
+            tool_profile=tool_profile,
+            runtime_mode=runtime_mode,
+        )
+
+
+@pytest.mark.asyncio
+async def test_send_reattaches_agent_after_invalid_agent_warm_stale_resume(
+    store: SessionStore,
+    config: CursorAgentConfig,
+) -> None:
+    """InvalidAgentError on warm-but-stale resume (agent in memory) reattaches."""
+    session_key = "cli:default:reattach-warm-stale"
+    facade = InvalidWarmStaleResumeFacade(default_reply="ok-after-warm-stale")
+    warm_agent_id = await facade.create_agent(
+        workspace="/tmp/workspace",
+        tool_profile="coding",
+    )
+    facade._fail_resume_for.add(warm_agent_id)
+    await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id=warm_agent_id,
+            workspace="/tmp/workspace",
+            runtime="local",
+            tool_profile="coding",
+        )
+    )
+
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    result = await pool.send(session_key, "hello after warm-stale resume")
+
+    assert result.status is RunStatus.FINISHED
+    assert result.text == "ok-after-warm-stale"
+    row = await store.resolve(session_key)
+    assert row is not None
+    assert row.agent_id != warm_agent_id
+    assert row.agent_id.startswith("fake-")
+    assert facade.has_agent(row.agent_id)
+
+
 class ReattachTrackingFacade(ColdStartSendFailFacade):
     """Cold-start send failure facade that records create_agent keyword arguments."""
 

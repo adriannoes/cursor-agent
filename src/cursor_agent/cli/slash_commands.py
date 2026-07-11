@@ -42,6 +42,7 @@ from cursor_agent.skills.discovery import (
     SkillEntry,
     skill_discovery_from_config,
 )
+from cursor_agent.tool_profile_policy import effective_tool_profile
 
 _HELP_TEXT = f"""\
 Slash commands:
@@ -247,11 +248,14 @@ async def _route_model(
         )
         if row is not None:
             try:
+                tool_profile = effective_tool_profile(
+                    ctx.config.tool_profile, row.tool_profile
+                )
                 await ctx.facade.resume_agent(
                     row.agent_id,
                     workspace=row.workspace,
                     model=model_id,
-                    tool_profile=row.tool_profile,
+                    tool_profile=tool_profile,
                     runtime_mode=row.runtime,
                 )
                 ctx.pool.forget_resumed_agent(row.agent_id)

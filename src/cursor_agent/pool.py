@@ -186,7 +186,9 @@ class SessionAgentPool:
         and cold MCP reinject policy live only in the facade. ``_resumed_models``
         is write-only here (last successful ``model:tool_profile`` key) so
         ``forget_resumed_agent`` can drop stale entries after agent swaps; it is
-        not consulted for resume decisions.
+        not consulted for resume decisions. ``InvalidAgentError`` always triggers
+        ``_reattach_agent`` (cold missing handle or warm-but-stale after a
+        model/profile switch).
         """
         model = self._resolve_model(model_override)
         tool_profile = effective_tool_profile(
@@ -204,8 +206,8 @@ class SessionAgentPool:
                 runtime_mode=row.runtime,
             )
         except InvalidAgentError:
-            if not cold_start:
-                raise
+            # Reattach whether cold (not in memory) or warm-but-stale (in memory
+            # but SDK resume rejected after model/profile change).
             return await self._reattach_agent(
                 row,
                 model_override=model_override,

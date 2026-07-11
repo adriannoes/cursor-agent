@@ -4,16 +4,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cursor_agent.cli.compress import load_compress_prompt
+from cursor_agent.cli.compress import load_compress_prompt, run_compress_session
 from cursor_agent.cli.repl_session import run_repl
 from cursor_agent.cli.startup import session_key_for
 from cursor_agent.config.loader import CursorAgentConfig
+from cursor_agent.first_party_models import DEFAULT_AGENT_MODEL
 from cursor_agent.pool import SessionAgentPool
 from cursor_agent.sdk_facade import FakeSdkFacade
 from cursor_agent.sessions.store import SessionStore
 
 from tests.unit.cli_repl_helpers import drive_repl, line_reader, seed_session
 from tests.unit.command_handler_fakes import (
+    ResumeTrackingFacade,
     _CompressSendSpyFacade,
     _SUMMARY_REPLY,
     _capture_command_logs,
@@ -239,3 +241,72 @@ async def test_compress_failure_records_error_command_outcome(
         if p["event"] == "command_end" and p["command"] == "compress"
     )
     assert compress_end["outcome"] == "error"
+
+
+async def test_compress_uses_effective_tool_profile_under_messaging_config(
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """Compress resume/create use messaging when config is messaging and the row is coding."""
+    messaging_config = config.model_copy(update={"tool_profile": "messaging"})
+    store = SessionStore(tmp_path / "sessions.db")
+    await store.initialize()
+    session_key = session_key_for(messaging_config)
+
+    class CompressProfileTrackingFacade(ResumeTrackingFacade):
+        """Track create_agent tool_profile alongside resume calls."""
+
+        def __init__(self, **kwargs: object) -> None:
+            super().__init__(**kwargs)
+            self.create_agent_calls: list[dict[str, object]] = []
+
+        async def create_agent(
+            self,
+            *,
+            workspace: str,
+            model: str = DEFAULT_AGENT_MODEL,
+            tool_profile: str = "coding",
+            runtime_mode: str = "local",
+        ) -> str:
+            self.create_agent_calls.append(
+                {
+                    "workspace": workspace,
+                    "model": model,
+                    "tool_profile": tool_profile,
+                    "runtime_mode": runtime_mode,
+                }
+            )
+            return await super().create_agent(
+                workspace=workspace,
+                model=model,
+                tool_profile=tool_profile,
+                runtime_mode=runtime_mode,
+            )
+
+    facade = CompressProfileTrackingFacade(
+        scripted_replies={"default": _SUMMARY_REPLY},
+    )
+    session_id = await seed_session(
+        store,
+        facade,
+        session_key,
+        workspace=str(tmp_path),
+    )
+    row = await store.resolve(session_key, session_id=session_id)
+    assert row is not None
+    assert row.tool_profile == "coding"
+    facade.create_agent_calls.clear()
+
+    result = await run_compress_session(
+        store=store,
+        facade=facade,
+        config=messaging_config,
+        session_key=session_key,
+        session_id=session_id,
+    )
+
+    assert result.session_id == session_id
+    assert all(call["tool_profile"] == "messaging" for call in facade.resume_calls)
+    assert len(facade.resume_calls) >= 2
+    assert len(facade.create_agent_calls) == 1
+    assert facade.create_agent_calls[0]["tool_profile"] == "messaging"

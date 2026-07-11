@@ -17,6 +17,7 @@ from cursor_agent.product_copy import SETUP_TOOL_PROFILE_OPTIONS
 from cursor_agent.tool_profile_policy import mcp_servers_override_for_profile
 from cursor_agent.tool_profiles import (
     ALLOWED_TOOL_PROFILES,
+    DEFAULT_TOOL_PROFILE,
     WIZARD_TOOL_PROFILE_ENTRIES,
     WIZARD_TOOL_PROFILE_INDEX_TO_NAME,
     format_allowed_tool_profiles_expected,
@@ -39,6 +40,13 @@ def test_wizard_tool_profile_entries_have_exactly_one_default() -> None:
     defaults = [name for name, is_default in WIZARD_TOOL_PROFILE_ENTRIES if is_default]
     assert len(defaults) == 1
     assert defaults[0] == "coding"
+
+
+def test_default_tool_profile_matches_wizard_default_entry() -> None:
+    """DEFAULT_TOOL_PROFILE is derived from the wizard default flag, not a hardcode."""
+    defaults = [name for name, is_default in WIZARD_TOOL_PROFILE_ENTRIES if is_default]
+    assert DEFAULT_TOOL_PROFILE == defaults[0]
+    assert DEFAULT_TOOL_PROFILE == "coding"
 
 
 def test_writer_and_policy_share_allowed_tool_profiles_identity() -> None:

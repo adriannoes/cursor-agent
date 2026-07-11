@@ -57,7 +57,10 @@ from cursor_agent.product_copy import (
     SETUP_TITLE_WORKSPACE,
     SETUP_TOOL_PROFILE_OPTIONS,
 )
-from cursor_agent.tool_profiles import resolve_wizard_tool_profile_choice
+from cursor_agent.tool_profiles import (
+    DEFAULT_TOOL_PROFILE,
+    resolve_wizard_tool_profile_choice,
+)
 
 # Monkeypatch targets for unit tests (ADR-027 injectable prompt style).
 _getpass_fn: Callable[[str], str] = getpass
@@ -65,7 +68,7 @@ _input_fn: Callable[[str], str] = input
 
 _SKIPPED_MEMORY_ROOT: str = "(skipped → ~/.cursor-agent)"
 _SKIPPED_SESSIONS_DB: str = "(skipped → ~/.cursor-agent/sessions.db)"
-_DEFAULT_TOOL_PROFILE_SUMMARY: str = "(default: coding)"
+_DEFAULT_TOOL_PROFILE_SUMMARY: str = f"(default: {DEFAULT_TOOL_PROFILE})"
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,7 +277,7 @@ def _display_model(value: str | None) -> str:
 
 
 def _display_tool_profile(value: str | None) -> str:
-    """Render tool_profile for the summary; omitted → coding default."""
+    """Render tool_profile for the summary; omitted → catalog default."""
     if value is None:
         return _DEFAULT_TOOL_PROFILE_SUMMARY
     return value

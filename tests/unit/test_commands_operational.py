@@ -162,6 +162,42 @@ async def test_model_sets_override_and_resumes_agent(
     assert model_calls[0]["agent_id"] == row.agent_id
 
 
+async def test_model_resume_uses_effective_tool_profile_under_messaging_config(
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """/model resumes with messaging when config is messaging and the row is coding."""
+    messaging_config = config.model_copy(update={"tool_profile": "messaging"})
+    facade = ResumeTrackingFacade(scripted_replies={"default": "ok"})
+    store = SessionStore(tmp_path / "sessions.db")
+    await store.initialize()
+    session_key = session_key_for(messaging_config)
+    session_id = await seed_session(store, facade, session_key)
+    row = await store.resolve(session_key, session_id=session_id)
+    assert row is not None
+    assert row.tool_profile == "coding"
+    pool = SessionAgentPool(store=store, facade=facade, config=messaging_config)
+    output: list[str] = []
+
+    await drive_repl(
+        pool,
+        session_key,
+        store,
+        messaging_config,
+        facade,
+        lines=("/model opaque-override-model", "/quit"),
+        writer=output.append,
+        auto_resume=True,
+    )
+
+    model_calls = [
+        call for call in facade.resume_calls if call["model"] == "opaque-override-model"
+    ]
+    assert len(model_calls) == 1
+    assert model_calls[0]["tool_profile"] == "messaging"
+    assert model_calls[0]["agent_id"] == row.agent_id
+
+
 async def test_model_bare_lists_first_party_ids(
     config: CursorAgentConfig,
     tmp_path: Path,

@@ -99,7 +99,15 @@ def to_cursor_agent_config(gateway_config: GatewayConfig) -> CursorAgentConfig:
 
     Uses package defaults only — ignores ``CURSOR_AGENT__*`` and
     ``~/.cursor-agent/config.yaml`` so ``gateway.yaml`` stays the sole surface.
+
+    Refuses any profile other than ``messaging`` so direct callers cannot bypass
+    ``resolve_gateway_startup_config``.
     """
+    if gateway_config.tool_profile != MESSAGING_TOOL_PROFILE:
+        raise ConfigError(
+            f"invalid gateway tool_profile: received {gateway_config.tool_profile!r}, "
+            f"expected {MESSAGING_TOOL_PROFILE!r}",
+        )
     return CursorAgentConfig(
         model=_DEFAULT_MODEL,
         tool_profile=gateway_config.tool_profile,
@@ -116,9 +124,4 @@ def to_cursor_agent_config(gateway_config: GatewayConfig) -> CursorAgentConfig:
 
 def resolve_gateway_startup_config(gateway_config: GatewayConfig) -> CursorAgentConfig:
     """Validate messaging profile and convert gateway config for CLI stack reuse."""
-    if gateway_config.tool_profile != MESSAGING_TOOL_PROFILE:
-        raise ConfigError(
-            f"invalid gateway tool_profile: received {gateway_config.tool_profile!r}, "
-            f"expected {MESSAGING_TOOL_PROFILE!r}",
-        )
     return to_cursor_agent_config(gateway_config)

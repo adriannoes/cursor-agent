@@ -27,6 +27,16 @@ Example:
     ('coding', True)
 """
 
+DEFAULT_TOOL_PROFILE: Final[str] = next(
+    name for name, is_default in WIZARD_TOOL_PROFILE_ENTRIES if is_default
+)
+"""Loader/wizard omitted default; derived from ``WIZARD_TOOL_PROFILE_ENTRIES``.
+
+Example:
+    >>> DEFAULT_TOOL_PROFILE
+    'coding'
+"""
+
 WIZARD_TOOL_PROFILE_INDEX_TO_NAME: Final[dict[str, str]] = {
     str(index): name
     for index, (name, _is_default) in enumerate(WIZARD_TOOL_PROFILE_ENTRIES, start=1)

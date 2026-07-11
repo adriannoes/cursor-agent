@@ -11,6 +11,7 @@ from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.errors import ConfigError
 from cursor_agent.sdk_facade import RunStatus, SdkFacade
 from cursor_agent.sessions.store import SessionStore
+from cursor_agent.tool_profile_policy import effective_tool_profile
 
 _COMPRESSING_STATUS = "compressing"
 _METADATA_STATUS_KEY = "status"
@@ -114,6 +115,7 @@ async def run_compress_session(
     previous_agent_id = row.agent_id
     prompt = load_compress_prompt()
     orphaned_agent_id: str | None = None
+    tool_profile = effective_tool_profile(config.tool_profile, row.tool_profile)
 
     try:
         await store.update_metadata(
@@ -126,7 +128,7 @@ async def run_compress_session(
             previous_agent_id,
             workspace=row.workspace,
             model=config.model,
-            tool_profile=row.tool_profile,
+            tool_profile=tool_profile,
             runtime_mode=row.runtime,
         )
 
@@ -149,7 +151,7 @@ async def run_compress_session(
         new_agent_id = await facade.create_agent(
             workspace=row.workspace,
             model=config.model,
-            tool_profile=row.tool_profile,
+            tool_profile=tool_profile,
             runtime_mode=row.runtime,
         )
         orphaned_agent_id = new_agent_id
@@ -160,7 +162,7 @@ async def run_compress_session(
             new_agent_id,
             workspace=row.workspace,
             model=config.model,
-            tool_profile=row.tool_profile,
+            tool_profile=tool_profile,
             runtime_mode=row.runtime,
         )
 
