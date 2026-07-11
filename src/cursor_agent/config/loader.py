@@ -85,16 +85,23 @@ class McpFullConfig(BaseModel):
         cls,
         value: list[str] | None,
     ) -> list[str] | None:
-        """Reject allowlist entries outside the curated registry."""
+        """Reject unknown or duplicate allowlist entries outside the curated set."""
         if value is None:
             return None
         allowed = sorted(CURATED_MCP_SERVER_IDS)
+        seen: set[str] = set()
         for server_id in value:
             if server_id not in CURATED_MCP_SERVER_IDS:
                 raise ValueError(
                     f"unknown mcp.full.servers id: received {server_id!r}, "
                     f"expected one of {allowed!r}",
                 )
+            if server_id in seen:
+                raise ValueError(
+                    f"duplicate mcp.full.servers id: received {server_id!r}, "
+                    f"expected unique ids from {allowed!r}",
+                )
+            seen.add(server_id)
         return value
 
     @field_validator("github_transport", mode="before")

@@ -444,6 +444,32 @@ def test_yaml_mcp_full_servers_unknown_id_raises_config_error(tmp_path: Path) ->
     assert "playwright" in message
 
 
+def test_yaml_mcp_full_servers_duplicate_id_raises_config_error(tmp_path: Path) -> None:
+    """Duplicate allowlist ids are rejected at load time (not silently deduped)."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        "mcp:\n  full:\n    servers:\n      - github\n      - github\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError) as exc_info:
+        load_config(config_path=config_file)
+    message = str(exc_info.value)
+    assert "duplicate" in message.lower()
+    assert "github" in message
+
+
+def test_yaml_mcp_full_servers_empty_list_is_empty_not_none(tmp_path: Path) -> None:
+    """Explicit empty allowlist loads as [] (all curated is None / omitted only)."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        "tool_profile: full\nmcp:\n  full:\n    servers: []\n",
+        encoding="utf-8",
+    )
+    config = load_config(config_path=config_file)
+    assert config.mcp.full.servers == []
+    assert config.mcp.full.servers is not None
+
+
 def test_env_mcp_full_servers_json_list_loads(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -455,6 +481,36 @@ def test_env_mcp_full_servers_json_list_loads(
     )
     config = load_config(config_path=tmp_path / "missing.yaml")
     assert config.mcp.full.servers == ["playwright", "github"]
+
+
+def test_env_mcp_full_servers_empty_json_list_is_empty_not_none(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Env SERVERS=[] is explicit empty allowlist; unset remains None (all curated)."""
+    monkeypatch.setenv("CURSOR_AGENT__MCP__FULL__SERVERS", "[]")
+    empty_config = load_config(config_path=tmp_path / "missing.yaml")
+    assert empty_config.mcp.full.servers == []
+
+    monkeypatch.delenv("CURSOR_AGENT__MCP__FULL__SERVERS", raising=False)
+    unset_config = load_config(config_path=tmp_path / "missing.yaml")
+    assert unset_config.mcp.full.servers is None
+
+
+def test_env_mcp_full_servers_duplicate_id_raises_config_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Duplicate ids via env raise ConfigError with the repeated id."""
+    monkeypatch.setenv(
+        "CURSOR_AGENT__MCP__FULL__SERVERS",
+        '["playwright","playwright"]',
+    )
+    with pytest.raises(ConfigError) as exc_info:
+        load_config(config_path=tmp_path / "missing.yaml")
+    message = str(exc_info.value)
+    assert "duplicate" in message.lower()
+    assert "playwright" in message
 
 
 def test_env_mcp_full_servers_unknown_id_raises_config_error(

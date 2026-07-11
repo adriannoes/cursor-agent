@@ -37,7 +37,7 @@ Warm resume (agent already in facade, same `model:tool_profile`) short-circuits 
 - Observability: log `mcp_servers_injected` with server **names only**, never tokens.
 - This ADR **supersedes** ADR-014’s “MVP two profiles only / `full` deferred” clause. Messaging security: [SECURITY.md](../../SECURITY.md).
 
-**Curated MVP servers:** `github` (default remote HTTP + PAT Bearer; Docker stdio opt-in), `brave-search` (`npx @brave/brave-search-mcp-server` + `BRAVE_API_KEY`), `playwright` (`npx @playwright/mcp@latest`, no API key).
+**Curated MVP servers:** `github` (default remote HTTP + PAT Bearer; Docker stdio opt-in), `brave-search` (`npx @brave/brave-search-mcp-server` + `BRAVE_API_KEY`), `playwright` (`npx @playwright/mcp@0.0.78`, pinned; no API key).
 
 ## Consequences
 

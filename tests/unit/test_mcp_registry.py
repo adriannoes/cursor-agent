@@ -88,7 +88,7 @@ def test_playwright_always_includable_without_required_env() -> None:
 
     assert set(servers) == {MCP_SERVER_ID_PLAYWRIGHT}
     assert servers[MCP_SERVER_ID_PLAYWRIGHT]["command"] == "npx"
-    assert servers[MCP_SERVER_ID_PLAYWRIGHT]["args"] == ["-y", "@playwright/mcp@latest"]
+    assert servers[MCP_SERVER_ID_PLAYWRIGHT]["args"] == ["-y", "@playwright/mcp@0.0.78"]
     assert warnings == []
 
 

@@ -104,7 +104,8 @@ _CURATED_MCP_SERVER_DEFINITIONS: Final[dict[str, _CuratedMcpServerDefinition]] =
     MCP_SERVER_ID_PLAYWRIGHT: _CuratedMcpServerDefinition(
         server_id=MCP_SERVER_ID_PLAYWRIGHT,
         command="npx",
-        args=("-y", "@playwright/mcp@latest"),
+        # Pin for supply-chain reproducibility; bump deliberately when upgrading.
+        args=("-y", "@playwright/mcp@0.0.78"),
         required_env_keys=(),
         emit_strategy=_emit_stdio_strategy,
     ),

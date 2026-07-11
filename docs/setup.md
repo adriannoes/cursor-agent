@@ -71,7 +71,7 @@ Curated servers and required env (secrets stay in env — never put tokens in YA
 |-----------|--------------|--------------|
 | `github` | `GITHUB_PERSONAL_ACCESS_TOKEN` | **Default:** official remote HTTP (`https://api.githubcopilot.com/mcp/`). **Opt-in:** Docker stdio via `mcp.full.github_transport: stdio` |
 | `brave-search` | `BRAVE_API_KEY` | `npx -y @brave/brave-search-mcp-server` |
-| `playwright` | _(none)_ | `npx -y @playwright/mcp@latest` |
+| `playwright` | _(none)_ | `npx -y @playwright/mcp@0.0.78` (pinned; bump deliberately) |
 
 **Default path — `github` without Docker** (PAT required; omit+warn if missing):
 

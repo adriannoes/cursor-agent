@@ -373,6 +373,88 @@ async def test_coding_warm_pool_get_skips_sdk_via_real_facade(
 
 
 @pytest.mark.asyncio
+async def test_messaging_warm_pool_get_skips_sdk_via_real_facade(
+    store: SessionStore,
+) -> None:
+    """Pool get() + real AsyncSdkFacade: messaging warm must not call SDK resume."""
+    session_key = "cli:default:messagingwarm-real"
+    workspace = "/tmp/ws-real-facade-messaging"
+    config = _config_with_tool_profile("messaging")
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-pool-messaging-warm"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.create = AsyncMock(return_value=mock_agent)
+    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(api_key="test-key")
+    facade._client = mock_client
+    agent_id = await facade.create_agent(
+        workspace=workspace,
+        model=config.model,
+        tool_profile="messaging",
+    )
+    await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id=agent_id,
+            workspace=workspace,
+            runtime="local",
+            tool_profile="messaging",
+        )
+    )
+
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    await pool.get(session_key)
+    await pool.get(session_key)
+
+    mock_client.agents.resume.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_full_warm_pool_get_skips_sdk_via_real_facade(
+    store: SessionStore,
+) -> None:
+    """Pool get() + real AsyncSdkFacade: full warm must not call SDK resume."""
+    session_key = "cli:default:fullwarm-real"
+    workspace = "/tmp/ws-real-facade-full"
+    config = _config_with_tool_profile("full")
+    mock_agent = AsyncMock()
+    mock_agent.agent_id = "agent-pool-full-warm"
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.agents.create = AsyncMock(return_value=mock_agent)
+    mock_client.agents.resume = AsyncMock(return_value=mock_agent)
+
+    facade = AsyncSdkFacade(api_key="test-key")
+    facade._client = mock_client
+    agent_id = await facade.create_agent(
+        workspace=workspace,
+        model=config.model,
+        tool_profile="full",
+    )
+    await store.create(
+        SessionCreateParams(
+            session_key=session_key,
+            agent_id=agent_id,
+            workspace=workspace,
+            runtime="local",
+            tool_profile="full",
+        )
+    )
+
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    await pool.get(session_key)
+    await pool.get(session_key)
+
+    mock_client.agents.resume.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_coding_warm_send_skips_sdk_resume_on_repeated_send(
     store: SessionStore,
     config: CursorAgentConfig,
@@ -590,6 +672,67 @@ async def test_lock_gateway_nonblocking_raises_agent_busy_error(
 
     send_release.set()
     await first_task
+
+
+@pytest.mark.asyncio
+async def test_lock_concurrent_get_serializes_cold_resume(
+    store: SessionStore,
+    config: CursorAgentConfig,
+) -> None:
+    """Concurrent get() shares the session lock so cold resume runs once."""
+    session_key = "cli:default:lockget1"
+    resume_release = asyncio.Event()
+    resume_entered = asyncio.Event()
+
+    class GatedResumeCountingFacade(SdkResumeCountingFacade):
+        """Hold the first resume until released; track concurrent in-flight peak."""
+
+        def __init__(self, **kwargs: object) -> None:
+            super().__init__(**kwargs)
+            self.concurrent_peak = 0
+            self._in_flight = 0
+
+        async def resume_agent(
+            self,
+            agent_id: str,
+            *,
+            workspace: str,
+            model: str | None = None,
+            tool_profile: str | None = None,
+            runtime_mode: str = "local",
+        ) -> str:
+            self._in_flight += 1
+            self.concurrent_peak = max(self.concurrent_peak, self._in_flight)
+            resume_entered.set()
+            await resume_release.wait()
+            try:
+                return await super().resume_agent(
+                    agent_id,
+                    workspace=workspace,
+                    model=model,
+                    tool_profile=tool_profile,
+                    runtime_mode=runtime_mode,
+                )
+            finally:
+                self._in_flight -= 1
+
+    facade = GatedResumeCountingFacade()
+    await _seed_session(store, facade, session_key)
+
+    pool = SessionAgentPool(store=store, facade=facade, config=config)
+    first_task = asyncio.create_task(pool.get(session_key))
+    await resume_entered.wait()
+    second_task = asyncio.create_task(pool.get(session_key))
+    await asyncio.sleep(0.05)
+    assert not second_task.done()
+    assert facade.concurrent_peak == 1
+
+    resume_release.set()
+    await first_task
+    await second_task
+
+    assert facade.concurrent_peak == 1
+    assert len(facade.sdk_resume_attempts) == 1
 
 
 @pytest.mark.asyncio

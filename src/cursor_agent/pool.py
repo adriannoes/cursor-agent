@@ -316,10 +316,15 @@ class SessionAgentPool:
         *,
         model_override: str | None = None,
     ) -> SessionRecord:
-        """Resolve and lazily resume the session for ``session_key``."""
+        """Resolve and lazily resume the session for ``session_key``.
+
+        Shares the per-key lock with ``send`` so concurrent cold resumes cannot
+        double-call SDK ``agents.resume`` under overlapping CLI callers.
+        """
         row = await self._resolve_or_raise(session_key, session_id)
         self._assert_runtime_match(row)
-        row = await self._ensure_resumed(row, model_override=model_override)
+        async with self._lock_for(session_key):
+            row = await self._ensure_resumed(row, model_override=model_override)
         return row
 
     async def send(
