@@ -51,12 +51,14 @@ def test_parse_retry_after_seconds(value: object, expected: float | None) -> Non
 
 
 def test_is_retryable_error_reads_attribute() -> None:
+    """Only exceptions advertising ``is_retryable=True`` are retryable."""
     assert is_retryable_error(_RetryableExc("transient")) is True
     assert is_retryable_error(_NonRetryableExc("fatal")) is False
     assert is_retryable_error(Exception("plain")) is False
 
 
 def test_retry_after_seconds_prefers_parsed_hint() -> None:
+    """SDK ``retry_after`` hint wins over exponential backoff."""
     exc = _RetryableExc("rate limited", retry_after="5")
     assert retry_after_seconds(exc, attempt=99) == 5.0
 
@@ -65,6 +67,7 @@ def test_retry_after_seconds_prefers_parsed_hint() -> None:
 def test_retry_after_seconds_exponential_backoff_with_jitter(
     _uniform: object,
 ) -> None:
+    """Without a hint, delay is ``2**attempt`` plus deterministic jitter."""
     exc = _RetryableExc("transient")
     assert retry_after_seconds(exc, attempt=0) == pytest.approx(1.1)
     assert retry_after_seconds(exc, attempt=1) == pytest.approx(2.1)
@@ -73,6 +76,7 @@ def test_retry_after_seconds_exponential_backoff_with_jitter(
 
 @patch("cursor_agent.sdk_retry.random.uniform", return_value=0.1)
 def test_retry_after_seconds_caps_exponential_backoff(_uniform: object) -> None:
+    """Backoff is capped at ``RETRY_BACKOFF_CAP_SECONDS`` before jitter."""
     exc = _RetryableExc("transient")
     delay = retry_after_seconds(exc, attempt=10)
     assert delay == pytest.approx(RETRY_BACKOFF_CAP_SECONDS + 0.1)
@@ -80,6 +84,7 @@ def test_retry_after_seconds_caps_exponential_backoff(_uniform: object) -> None:
 
 @pytest.mark.asyncio
 async def test_retry_sdk_call_succeeds_after_retryable_failures() -> None:
+    """Retryable failures sleep then succeed within ``RETRY_MAX_ATTEMPTS``."""
     attempts = 0
 
     async def flaky() -> str:
@@ -100,6 +105,8 @@ async def test_retry_sdk_call_succeeds_after_retryable_failures() -> None:
 
 @pytest.mark.asyncio
 async def test_retry_sdk_call_raises_after_max_attempts() -> None:
+    """Exhausted retryable failures re-raise the last error."""
+
     async def always_fail() -> str:
         raise _RetryableExc("still broken", retry_after=0.01)
 
@@ -114,6 +121,8 @@ async def test_retry_sdk_call_raises_after_max_attempts() -> None:
 
 @pytest.mark.asyncio
 async def test_retry_sdk_call_does_not_retry_non_retryable() -> None:
+    """Non-retryable errors raise immediately without sleeping."""
+
     async def fatal() -> str:
         raise _NonRetryableExc("auth failed")
 
