@@ -147,6 +147,12 @@ Further roadmap:
 - Terminal output fallback when the locale cannot render Unicode symbols (for example, replacing checkmarks with ASCII).
 - Session search, gateway queueing, and a Textual-based TUI — promoted when demand justifies scope.
 
+## Contributors
+
+Thanks to everyone who has improved Cursor Agent:
+
+- [wing-kit](https://github.com/wing-kit) — gateway `model:` key support ([#59](https://github.com/adriannoes/cursor-agent/pull/59))
+
 ## Contributing
 
 Bug reports, feature ideas and PRs are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for issue templates and the local verification gate.
