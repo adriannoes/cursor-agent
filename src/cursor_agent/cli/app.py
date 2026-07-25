@@ -29,6 +29,7 @@ from cursor_agent.cli.startup import (
     session_key_for,
 )
 from cursor_agent.cli.stream_renderer import build_display_stream_callbacks
+from cursor_agent.cli.usage_command import usage_command
 from cursor_agent.cli.welcome import render_welcome
 from cursor_agent.config.loader import CursorAgentConfig, ToolProfile, load_config
 from cursor_agent.errors import CursorAgentError
@@ -42,6 +43,7 @@ sessions_app = typer.Typer(help="Manage sessions")
 app.add_typer(sessions_app, name="sessions")
 app.add_typer(cron_app, name="cron")
 app.add_typer(setup_app, name="setup")
+app.command("usage")(usage_command)
 
 _EMPTY_SESSIONS_MESSAGE = "No sessions found for this workspace."
 _UNTITLED_PLACEHOLDER = "(untitled)"
