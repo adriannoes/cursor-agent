@@ -18,6 +18,7 @@ At startup the CLI loads a gitignored `.env` file from the **current working dir
 | `CURSOR_AGENT__RUNTIME__LOCAL__CWD` | Default workspace directory for local agents |
 | `CURSOR_AGENT__MEMORY_ROOT` | Directory containing `USER.md` and `MEMORY.md` |
 | `CURSOR_AGENT_SESSIONS_DB` | SQLite session store path |
+| `CURSOR_AGENT_USAGE_TOKEN` | Optional OAuth override for `cursor-agent usage` (default: `accessToken` in `~/.config/cursor/auth.json`) |
 | `CURSOR_AGENT__MODEL` | Model id (default: `grok-4.5`; pin Composer with `composer-2.5`) |
 | `CURSOR_AGENT__TOOL_PROFILE` | `coding`, `messaging`, or `full` (default: `coding`) |
 | `CURSOR_AGENT__MCP__FULL__SERVERS` | JSON list of curated MCP server ids for `full` (default: all curated) |
@@ -194,6 +195,12 @@ export CURSOR_AGENT_SESSIONS_DB="/path/to/sessions.db"
 This command relocates the SQLite session store away from the default `~/.cursor-agent/sessions.db`.
 
 The default database uses SQLite **schema version 1**; opening an older file without version metadata is upgraded automatically on startup with existing session rows preserved. See [Architecture — Session SQLite baseline](architecture.md#session-sqlite-baseline-v1) for details.
+
+### Plan usage (`cursor-agent usage`)
+
+`uv run cursor-agent usage` prints a snapshot of the current Cursor plan quota (total / auto / API). It calls an **undocumented** dashboard endpoint and is best-effort — the response shape may change without notice.
+
+Auth (in order): `CURSOR_AGENT_USAGE_TOKEN`, then the OAuth `accessToken` from `~/.config/cursor/auth.json` written by the **official** Cursor Agent CLI (`agent login`). That store lives outside `~/.cursor-agent/`. This package has no `login` command. `CURSOR_API_KEY` is not accepted by the usage endpoint.
 
 ### Memory root override
 

@@ -25,8 +25,9 @@ def usage_command(
 ) -> None:
     """Show current Cursor plan usage (total / auto / API).
 
-    Uses the dashboard endpoint (undocumented) with the OAuth access token
-    from the official Cursor Agent CLI auth store.
+    Uses the undocumented dashboard endpoint with the OAuth access token
+    from the official Cursor Agent CLI auth store (`agent login`), or
+    ``CURSOR_AGENT_USAGE_TOKEN``. This package has no login command.
     """
     try:
         token = resolve_usage_access_token()

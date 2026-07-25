@@ -108,7 +108,7 @@ uv run cursor-agent gateway                   # gateway using ~/.cursor-agent/ga
 uv run cursor-agent gateway --config /path/to/gateway.yaml
 ```
 
-`cursor-agent usage` queries Cursor's undocumented dashboard endpoint (not the SDK). Auth is the OAuth access token from the official Cursor CLI store at `~/.config/cursor/auth.json`, or `CURSOR_AGENT_USAGE_TOKEN`. `CURSOR_API_KEY` is not accepted by this endpoint.
+`cursor-agent usage` queries Cursor's undocumented dashboard endpoint (not the SDK; best-effort — the API may change without notice). Auth is the OAuth access token from the official Cursor Agent CLI store at `~/.config/cursor/auth.json` (outside `~/.cursor-agent/`), or `CURSOR_AGENT_USAGE_TOKEN`. Refresh that store with `agent login` from the official CLI — this package has no `login` command. `CURSOR_API_KEY` is not accepted by this endpoint.
 
 Runtime config and session data live under `~/.cursor-agent/`. Override workspace, sessions DB, memory root, model, or tool profile via environment variables or YAML — see [Setup guide — Configuration](docs/setup.md#configuration) and [.env.example](.env.example).
 

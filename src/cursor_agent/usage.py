@@ -59,8 +59,9 @@ def resolve_usage_access_token(
         raw = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise AuthError(
-            f"cursor usage: no access token — set {USAGE_TOKEN_ENV_VAR} or log in "
-            f"the official Cursor CLI (expected auth store at {path})"
+            f"cursor usage: no access token — set {USAGE_TOKEN_ENV_VAR} or run "
+            f"`agent login` from the official Cursor Agent CLI "
+            f"(writes auth store at {path}; this package has no login command)"
         ) from exc
     try:
         data = json.loads(raw)
@@ -73,7 +74,8 @@ def resolve_usage_access_token(
     if not token:
         raise AuthError(
             f"cursor usage: auth store at {path} has no accessToken — run "
-            "'cursor-agent login' (official CLI) to refresh"
+            f"`agent login` from the official Cursor Agent CLI, or set "
+            f"{USAGE_TOKEN_ENV_VAR}"
         )
     return token
 
@@ -102,8 +104,8 @@ def fetch_current_period_usage(
         if exc.code in (401, 403):
             raise AuthError(
                 "cursor usage: dashboard endpoint rejected the access token "
-                f"(HTTP {exc.code}) — run 'cursor-agent login' (official CLI) "
-                f"or set a fresh {USAGE_TOKEN_ENV_VAR}"
+                f"(HTTP {exc.code}) — run `agent login` from the official "
+                f"Cursor Agent CLI, or set a fresh {USAGE_TOKEN_ENV_VAR}"
             ) from exc
         raise NetworkError(
             f"cursor usage: dashboard endpoint returned HTTP {exc.code}"
