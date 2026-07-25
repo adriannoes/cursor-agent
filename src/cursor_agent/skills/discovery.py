@@ -10,6 +10,7 @@ from typing import Any, Final, Literal
 import yaml
 
 from cursor_agent.config.loader import CursorAgentConfig
+from cursor_agent.skills import pack_paths
 from cursor_agent.utf8_io import (
     decode_without_split_code_point,
     read_utf8_file_tail,
@@ -82,10 +83,11 @@ def skill_discovery_from_config(
     entries: dict[str, SkillEntry] = {}
 
     if "user" in setting_sources:
+        # WHY: pack_paths is the single source for BYO / seed destinations (PRD-016).
         user_root = (
             override_user_skills
             if override_user_skills is not None
-            else Path.home() / ".cursor" / "skills"
+            else pack_paths.user_skills_root(Path.home())
         )
         _merge_skill_entries(
             entries,
@@ -95,7 +97,7 @@ def skill_discovery_from_config(
         )
 
     if "project" in setting_sources:
-        project_root = workspace / ".cursor" / "skills"
+        project_root = pack_paths.project_skills_root(workspace)
         _merge_skill_entries(
             entries,
             _discover_skills_in_root(

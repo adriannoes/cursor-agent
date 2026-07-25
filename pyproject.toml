@@ -74,3 +74,4 @@ packages = ["src/cursor_agent"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "hooks/messaging" = "cursor_agent/hooks/messaging"
+"skills" = "cursor_agent/skills_pack"
