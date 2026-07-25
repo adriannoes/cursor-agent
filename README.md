@@ -17,6 +17,7 @@ Orchestration layer only — the SDK owns the agent loop, tools, and inference. 
 - Interactive local REPL (`cursor-agent`)
 - Persistent sessions (`cursor-agent sessions list`)
 - Long-running messaging gateway, including Telegram (`cursor-agent gateway`)
+- Plan usage snapshot (`cursor-agent usage`) via the Cursor dashboard endpoint
 - Local Memory v1 from `~/.cursor-agent/USER.md` and `~/.cursor-agent/MEMORY.md`
 - Embedded cron scheduler managed by `cursor-agent cron list|add|remove`
 - `coding`, `messaging`, and `full` tool profiles for trusted dev, untrusted input, and curated MCP
@@ -101,9 +102,13 @@ uv run cursor-agent                         # interactive REPL (default: coding 
 uv run cursor-agent --profile messaging     # validate messaging hooks locally
 uv run cursor-agent sessions list             # list sessions for the workspace key
 uv run cursor-agent cron list                 # list scheduled jobs
+uv run cursor-agent usage                     # current plan usage (total / auto / API)
+uv run cursor-agent usage --json              # same snapshot as JSON
 uv run cursor-agent gateway                   # gateway using ~/.cursor-agent/gateway.yaml
 uv run cursor-agent gateway --config /path/to/gateway.yaml
 ```
+
+`cursor-agent usage` queries Cursor's undocumented dashboard endpoint (not the SDK; best-effort — the API may change without notice). Auth is the OAuth access token from the official Cursor Agent CLI store at `~/.config/cursor/auth.json` (outside `~/.cursor-agent/`), or `CURSOR_AGENT_USAGE_TOKEN`. Refresh that store with `agent login` from the official CLI — this package has no `login` command. `CURSOR_API_KEY` is not accepted by this endpoint.
 
 Runtime config and session data live under `~/.cursor-agent/`. Override workspace, sessions DB, memory root, model, or tool profile via environment variables or YAML — see [Setup guide — Configuration](docs/setup.md#configuration) and [.env.example](.env.example).
 
