@@ -22,7 +22,6 @@ DEFAULT_GATEWAY_CONFIG_PATH = Path.home() / ".cursor-agent" / "gateway.yaml"
 MESSAGING_TOOL_PROFILE: ToolProfile = "messaging"
 
 _DEFAULT_SETTING_SOURCES: list[str] = ["project", "user"]
-_DEFAULT_MODEL = DEFAULT_AGENT_MODEL
 _DEFAULT_RUNTIME_MODE: RuntimeMode = "local"
 _REDACTED_SECRET = "[REDACTED]"
 _SENSITIVE_PLATFORM_FIELDS = frozenset({"bot_token"})
@@ -98,8 +97,10 @@ def load_gateway_config(config_path: Path | None = None) -> GatewayConfig:
 def to_cursor_agent_config(gateway_config: GatewayConfig) -> CursorAgentConfig:
     """Convert gateway config into ``CursorAgentConfig`` for CLI stack reuse.
 
-    Uses package defaults only — ignores ``CURSOR_AGENT__*`` and
-    ``~/.cursor-agent/config.yaml`` so ``gateway.yaml`` stays the sole surface.
+    Honors the ``model`` key from ``gateway.yaml`` (defaulting to the package
+    default model) and otherwise uses package defaults only — ignores
+    ``CURSOR_AGENT__*`` and ``~/.cursor-agent/config.yaml`` so ``gateway.yaml``
+    stays the sole surface.
 
     Refuses any profile other than ``messaging`` so direct callers cannot bypass
     ``resolve_gateway_startup_config``.

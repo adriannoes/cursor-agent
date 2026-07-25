@@ -281,6 +281,29 @@ def test_to_cursor_agent_config_maps_workspace_and_profile(tmp_path: Path) -> No
     assert agent_config.tool_profile == "messaging"
 
 
+def test_to_cursor_agent_config_maps_gateway_model(tmp_path: Path) -> None:
+    """Gateway YAML ``model:`` key is passed through to the agent config."""
+    config_file = tmp_path / "gateway.yaml"
+    _write_gateway_yaml(
+        config_file,
+        _minimal_gateway_yaml() + "model: composer-2.5\n",
+    )
+    gateway_config_loaded = load_gateway_config(config_path=config_file)
+    agent_config = to_cursor_agent_config(gateway_config_loaded)
+
+    assert agent_config.model == "composer-2.5"
+
+
+def test_to_cursor_agent_config_defaults_model_when_omitted(tmp_path: Path) -> None:
+    """Omitting ``model:`` keeps the package default model (grok-4.5)."""
+    config_file = tmp_path / "gateway.yaml"
+    _write_gateway_yaml(config_file, _minimal_gateway_yaml())
+    gateway_config_loaded = load_gateway_config(config_path=config_file)
+    agent_config = to_cursor_agent_config(gateway_config_loaded)
+
+    assert agent_config.model == "grok-4.5"
+
+
 def test_to_cursor_agent_config_preserves_cli_compatible_defaults(
     tmp_path: Path,
 ) -> None:
