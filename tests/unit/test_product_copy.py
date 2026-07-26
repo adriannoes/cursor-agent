@@ -101,6 +101,17 @@ def test_first_commands_hint_includes_onboarding_discoverability_items() -> None
     assert "docs/setup.md" in FIRST_COMMANDS_HINT
 
 
+def test_first_commands_hint_mentions_skills_cli_discoverability() -> None:
+    """FR-6 / A7: first-commands hint lists /skills plus CLI list, seed, and path."""
+    assert "/skills" in FIRST_COMMANDS_HINT
+    assert "skills list" in FIRST_COMMANDS_HINT
+    assert "skills seed" in FIRST_COMMANDS_HINT
+    assert "skills path" in FIRST_COMMANDS_HINT
+    _assert_cli_hint_exclusions(FIRST_COMMANDS_HINT)
+    _assert_no_secret_like_values(FIRST_COMMANDS_HINT)
+    assert _max_rendered_line_width(FIRST_COMMANDS_HINT) <= PRD_MAX_LINE_WIDTH
+
+
 def test_first_commands_hint_is_english_without_forbidden_cli_topics() -> None:
     """CLI first-command hint excludes gateway/cron/Telegram /start content."""
     _assert_cli_hint_exclusions(FIRST_COMMANDS_HINT)
