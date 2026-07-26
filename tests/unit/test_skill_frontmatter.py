@@ -154,6 +154,25 @@ def test_frontmatter_prefix_byte_length_includes_trailing_blank_lines(
     assert content[prefix_length:] == b"Body.\n"
 
 
+def test_frontmatter_prefix_byte_length_accepts_crlf_closer(tmp_path: Path) -> None:
+    """Windows-authored CRLF frontmatter must still yield a positive prefix.
+
+    WHY (PR #69 review): scanner that only looks for ``\\n---\\n`` returns 0 for
+    ``---\\r\\n...\\r\\n---\\r\\n``, hiding name/description.
+    """
+    skill_path = tmp_path / "SKILL.md"
+    content = b"---\r\nname: plan\r\ndescription: Plan work\r\n---\r\n\r\nBody.\r\n"
+    skill_path.write_bytes(content)
+
+    prefix_length = frontmatter_prefix_byte_length(skill_path)
+    assert prefix_length > 0
+    assert content[:prefix_length].startswith(b"---")
+    assert b"Body." not in content[:prefix_length]
+
+    frontmatter = parse_yaml_frontmatter(read_frontmatter_text(skill_path))
+    assert frontmatter == {"name": "plan", "description": "Plan work"}
+
+
 def test_read_frontmatter_text_returns_empty_without_frontmatter(
     tmp_path: Path,
 ) -> None:

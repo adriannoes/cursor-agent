@@ -109,8 +109,18 @@ def frontmatter_prefix_byte_length(skill_path: Path) -> int:
     if not head_bytes.startswith(b"---"):
         return 0
 
-    closing_marker = b"\n---\n"
-    closing_index = head_bytes.find(closing_marker, 3)
+    # WHY: Windows-authored SKILL.md uses CRLF; LF-only closer left name/description
+    # invisible (PR #69 Should Fix). Prefer the earliest valid closer.
+    closing_markers = (b"\n---\n", b"\r\n---\r\n", b"\n---\r\n", b"\r\n---\n")
+    closing_index = -1
+    closing_marker = b""
+    for marker in closing_markers:
+        index = head_bytes.find(marker, 3)
+        if index == -1:
+            continue
+        if closing_index == -1 or index < closing_index:
+            closing_index = index
+            closing_marker = marker
     if closing_index == -1:
         return 0
 

@@ -818,3 +818,69 @@ def test_frontmatter_filling_budget_returns_truncated_prefix_only(
     # truncate_utf8_from_end keeps the tail of the oversized frontmatter prefix
     assert entry.content.endswith("---\n\n")
     assert "name: huge-frontmatter" not in entry.content
+
+
+def test_seed_staging_leftover_is_not_discovered(tmp_path: Path) -> None:
+    """Dot-prefixed staging leftovers must not collide with a real skill slug.
+
+    WHY (PR #69 review): seed stages under ``.seed-staging-*`` inside the user
+    skills root; an interrupted seed must not index the leftover as ``plan``.
+    """
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    user_root = tmp_path / "user-skills"
+    user_root.mkdir()
+    _write_skill_md(
+        user_root,
+        "plan",
+        name="plan",
+        description="Real seeded plan skill.",
+        body="Plan work carefully.",
+    )
+    staging_dir = user_root / ".seed-staging-plan-deadbeef"
+    staging_dir.mkdir()
+    (staging_dir / "SKILL.md").write_text(
+        "---\nname: plan\ndescription: Phantom staging leftover.\n---\n\nstaging",
+        encoding="utf-8",
+    )
+
+    discovery = _discovery_from_fixtures(
+        tmp_path,
+        workspace=workspace,
+        user_skills_root=user_root,
+    )
+    skills = discovery.list_skills()
+
+    assert [skill.name for skill in skills] == ["plan"]
+    assert skills[0].path == "plan/SKILL.md"
+    assert "Phantom" not in skills[0].description
+
+
+def test_symlinked_skills_root_is_skipped(tmp_path: Path) -> None:
+    """A symlinked skills root is ignored (aligned with seed destination policy).
+
+    WHY (PR #69 review): seed refuses symlink destinations; discovery must not
+    follow a symlinked ``.cursor/skills`` as a normal root.
+    """
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    real_skills = tmp_path / "real-skills"
+    real_skills.mkdir()
+    _write_skill_md(
+        real_skills,
+        "leaked",
+        name="leaked",
+        description="Behind a symlink root.",
+        body="Should not be discovered.",
+    )
+    cursor_dir = workspace / ".cursor"
+    cursor_dir.mkdir()
+    (cursor_dir / "skills").symlink_to(real_skills)
+
+    discovery = _discovery_from_fixtures(
+        tmp_path,
+        workspace=workspace,
+        user_skills_root=tmp_path / "user-skills",
+    )
+
+    assert discovery.list_skills() == []
