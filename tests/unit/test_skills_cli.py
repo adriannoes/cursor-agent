@@ -1,13 +1,10 @@
-"""Unit tests for CLI ``skills path|list|seed`` (PRD-016 FR-3 / FR-7, Wave 3 / 4.1).
+"""Unit tests for CLI ``skills path|list|seed``.
 
 WHY: lock Typer registration, hermetic root injection, BYO list visibility, and
-seed exit codes before ``skills_commands.py`` exists (TDD RED for Task 4.1).
+seed exit codes. Destinations, pack, and cwd live under ``tmp_path`` only —
+never touch real ``~/.cursor/skills/``.
 
-Hermetic: destinations, pack, and cwd live under ``tmp_path`` only — never touch
-real ``~/.cursor/skills/``.
-
-Expected public hooks on ``cursor_agent.cli.skills_commands`` (Task 4.2 must
-implement these exact names so fixtures can monkeypatch them):
+Public hooks on ``cursor_agent.cli.skills_commands`` (monkeypatch contract):
 
 - ``resolve_skills_cwd(config) -> Path``
   default: ``Path(config.runtime.local.cwd).resolve()``
@@ -29,9 +26,11 @@ from typer.testing import CliRunner
 from cursor_agent.cli.app import app
 from cursor_agent.cli.rich_display import format_skills_list_output
 from cursor_agent.cli.skills_commands import (
+    resolve_skills_cli_paths,
     resolve_skills_cwd,
     resolve_skills_home,
     resolve_skills_pack_root,
+    resolve_skills_seed_roots,
 )
 from cursor_agent.config.loader import load_config
 from cursor_agent.errors import ConfigError
@@ -40,6 +39,7 @@ from cursor_agent.skills.pack_paths import (
     project_skills_root,
     user_skills_root,
 )
+from tests.unit.skills_fixtures import mini_pack_with_category_tree, write_skill_md
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
@@ -49,7 +49,7 @@ _EMPTY_SKILLS_LIST_MESSAGE = (
     "No skills discovered in the configured workspace and user paths."
 )
 
-# Dotted paths for injectable hooks (Task 4.2 contract).
+# Dotted paths for injectable resolve_skills_* hooks (monkeypatch contract).
 _RESOLVE_SKILLS_CWD = "cursor_agent.cli.skills_commands.resolve_skills_cwd"
 _RESOLVE_SKILLS_HOME = "cursor_agent.cli.skills_commands.resolve_skills_home"
 _RESOLVE_SKILLS_PACK_ROOT = "cursor_agent.cli.skills_commands.resolve_skills_pack_root"
@@ -66,32 +66,6 @@ class SkillsCliEnv:
     project_skills: Path
     user_skills: Path
     outside_probe: Path
-
-
-def _write_skill_md(skill_dir: Path, *, name: str, description: str) -> Path:
-    """Create a minimal AgentSkills SKILL.md and return its path."""
-    skill_dir.mkdir(parents=True, exist_ok=True)
-    skill_path: Path = skill_dir / "SKILL.md"
-    skill_path.write_text(
-        f"---\nname: {name}\ndescription: {description}\n---\n\nBody for {name}.\n",
-        encoding="utf-8",
-    )
-    return skill_path
-
-
-def _mini_pack_with_two_skills(pack_root: Path) -> Path:
-    """Build a controllable mini pack with category nesting (flatten contract)."""
-    _write_skill_md(
-        pack_root / "research" / "alpha-skill",
-        name="alpha-skill",
-        description="Mini pack research skill",
-    )
-    _write_skill_md(
-        pack_root / "meta" / "beta-skill",
-        name="beta-skill",
-        description="Mini pack meta skill",
-    )
-    return pack_root
 
 
 def _paths_touched_outside_tmp(
@@ -119,27 +93,27 @@ def skills_cli_env(
 ) -> SkillsCliEnv:
     """Point skills CLI hooks at ``tmp_path`` workspace/home/pack (cron-style).
 
-    Task 4.2 must expose ``resolve_skills_cwd``, ``resolve_skills_home``, and
-    ``resolve_skills_pack_root`` on ``cursor_agent.cli.skills_commands`` so this
-    fixture can monkeypatch them without patching ``Path.home`` alone.
+    Monkeypatches ``resolve_skills_cwd``, ``resolve_skills_home``, and
+    ``resolve_skills_pack_root`` so tests stay hermetic without patching
+    ``Path.home`` alone.
     """
     workspace: Path = tmp_path / "workspace"
     home: Path = tmp_path / "home"
     pack_root: Path = tmp_path / "mini-pack"
     workspace.mkdir()
     home.mkdir()
-    _mini_pack_with_two_skills(pack_root)
+    mini_pack_with_category_tree(pack_root)
 
     project_skills: Path = project_skills_root(workspace)
     user_skills: Path = user_skills_root(home)
     outside_probe: Path = tmp_path.parent / f".skills-cli-outside-{tmp_path.name}"
 
-    # WHY: prefer injectable hooks over Path.home alone (Task 4.1 contract).
+    # WHY: prefer injectable hooks over Path.home alone for hermetic roots.
     monkeypatch.setattr(_RESOLVE_SKILLS_CWD, lambda _config: workspace.resolve())
     monkeypatch.setattr(_RESOLVE_SKILLS_HOME, lambda: home.resolve())
     monkeypatch.setattr(_RESOLVE_SKILLS_PACK_ROOT, lambda: pack_root.resolve())
 
-    # WHY C1: real load_config() reads operator ~/.cursor-agent + ambient
+    # WHY: real load_config() reads operator ~/.cursor-agent + ambient
     # CURSOR_AGENT__* (e.g. setting_sources) and breaks hermetic discovery.
     hermetic_config = load_config(
         config_path=tmp_path / "missing.yaml",
@@ -156,7 +130,7 @@ def skills_cli_env(
         "cursor_agent.cli.skills_commands.load_config",
         lambda **_kwargs: hermetic_config,
     )
-    # WHY C1: root Typer callback always runs load_cwd_dotenv() on invoke.
+    # WHY: root Typer callback always runs load_cwd_dotenv() on invoke.
     monkeypatch.setattr("cursor_agent.cli.app.load_cwd_dotenv", lambda: None)
 
     return SkillsCliEnv(
@@ -275,7 +249,7 @@ def test_skills_list_sees_pasted_project_byo_skill(
 ) -> None:
     """After pasting a project skill under ``.cursor/skills/``, list shows it as project."""
     before = _snapshot_sibling_tree(skills_cli_env.tmp_path)
-    _write_skill_md(
+    write_skill_md(
         skills_cli_env.project_skills / "my-byo",
         name="my-byo",
         description="Pasted third-party BYO skill",
@@ -298,7 +272,7 @@ def test_skills_list_sees_pasted_user_byo_skill(
 ) -> None:
     """After pasting under the user skills root, list shows Source: user."""
     before = _snapshot_sibling_tree(skills_cli_env.tmp_path)
-    _write_skill_md(
+    write_skill_md(
         skills_cli_env.user_skills / "user-byo",
         name="user-byo",
         description="Pasted user-root BYO skill",
@@ -412,12 +386,12 @@ def test_skills_seed_exits_nonzero_when_any_failed(
 ) -> None:
     """Any seed failure must exit 1, echo Failed on stderr, and keep valid siblings."""
     broken_pack = skills_cli_env.tmp_path / "broken-pack"
-    _write_skill_md(
+    write_skill_md(
         broken_pack / "escape" / "bad",
         name="../x",
         description="Invalid slug that must fail seed",
     )
-    _write_skill_md(
+    write_skill_md(
         broken_pack / "ok" / "good-skill",
         name="good-skill",
         description="Valid sibling still attempts seed",
@@ -479,6 +453,27 @@ def test_skills_path_exits_one_on_config_error(
     )
 
 
+def test_skills_path_succeeds_when_pack_root_resolution_raises(
+    skills_cli_env: SkillsCliEnv,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """``skills path`` must not resolve the bundled pack (BYO roots only)."""
+
+    def _pack_must_not_be_resolved() -> Path:
+        raise ConfigError(
+            "bundled skills pack root not found: received missing-pack, "
+            "expected packaged cursor_agent/skills_pack or checkout skills/"
+        )
+
+    monkeypatch.setattr(_RESOLVE_SKILLS_PACK_ROOT, _pack_must_not_be_resolved)
+
+    result = CliRunner().invoke(app, ["skills", "path"])
+
+    assert result.exit_code == 0, result.output
+    assert f"project: {skills_cli_env.project_skills.resolve()}" in result.stdout
+    assert f"user: {skills_cli_env.user_skills.resolve()}" in result.stdout
+
+
 def test_skills_list_exits_one_on_config_error(
     skills_cli_env: SkillsCliEnv,
     monkeypatch: MonkeyPatch,
@@ -498,6 +493,28 @@ def test_skills_list_exits_one_on_config_error(
     combined = f"{result.stderr}\n{result.output}"
     assert "invalid config" in combined.lower(), (
         f"expected actionable ConfigError on stderr, received {combined!r}"
+    )
+
+
+def test_skills_list_succeeds_when_pack_root_resolution_raises(
+    skills_cli_env: SkillsCliEnv,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """``skills list`` must not resolve the bundled pack (discovery is BYO-only)."""
+
+    def _pack_must_not_be_resolved() -> Path:
+        raise ConfigError(
+            "bundled skills pack root not found: received missing-pack, "
+            "expected packaged cursor_agent/skills_pack or checkout skills/"
+        )
+
+    monkeypatch.setattr(_RESOLVE_SKILLS_PACK_ROOT, _pack_must_not_be_resolved)
+
+    result = CliRunner().invoke(app, ["skills", "list"])
+
+    assert result.exit_code == 0, result.output
+    assert (
+        _EMPTY_SKILLS_LIST_MESSAGE in result.stdout or "skills" in result.stdout.lower()
     )
 
 
@@ -605,6 +622,56 @@ def test_resolve_skills_pack_root_defaults_to_bundled_pack() -> None:
     )
 
 
+def test_resolve_skills_cli_paths_uses_cwd_and_home_hooks_not_pack(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """``resolve_skills_cli_paths`` composes cwd/home hooks and never touches pack."""
+    workspace: Path = tmp_path / "cli-paths-cwd"
+    home: Path = tmp_path / "cli-paths-home"
+    workspace.mkdir()
+    home.mkdir()
+    config = load_config(
+        config_path=tmp_path / "missing.yaml",
+        cli_overrides={"runtime": {"local": {"cwd": str(workspace)}}},
+    )
+    monkeypatch.setattr(_RESOLVE_SKILLS_CWD, lambda _config: workspace.resolve())
+    monkeypatch.setattr(_RESOLVE_SKILLS_HOME, lambda: home.resolve())
+
+    def _pack_must_not_be_resolved() -> Path:
+        raise AssertionError(
+            "resolve_skills_cli_paths must not call resolve_skills_pack_root"
+        )
+
+    monkeypatch.setattr(_RESOLVE_SKILLS_PACK_ROOT, _pack_must_not_be_resolved)
+
+    paths = resolve_skills_cli_paths(config)
+
+    assert paths.cwd == workspace.resolve()
+    assert paths.home == home.resolve()
+    assert paths.project_skills == project_skills_root(workspace.resolve())
+    assert paths.user_skills == user_skills_root(home.resolve())
+    assert not hasattr(paths, "pack_root")
+
+
+def test_resolve_skills_seed_roots_uses_home_and_pack_hooks(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """``resolve_skills_seed_roots`` returns injectable home and pack roots."""
+    home: Path = tmp_path / "seed-home"
+    pack_root: Path = tmp_path / "seed-pack"
+    home.mkdir()
+    pack_root.mkdir()
+    monkeypatch.setattr(_RESOLVE_SKILLS_HOME, lambda: home.resolve())
+    monkeypatch.setattr(_RESOLVE_SKILLS_PACK_ROOT, lambda: pack_root.resolve())
+
+    resolved_home, resolved_pack = resolve_skills_seed_roots()
+
+    assert resolved_home == home.resolve()
+    assert resolved_pack == pack_root.resolve()
+
+
 # --- seed summary formatting edges --------------------------------------------
 
 
@@ -636,7 +703,7 @@ def test_skills_seed_failures_only_skips_empty_stdout_summary(
 ) -> None:
     """Failures-only seed: empty stdout summary, Failed lines on stderr, exit 1."""
     broken_pack: Path = skills_cli_env.tmp_path / "failures-only-pack"
-    _write_skill_md(
+    write_skill_md(
         broken_pack / "escape" / "bad",
         name="../x",
         description="Invalid slug that must fail seed alone",

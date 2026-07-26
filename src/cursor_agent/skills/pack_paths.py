@@ -1,7 +1,8 @@
-"""Resolve bundled pack and project/user skills roots (PRD-016 FR-1, FR-3).
+"""Resolve bundled pack and project/user skills roots.
 
 WHY: the wheel embeds product skills at ``cursor_agent/skills_pack``, never at
-``cursor_agent/skills`` — that path is the Python discovery package (Q5).
+``cursor_agent/skills`` — that path is the Python discovery package and would
+collide if both lived under the same import path.
 """
 
 from __future__ import annotations

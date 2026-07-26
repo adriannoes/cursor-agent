@@ -1,7 +1,7 @@
 """Public helpers for AgentSkills YAML frontmatter and SKILL.md path safety.
 
-WHY: seed and discovery share symlink/frontmatter policy; PRD-016 Wave 2 C5
-promotes these from discovery private helpers so seed/tests import a stable API.
+WHY: seed and discovery share symlink/frontmatter policy through one stable API
+so both paths refuse the same unsafe SKILL.md layouts.
 """
 
 from __future__ import annotations
@@ -80,6 +80,20 @@ def parse_yaml_frontmatter(text: str) -> dict[str, str]:
         msg = f"invalid frontmatter: received {loaded!r}, expected mapping"
         raise ValueError(msg)
     return _string_frontmatter_fields(loaded)
+
+
+def skill_name_from_frontmatter(
+    frontmatter: dict[str, str],
+    *,
+    directory_name: str,
+) -> str:
+    """Return frontmatter ``name`` (stripped) or fall back to ``directory_name``.
+
+    Example:
+        >>> skill_name_from_frontmatter({"name": "plan"}, directory_name="plan-dir")
+        'plan'
+    """
+    return frontmatter.get("name", "").strip() or directory_name
 
 
 def frontmatter_prefix_byte_length(skill_path: Path) -> int:

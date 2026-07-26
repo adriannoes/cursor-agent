@@ -1,7 +1,7 @@
-"""Unit tests for bundled product skills pack layout and catalog (PRD-016, FR-2, FR-7).
+"""Unit tests for bundled product skills pack layout and catalog.
 
 WHY: lock the 14 starter skill paths, frontmatter contracts, size cap, uniqueness,
-and ADR-013 denylist before authoring SKILL.md bodies (TDD RED for Wave 1).
+and ADR-013 denylist for the shipped skills pack.
 """
 
 from __future__ import annotations
@@ -17,24 +17,7 @@ from cursor_agent.skills.skill_frontmatter import (
     parse_yaml_frontmatter,
     read_frontmatter_text,
 )
-
-# Locked catalog from PRD-016 FR-1 / FR-2 (category → skill name).
-EXPECTED_SKILLS_PACK_ENTRIES: tuple[tuple[str, str], ...] = (
-    ("research", "deep-research"),
-    ("research", "brief"),
-    ("research", "compare-sources"),
-    ("research", "summarize-url"),
-    ("software-development", "plan"),
-    ("software-development", "debug"),
-    ("software-development", "tdd"),
-    ("software-development", "spike"),
-    ("software-development", "dogfood"),
-    ("software-development", "simplify"),
-    ("github", "pr-review"),
-    ("github", "pr-workflow"),
-    ("github", "issues"),
-    ("meta", "build-skill"),
-)
+from tests.unit.skills_fixtures import EXPECTED_SKILLS_PACK_ENTRIES
 
 
 def _skill_md_path(category: str, skill_name: str) -> Path:

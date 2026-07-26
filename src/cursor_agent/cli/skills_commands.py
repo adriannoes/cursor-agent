@@ -1,4 +1,4 @@
-"""Typer handlers for ``cursor-agent skills`` (PRD-016 FR-3 / FR-7).
+"""Typer handlers for ``cursor-agent skills``.
 
 WHY: operators need path/list/seed without the REPL; hooks are injectable so
 unit tests stay hermetic under ``tmp_path`` (never real ``~/.cursor/skills/``).
@@ -6,6 +6,7 @@ unit tests stay hermetic under ``tmp_path`` (never real ``~/.cursor/skills/``).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, NoReturn
 
@@ -81,6 +82,76 @@ def resolve_skills_pack_root() -> Path:
     return bundled_skills_pack_root()
 
 
+@dataclass(frozen=True, slots=True)
+class SkillsCliPaths:
+    """Resolved hermetic roots for skills CLI path/list commands.
+
+    WHY: path/list never need the bundled pack — pack resolution stays on
+    ``resolve_skills_seed_roots`` so a missing pack does not break BYO inspect.
+
+    Example:
+        >>> # paths = resolve_skills_cli_paths(load_config())
+        >>> # paths.project_skills
+    """
+
+    cwd: Path
+    home: Path
+
+    @property
+    def project_skills(self) -> Path:
+        """Project ``.cursor/skills`` root derived from ``cwd``."""
+        return project_skills_root(self.cwd)
+
+    @property
+    def user_skills(self) -> Path:
+        """User ``.cursor/skills`` root derived from ``home``."""
+        return user_skills_root(self.home)
+
+
+@dataclass(frozen=True, slots=True)
+class SkillsCliRuntime:
+    """Config plus resolved paths for skills path/list commands.
+
+    Example:
+        >>> # runtime = load_skills_cli_runtime()
+        >>> # runtime.paths.project_skills
+    """
+
+    config: CursorAgentConfig
+    paths: SkillsCliPaths
+
+
+def resolve_skills_cli_paths(config: CursorAgentConfig) -> SkillsCliPaths:
+    """Compose cwd/home via the public ``resolve_skills_*`` hooks (no pack).
+
+    Example:
+        >>> # resolve_skills_cli_paths(load_config()).cwd.is_absolute()
+    """
+    return SkillsCliPaths(
+        cwd=resolve_skills_cwd(config),
+        home=resolve_skills_home(),
+    )
+
+
+def load_skills_cli_runtime() -> SkillsCliRuntime:
+    """Load config and resolve skills CLI paths in one step.
+
+    Example:
+        >>> # load_skills_cli_runtime().paths.user_skills
+    """
+    config = load_config()
+    return SkillsCliRuntime(config=config, paths=resolve_skills_cli_paths(config))
+
+
+def resolve_skills_seed_roots() -> tuple[Path, Path]:
+    """Return ``(home, pack_root)`` for seed via injectable hooks (no ``load_config``).
+
+    Example:
+        >>> # home, pack = resolve_skills_seed_roots()
+    """
+    return resolve_skills_home(), resolve_skills_pack_root()
+
+
 def _format_seed_summary(summary: SeedSummary) -> str:
     """Render non-failure seed outcomes as human-readable stdout lines.
 
@@ -113,14 +184,12 @@ def skills_path() -> None:
         cursor-agent skills path
     """
     try:
-        config = load_config()
-        cwd = resolve_skills_cwd(config)
-        home = resolve_skills_home()
+        runtime = load_skills_cli_runtime()
     except CursorAgentError as exc:
         _exit_on_cursor_agent_error(exc)
 
-    project_root = project_skills_root(cwd).resolve()
-    user_root = user_skills_root(home).resolve()
+    project_root = runtime.paths.project_skills.resolve()
+    user_root = runtime.paths.user_skills.resolve()
     lines = [
         f"project: {project_root}",
         f"user: {user_root}",
@@ -140,14 +209,12 @@ def skills_list() -> None:
         cursor-agent skills list
     """
     try:
-        config = load_config()
-        cwd = resolve_skills_cwd(config)
-        home = resolve_skills_home()
-        # WHY: align with REPL /skills — formatter needs metadata only (review N1).
+        runtime = load_skills_cli_runtime()
+        # WHY: align with REPL /skills — formatter needs metadata only.
         discovery = skill_discovery_from_config(
-            config,
-            override_workspace=cwd,
-            override_user_skills=user_skills_root(home),
+            runtime.config,
+            override_workspace=runtime.paths.cwd,
+            override_user_skills=runtime.paths.user_skills,
             include_content=False,
         )
         output = format_skills_list_output(discovery.list_skills())
@@ -174,8 +241,8 @@ def skills_seed(
         cursor-agent skills seed --force
     """
     try:
-        pack_root = resolve_skills_pack_root()
-        destination_root = user_skills_root(resolve_skills_home())
+        home, pack_root = resolve_skills_seed_roots()
+        destination_root = user_skills_root(home)
         summary = seed_bundled_skills(
             pack_root=pack_root,
             destination_root=destination_root,

@@ -1,4 +1,4 @@
-"""Unit tests for AgentSkills YAML frontmatter helpers (PRD-016 Wave 2).
+"""Unit tests for AgentSkills YAML frontmatter helpers.
 
 Hermetic: all paths use ``tmp_path`` only — never real ``~/.cursor/skills/``.
 """
@@ -14,6 +14,7 @@ from cursor_agent.skills.skill_frontmatter import (
     is_safe_skill_file,
     parse_yaml_frontmatter,
     read_frontmatter_text,
+    skill_name_from_frontmatter,
 )
 
 
@@ -171,3 +172,36 @@ def test_read_frontmatter_text_returns_decoded_prefix(tmp_path: Path) -> None:
     text = read_frontmatter_text(skill_path)
     assert text.startswith("---\nname: plan\n---")
     assert "Body." not in text
+
+
+def test_skill_name_from_frontmatter_uses_name_when_present() -> None:
+    """Present non-empty ``name`` wins over ``directory_name``."""
+    assert (
+        skill_name_from_frontmatter(
+            {"name": "plan", "description": "x"},
+            directory_name="dir-only-slug",
+        )
+        == "plan"
+    )
+
+
+def test_skill_name_from_frontmatter_strips_whitespace_name() -> None:
+    """Whitespace-only ``name`` falls back to ``directory_name``."""
+    assert (
+        skill_name_from_frontmatter(
+            {"name": "   ", "description": "x"},
+            directory_name="dir-only-slug",
+        )
+        == "dir-only-slug"
+    )
+
+
+def test_skill_name_from_frontmatter_falls_back_when_name_absent() -> None:
+    """Missing ``name`` key falls back to ``directory_name``."""
+    assert (
+        skill_name_from_frontmatter(
+            {"description": "no name field"},
+            directory_name="dir-only-slug",
+        )
+        == "dir-only-slug"
+    )

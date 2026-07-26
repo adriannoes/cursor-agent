@@ -1,4 +1,4 @@
-"""Package artifact smoke tests (PRD-012 Task 8.1; PRD-016 skills_pack).
+"""Package artifact smoke tests for the installed wheel.
 
 Builds the wheel, installs into a fresh virtualenv, and verifies the
 console script (including ``skills --help``), bundled messaging hook
@@ -111,7 +111,7 @@ def _verify_setup_help(console_script: Path) -> None:
 
 
 def _verify_skills_help(console_script: Path) -> None:
-    """Installed package must expose registered ``skills`` subcommands (FR-7 / Q5).
+    """Installed package must expose registered ``skills`` subcommands.
 
     WHY: substring checks on group help can match prose in the description;
     per-subcommand ``--help`` proves Typer registered path/list/seed.
@@ -150,8 +150,8 @@ def _verify_packaged_hooks(python_bin: Path) -> None:
 def _verify_packaged_skills_pack(python_bin: Path) -> None:
     """Installed wheel must embed skills under skills_pack, never the Python package.
 
-    WHY (PRD-016 Q5): unit tests can pass via checkout fallback; smoke must lock
-    the installed ``cursor_agent/skills_pack`` contract on a real wheel.
+    WHY: unit tests can pass via checkout fallback; smoke must lock the installed
+    ``cursor_agent/skills_pack`` contract on a real wheel.
     """
     probe = "\n".join(
         [
