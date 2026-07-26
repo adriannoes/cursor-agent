@@ -11,6 +11,7 @@ from typing import Any, Final
 
 import yaml
 
+SKILL_FILENAME: Final[str] = "SKILL.md"
 _FRONTMATTER_MAX_BYTES: Final[int] = 8192
 
 
@@ -40,7 +41,7 @@ def read_frontmatter_text(path: Path) -> str:
         >>> from pathlib import Path
         >>> # read_frontmatter_text(Path("skills/plan/SKILL.md"))
     """
-    prefix_byte_length = _frontmatter_prefix_byte_length(path)
+    prefix_byte_length = frontmatter_prefix_byte_length(path)
     if prefix_byte_length == 0:
         return ""
     with path.open("rb") as handle:
@@ -81,8 +82,13 @@ def parse_yaml_frontmatter(text: str) -> dict[str, str]:
     return _string_frontmatter_fields(loaded)
 
 
-def _frontmatter_prefix_byte_length(skill_path: Path) -> int:
-    """Return the UTF-8 byte length of YAML frontmatter plus its body separator."""
+def frontmatter_prefix_byte_length(skill_path: Path) -> int:
+    """Return the UTF-8 byte length of YAML frontmatter plus its body separator.
+
+    Example:
+        >>> from pathlib import Path
+        >>> # frontmatter_prefix_byte_length(Path("skills/plan/SKILL.md"))
+    """
     with skill_path.open("rb") as handle:
         head_bytes = handle.read(_FRONTMATTER_MAX_BYTES)
 

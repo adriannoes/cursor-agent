@@ -12,7 +12,8 @@ import yaml
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.skills import pack_paths
 from cursor_agent.skills.skill_frontmatter import (
-    _frontmatter_prefix_byte_length,
+    SKILL_FILENAME,
+    frontmatter_prefix_byte_length,
     is_safe_skill_file,
     parse_yaml_frontmatter,
     read_frontmatter_text,
@@ -25,14 +26,10 @@ from cursor_agent.utf8_io import (
 
 SkillSource = Literal["project", "user"]
 
-SKILL_FILENAME: Final[str] = "SKILL.md"
+# WHY: SKILL_FILENAME is imported from skill_frontmatter and re-exported here
+# for callers that historically used ``from cursor_agent.skills.discovery import SKILL_FILENAME``.
 SKILL_CONTENT_MAX_BYTES: Final[int] = 32 * 1024
 _MODULE_LOGGER = logging.getLogger(__name__)
-
-# WHY: thin aliases keep discover-loop call sites stable after C5 extraction.
-_is_safe_skill_file = is_safe_skill_file
-_parse_yaml_frontmatter = parse_yaml_frontmatter
-_read_frontmatter_text = read_frontmatter_text
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,7 +135,7 @@ def _discover_skills_in_root(
 
     entries: dict[str, SkillEntry] = {}
     for skill_path in sorted(skills_root.rglob(SKILL_FILENAME)):
-        if not _is_safe_skill_file(skill_path, skills_root):
+        if not is_safe_skill_file(skill_path, skills_root):
             continue
         try:
             entry = _load_skill_entry(
@@ -182,8 +179,8 @@ def _load_skill_entry(
     include_content: bool,
 ) -> SkillEntry:
     directory_name = skill_path.parent.name
-    frontmatter_text = _read_frontmatter_text(skill_path)
-    frontmatter = _parse_yaml_frontmatter(frontmatter_text)
+    frontmatter_text = read_frontmatter_text(skill_path)
+    frontmatter = parse_yaml_frontmatter(frontmatter_text)
 
     name = frontmatter.get("name", "").strip() or directory_name
     description = frontmatter.get("description", "").strip()
@@ -210,7 +207,7 @@ def _read_bounded_skill_content(skill_path: Path) -> str:
     if file_size == 0:
         return ""
 
-    prefix_byte_length = _frontmatter_prefix_byte_length(skill_path)
+    prefix_byte_length = frontmatter_prefix_byte_length(skill_path)
     if file_size <= SKILL_CONTENT_MAX_BYTES:
         text, _ = read_utf8_file_tail(skill_path, SKILL_CONTENT_MAX_BYTES)
         return truncate_utf8_from_end(text, SKILL_CONTENT_MAX_BYTES)

@@ -9,13 +9,18 @@ touch real ``~/.cursor/skills/``.
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from cursor_agent.errors import ConfigError
 from cursor_agent.skills.pack_paths import bundled_skills_pack_root
-from cursor_agent.skills.seed import SeedSummary, seed_bundled_skills
+from cursor_agent.skills.seed import SeedFailure, SeedSummary, seed_bundled_skills
+
+if TYPE_CHECKING:
+    from _pytest.monkeypatch import MonkeyPatch
 
 # Locked catalog names from PRD-016 FR-2 (flat destination slugs after seed).
 EXPECTED_SEEDED_SKILL_SLUGS: frozenset[str] = frozenset(
@@ -76,6 +81,28 @@ def _destination_skill_slugs(destination_root: Path) -> set[str]:
     return {path.name for path in destination_root.iterdir() if path.is_dir()}
 
 
+def _failed_slugs(summary: SeedSummary) -> set[str]:
+    """Return the set of slugs recorded in ``summary.failed``."""
+    return {failure.slug for failure in summary.failed}
+
+
+def _assert_failure_has_reason(summary: SeedSummary, slug: str) -> None:
+    """Assert ``slug`` appears in failed with a non-empty reason string."""
+    for failure in summary.failed:
+        if failure.slug == slug:
+            assert isinstance(failure, SeedFailure), (
+                f"failed entry must be SeedFailure, received {failure!r}"
+            )
+            assert failure.reason.strip(), (
+                f"SeedFailure for slug={slug!r} must include a non-empty reason, "
+                f"received reason={failure.reason!r}"
+            )
+            return
+    raise AssertionError(
+        f"expected SeedFailure for slug={slug!r}, received failed={summary.failed!r}"
+    )
+
+
 def _assert_seed_summary_shape(summary: SeedSummary) -> None:
     """Lock SeedSummary field types expected by Task 3.2 / CLI consumers."""
     assert isinstance(summary.seeded, tuple), (
@@ -91,20 +118,30 @@ def _assert_seed_summary_shape(summary: SeedSummary) -> None:
         f"received type={type(summary.overwritten)!r} value={summary.overwritten!r}"
     )
     assert isinstance(summary.failed, tuple), (
-        f"SeedSummary.failed must be tuple[str, ...], "
+        f"SeedSummary.failed must be tuple[SeedFailure, ...], "
         f"received type={type(summary.failed)!r} value={summary.failed!r}"
     )
     for field_name, values in (
         ("seeded", summary.seeded),
         ("skipped", summary.skipped),
         ("overwritten", summary.overwritten),
-        ("failed", summary.failed),
     ):
         for item in values:
             assert isinstance(item, str), (
                 f"SeedSummary.{field_name} items must be str, "
                 f"received item={item!r} type={type(item)!r}"
             )
+    for failure in summary.failed:
+        assert isinstance(failure, SeedFailure), (
+            f"SeedSummary.failed items must be SeedFailure, "
+            f"received item={failure!r} type={type(failure)!r}"
+        )
+        assert isinstance(failure.slug, str), (
+            f"SeedFailure.slug must be str, received {failure.slug!r}"
+        )
+        assert isinstance(failure.reason, str), (
+            f"SeedFailure.reason must be str, received {failure.reason!r}"
+        )
 
 
 def test_seed_bundled_skills_copies_all_fourteen_into_flat_destination(
@@ -332,9 +369,10 @@ def test_seed_bundled_skills_records_invalid_slug_in_failed(
     )
 
     _assert_seed_summary_shape(summary)
-    assert "../x" in summary.failed, (
+    assert "../x" in _failed_slugs(summary), (
         f"invalid slug must appear in failed, received failed={summary.failed!r}"
     )
+    _assert_failure_has_reason(summary, "../x")
     assert "good-skill" in summary.seeded, (
         f"valid sibling must still seed, received seeded={summary.seeded!r}"
     )
@@ -432,9 +470,14 @@ def test_seed_bundled_skills_records_symlink_skill_md_in_failed(
     )
 
     _assert_seed_summary_shape(summary)
-    assert any("leaked" in label for label in summary.failed), (
+    assert any("leaked" in failure.slug for failure in summary.failed), (
         f"symlink pack entry must appear in failed, received failed={summary.failed!r}"
     )
+    for failure in summary.failed:
+        if "leaked" in failure.slug:
+            assert failure.reason.strip(), (
+                f"symlink failure must include reason, received {failure!r}"
+            )
     assert "ok-skill" in summary.seeded, (
         f"valid sibling must still seed, received seeded={summary.seeded!r}"
     )
@@ -465,9 +508,10 @@ def test_seed_bundled_skills_records_symlinked_slug_dir_escape_in_failed(
     )
 
     _assert_seed_summary_shape(summary)
-    assert "alpha-skill" in summary.failed, (
+    assert "alpha-skill" in _failed_slugs(summary), (
         f"escape must record alpha-skill in failed, received failed={summary.failed!r}"
     )
+    _assert_failure_has_reason(summary, "alpha-skill")
     assert "beta-skill" in summary.seeded, (
         f"sibling beta-skill must still seed, received seeded={summary.seeded!r}"
     )
@@ -496,15 +540,110 @@ def test_seed_bundled_skills_force_records_symlinked_slug_dir_escape_in_failed(
         force=True,
     )
 
-    assert "alpha-skill" in summary.failed, (
+    assert "alpha-skill" in _failed_slugs(summary), (
         f"force escape must record alpha-skill in failed, "
         f"received failed={summary.failed!r}"
     )
+    _assert_failure_has_reason(summary, "alpha-skill")
     assert "beta-skill" in summary.seeded, (
         f"sibling beta-skill must still seed under force, "
         f"received seeded={summary.seeded!r}"
     )
     assert not (outside_dir / "SKILL.md").exists()
+
+
+def test_seed_bundled_skills_refuses_in_tree_slug_symlink_clobber(
+    tmp_path: Path,
+) -> None:
+    """In-tree slug symlink must fail; target sibling contents must stay intact."""
+    pack_root: Path = _mini_pack_with_category_tree(tmp_path / "mini-pack")
+    destination_root: Path = tmp_path / "dest"
+    destination_root.mkdir()
+
+    # Seed beta first so the in-tree symlink target has known body content.
+    seed_bundled_skills(
+        pack_root=pack_root,
+        destination_root=destination_root,
+        force=False,
+    )
+    beta_skill_md: Path = destination_root / "beta-skill" / "SKILL.md"
+    beta_body: str = beta_skill_md.read_text(encoding="utf-8")
+    alpha_dir: Path = destination_root / "alpha-skill"
+    # Replace seeded alpha dir with symlink → beta (in-tree clobber hazard).
+    shutil.rmtree(alpha_dir)
+    alpha_dir.symlink_to(destination_root / "beta-skill", target_is_directory=True)
+
+    for force in (False, True):
+        summary: SeedSummary = seed_bundled_skills(
+            pack_root=pack_root,
+            destination_root=destination_root,
+            force=force,
+        )
+        assert "alpha-skill" in _failed_slugs(summary), (
+            f"in-tree symlink must fail for force={force}, "
+            f"received failed={summary.failed!r}"
+        )
+        _assert_failure_has_reason(summary, "alpha-skill")
+        assert alpha_dir.is_symlink(), (
+            f"alpha-skill must remain a symlink (not followed/deleted), "
+            f"force={force}, path={alpha_dir}"
+        )
+        assert beta_skill_md.read_text(encoding="utf-8") == beta_body, (
+            f"beta-skill body must not be replaced by alpha pack content, "
+            f"force={force}, received={beta_skill_md.read_text(encoding='utf-8')!r}"
+        )
+        assert "Body for alpha-skill" not in beta_body
+        assert "Body for alpha-skill" not in beta_skill_md.read_text(encoding="utf-8")
+
+
+def test_seed_bundled_skills_force_preserves_tree_when_copytree_fails(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Failed force overwrite must leave prior SKILL.md intact and record failure."""
+    pack_root: Path = tmp_path / "atomic-pack"
+    _write_skill_md(
+        pack_root / "meta" / "stable-skill",
+        name="stable-skill",
+        description="Survives failed force overwrite",
+    )
+    destination_root: Path = tmp_path / "dest"
+    destination_root.mkdir()
+
+    first: SeedSummary = seed_bundled_skills(
+        pack_root=pack_root,
+        destination_root=destination_root,
+        force=False,
+    )
+    assert "stable-skill" in first.seeded
+    skill_md: Path = destination_root / "stable-skill" / "SKILL.md"
+    original_text: str = skill_md.read_text(encoding="utf-8")
+
+    def _raise_copytree(*_args: object, **_kwargs: object) -> None:
+        raise OSError("simulated copytree failure")
+
+    monkeypatch.setattr("cursor_agent.skills.seed.shutil.copytree", _raise_copytree)
+
+    forced: SeedSummary = seed_bundled_skills(
+        pack_root=pack_root,
+        destination_root=destination_root,
+        force=True,
+    )
+
+    _assert_seed_summary_shape(forced)
+    assert "stable-skill" in _failed_slugs(forced), (
+        f"failed force copy must record slug in failed, "
+        f"received failed={forced.failed!r}"
+    )
+    _assert_failure_has_reason(forced, "stable-skill")
+    assert skill_md.is_file(), (
+        f"prior SKILL.md must survive failed force overwrite at {skill_md}"
+    )
+    assert skill_md.read_text(encoding="utf-8") == original_text, (
+        f"prior SKILL.md contents must be unchanged after failed force, "
+        f"received={skill_md.read_text(encoding='utf-8')!r}, "
+        f"expected={original_text!r}"
+    )
 
 
 def test_seed_bundled_skills_records_unparseable_frontmatter_in_failed(
@@ -534,7 +673,7 @@ def test_seed_bundled_skills_records_unparseable_frontmatter_in_failed(
     )
 
     _assert_seed_summary_shape(summary)
-    assert any("broken" in label for label in summary.failed), (
+    assert any("broken" in failure.slug for failure in summary.failed), (
         f"unparseable skill must appear in failed, received failed={summary.failed!r}"
     )
     assert "ok-skill" in summary.seeded, (
@@ -634,12 +773,74 @@ def test_seed_bundled_skills_records_duplicate_slug_in_failed(
     assert "dup-skill" in summary.seeded, (
         f"first dup-skill occurrence must seed, received seeded={summary.seeded!r}"
     )
-    assert "dup-skill" in summary.failed, (
+    assert "dup-skill" in _failed_slugs(summary), (
         f"second dup-skill occurrence must fail, received failed={summary.failed!r}"
     )
     assert summary.seeded.count("dup-skill") == 1
-    assert summary.failed.count("dup-skill") == 1
+    assert sum(1 for failure in summary.failed if failure.slug == "dup-skill") == 1
     assert (destination_root / "dup-skill" / "SKILL.md").is_file()
+
+
+def test_seed_bundled_skills_failed_first_slug_does_not_block_later_valid(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Failed first same-slug must not enter seen_slugs; later occurrence still seeds.
+
+    First copy fails via monkeypatched copytree; second pack entry shares the slug
+    and must seed (not be misclassified as a duplicate).
+    """
+    pack_root: Path = tmp_path / "flaky-pack"
+    _write_skill_md(
+        pack_root / "a-first" / "first",
+        name="shared-slug",
+        description="First occurrence — copy will fail",
+    )
+    _write_skill_md(
+        pack_root / "z-second" / "second",
+        name="shared-slug",
+        description="Second occurrence — must seed after first failed",
+    )
+    destination_root: Path = tmp_path / "dest"
+    destination_root.mkdir()
+
+    real_copytree = shutil.copytree
+    copy_attempts: list[int] = [0]
+
+    def _flaky_copytree(*args: object, **kwargs: object) -> Path:
+        copy_attempts[0] += 1
+        if copy_attempts[0] == 1:
+            raise OSError("simulated first-copy failure")
+        return real_copytree(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "cursor_agent.skills.seed.shutil.copytree",
+        _flaky_copytree,
+    )
+
+    summary: SeedSummary = seed_bundled_skills(
+        pack_root=pack_root,
+        destination_root=destination_root,
+        force=False,
+    )
+
+    _assert_seed_summary_shape(summary)
+    assert "shared-slug" in _failed_slugs(summary), (
+        f"first failed copy must record shared-slug, received failed={summary.failed!r}"
+    )
+    _assert_failure_has_reason(summary, "shared-slug")
+    assert "shared-slug" in summary.seeded, (
+        f"second same-slug must seed after failed first, "
+        f"received seeded={summary.seeded!r}, failed={summary.failed!r}"
+    )
+    assert sum(1 for failure in summary.failed if failure.slug == "shared-slug") == 1
+    assert all(
+        "duplicate" not in failure.reason.lower() for failure in summary.failed
+    ), (
+        f"failed first must not cause duplicate misclassification, "
+        f"received failed={summary.failed!r}"
+    )
+    assert (destination_root / "shared-slug" / "SKILL.md").is_file()
 
 
 def test_seed_bundled_skills_records_slug_exceeding_length_cap_in_failed(
@@ -668,9 +869,10 @@ def test_seed_bundled_skills_records_slug_exceeding_length_cap_in_failed(
     )
 
     _assert_seed_summary_shape(summary)
-    assert long_name in summary.failed, (
+    assert long_name in _failed_slugs(summary), (
         f"65-char slug must appear in failed, received failed={summary.failed!r}"
     )
+    _assert_failure_has_reason(summary, long_name)
     assert "ok-skill" in summary.seeded, (
         f"valid sibling must still seed, received seeded={summary.seeded!r}"
     )
@@ -702,10 +904,11 @@ def test_seed_bundled_skills_records_invalid_directory_fallback_in_failed(
     )
 
     _assert_seed_summary_shape(summary)
-    assert "BadName" in summary.failed, (
+    assert "BadName" in _failed_slugs(summary), (
         f"invalid directory fallback must appear in failed, "
         f"received failed={summary.failed!r}"
     )
+    _assert_failure_has_reason(summary, "BadName")
     assert "ok-skill" in summary.seeded, (
         f"valid sibling must still seed, received seeded={summary.seeded!r}"
     )
