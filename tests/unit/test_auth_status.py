@@ -27,6 +27,7 @@ Pattern: ``tests/unit/test_usage.py`` CliRunner + monkeypatch.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -39,13 +40,21 @@ from cursor_agent.errors import AuthError, NetworkError
 from cursor_agent.usage import USAGE_TOKEN_ENV_VAR
 
 
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove Rich/ANSI SGR sequences so flag names are contiguous substrings."""
+    return _ANSI_ESCAPE_RE.sub("", text)
+
+
 def _write_auth_json(path: Path, data: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data), encoding="utf-8")
 
 
 def _invoke_auth_status(*args: str) -> Any:
-    """Invoke the future ``auth status`` subcommand via the root Typer app."""
+    """Invoke the ``auth status`` subcommand via the root Typer app."""
     return CliRunner().invoke(app, ["auth", "status", *args])
 
 
@@ -161,16 +170,60 @@ def test_resolve_usage_oauth_invalid_store_for_missing_access_token_field(
     assert status == UsageOauthStatus.INVALID_STORE
 
 
+def test_resolve_usage_oauth_invalid_store_for_non_dict_json(tmp_path: Path) -> None:
+    """JSON array/root non-object → invalid_store (structural)."""
+    from cursor_agent.auth_status import (  # noqa: PLC0415
+        UsageOauthStatus,
+        resolve_usage_oauth_local_status,
+    )
+
+    auth = tmp_path / "auth.json"
+    auth.write_text("[]", encoding="utf-8")
+    status = resolve_usage_oauth_local_status(env={}, auth_json_path=auth)
+    assert status == UsageOauthStatus.INVALID_STORE
+
+
+def test_resolve_usage_oauth_invalid_store_when_auth_json_unreadable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OSError reading auth.json → invalid_store (not missing)."""
+    from cursor_agent.auth_status import (  # noqa: PLC0415
+        UsageOauthStatus,
+        resolve_usage_oauth_local_status,
+    )
+
+    auth = tmp_path / "auth.json"
+    auth.write_text('{"accessToken": "x"}', encoding="utf-8")
+    original_read_text = Path.read_text
+
+    def _boom(self: Path, *args: object, **kwargs: object) -> str:
+        if self == auth:
+            raise OSError("permission denied: simulated unreadable auth.json")
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", _boom)
+    status = resolve_usage_oauth_local_status(env={}, auth_json_path=auth)
+    assert status == UsageOauthStatus.INVALID_STORE
+
+
 # ---------------------------------------------------------------------------
 # CLI: help / flags
 # ---------------------------------------------------------------------------
 
 
-def test_auth_status_help_exposes_json_probe_and_no_probe_flags() -> None:
+def test_auth_status_help_exposes_json_probe_and_no_probe_flags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """``auth status --help`` documents --json, --probe, and --no-probe."""
+    # Reproduce CI: colored Rich help splits "--json" across ANSI SGR codes.
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setenv("COLUMNS", "80")
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
     result = CliRunner().invoke(app, ["auth", "status", "--help"])
     assert result.exit_code == 0, result.output
-    help_text = result.output
+    help_text = _strip_ansi(result.output)
     assert "--json" in help_text
     assert "--probe" in help_text
     assert "--no-probe" in help_text
@@ -302,48 +355,6 @@ def test_cli_auth_status_no_probe_does_not_call_probe_api_key(
     )
 
 
-def test_cli_auth_status_no_probe_does_not_call_fake_facade_probe(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """When CLI uses FakeSdkFacade, --no-probe must leave probe_api_key uncalled."""
-    from cursor_agent.sdk_facade import FakeSdkFacade  # noqa: PLC0415
-
-    facade = FakeSdkFacade(probe_ok=True)
-    original_probe = facade.probe_api_key
-    probe_calls: list[str] = []
-
-    async def _counting_probe() -> bool:
-        probe_calls.append("called")
-        return await original_probe()
-
-    facade.probe_api_key = _counting_probe  # type: ignore[method-assign]
-
-    monkeypatch.setenv("CURSOR_API_KEY", "sk-test-present")
-    monkeypatch.setenv(USAGE_TOKEN_ENV_VAR, "oauth-token-present")
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(
-        "cursor_agent.cli.auth_command.FakeSdkFacade",
-        lambda *a, **k: facade,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        "cursor_agent.cli.auth_command.get_sdk_facade",
-        lambda: facade,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        "cursor_agent.auth_status.get_sdk_facade",
-        lambda: facade,
-        raising=False,
-    )
-
-    result = _invoke_auth_status("--no-probe")
-    assert result.exit_code == 0, result.output
-    assert probe_calls == []
-    assert facade.aclose_call_count == 0
-
-
 # ---------------------------------------------------------------------------
 # CLI: probe failure → exit 1
 # ---------------------------------------------------------------------------
@@ -377,6 +388,70 @@ def test_cli_auth_status_probe_failure_exits_one(
     assert result.exit_code == 1, result.output
     assert "sk-test-present" not in result.output
     assert "oauth-token-present" not in result.output
+
+
+def test_cli_auth_status_unmapped_probe_exception_exits_one(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Unexpected probe Exception becomes probe:error + exit 1 (no traceback)."""
+
+    async def _boom_probe(**kwargs: object) -> bool:
+        raise AttributeError("simulated unmapped SDK attribute fault")
+
+    monkeypatch.setenv("CURSOR_API_KEY", "sk-test-present")
+    monkeypatch.setenv(USAGE_TOKEN_ENV_VAR, "oauth-token-present")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(
+        "cursor_agent.auth_status.probe_api_key",
+        _boom_probe,
+        raising=False,
+    )
+
+    result = _invoke_auth_status()
+    assert result.exit_code == 1, result.output
+    assert "AttributeError" not in result.output
+    assert "Traceback" not in result.output
+    assert "sk-test-present" not in result.output
+
+
+def test_cli_auth_status_present_oauth_unreadable_token_exits_one(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Defensive path: local PRESENT but token reader returns None → probe fail."""
+    from cursor_agent.auth_status import (  # noqa: PLC0415
+        ApiKeyStatus,
+        UsageOauthStatus,
+    )
+
+    monkeypatch.setenv("CURSOR_API_KEY", "sk-test-present")
+    monkeypatch.setenv(USAGE_TOKEN_ENV_VAR, "oauth-token-present")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(
+        "cursor_agent.auth_status.resolve_api_key_local_status",
+        lambda **_: ApiKeyStatus.PRESENT,
+    )
+    monkeypatch.setattr(
+        "cursor_agent.auth_status.resolve_usage_oauth_local_status",
+        lambda **_: UsageOauthStatus.PRESENT,
+    )
+    monkeypatch.setattr(
+        "cursor_agent.auth_status._read_usage_oauth_token",
+        lambda **_: None,
+    )
+
+    async def _ok_probe(**kwargs: object) -> bool:
+        return True
+
+    monkeypatch.setattr(
+        "cursor_agent.auth_status.probe_api_key",
+        _ok_probe,
+        raising=False,
+    )
+
+    result = _invoke_auth_status()
+    assert result.exit_code == 1, result.output
 
 
 def test_cli_auth_status_usage_oauth_probe_failure_exits_one(

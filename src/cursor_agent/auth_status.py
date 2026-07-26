@@ -17,7 +17,6 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from cursor_agent.errors import CursorAgentError
 from cursor_agent.sdk_facade import AUTH_PROBE_TIMEOUT_SECONDS, probe_api_key
 from cursor_agent.usage import (
     USAGE_TOKEN_ENV_VAR,
@@ -195,7 +194,9 @@ def collect_auth_channel_report(
         api_key_value = (environ.get(API_KEY_ENV_VAR) or "").strip()
         try:
             api_key_probe_ok = _probe_api_key_channel(api_key_value)
-        except CursorAgentError:
+        except Exception:
+            # WHY: FR-1 probe failure → exit 1; unmapped SDK/runtime faults must
+            # not dump a traceback from the CLI (KeyboardInterrupt still propagates).
             api_key_probe_ok = False
 
     if probe and oauth_status is UsageOauthStatus.PRESENT:
@@ -205,7 +206,7 @@ def collect_auth_channel_report(
         else:
             try:
                 usage_oauth_probe_ok = _probe_usage_oauth_channel(token)
-            except CursorAgentError:
+            except Exception:
                 usage_oauth_probe_ok = False
 
     warning: str | None = None

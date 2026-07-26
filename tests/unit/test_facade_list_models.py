@@ -338,3 +338,36 @@ async def test_module_list_models_aclose_called_on_error_path(
         await list_models(api_key="test-key")
 
     assert aclose_calls == ["aclose"]
+
+
+@pytest.mark.asyncio
+async def test_module_list_models_invalid_row_raises_config_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Empty id/display_name rows map to ConfigError (not bare ValueError)."""
+    from cursor_agent.errors import ConfigError
+    from cursor_agent.sdk_facade import list_models
+
+    class _Row:
+        id = ""
+        display_name = ""
+        description = None
+
+    class _EphemeralBridge:
+        async def list_models(self, *, api_key: str | None = None) -> list[Any]:
+            _ = api_key
+            return [_Row()]
+
+        async def aclose(self) -> None:
+            return None
+
+    async def _launch_bridge(*_args: Any, **_kwargs: Any) -> _EphemeralBridge:
+        return _EphemeralBridge()
+
+    monkeypatch.setattr(
+        "cursor_agent.sdk_facade.AsyncClient.launch_bridge",
+        _launch_bridge,
+    )
+
+    with pytest.raises(ConfigError, match="invalid SDK model row"):
+        await list_models(api_key="test-key")

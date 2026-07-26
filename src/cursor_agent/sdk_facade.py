@@ -36,6 +36,7 @@ import uuid
 from collections.abc import Sequence
 from typing import Any
 
+from cursor_agent.errors import ConfigError
 from cursor_agent.facade_logging import (
     LogContext,
     emit_mcp_servers_injected,
@@ -96,11 +97,16 @@ from cursor_sdk.types import options_to_json  # noqa: E402
 
 
 def _model_catalog_entry_from_sdk(raw: Any) -> ModelCatalogEntry:
-    """Map one SDK model row to ``ModelCatalogEntry`` (no raw SDK leak)."""
+    """Map one SDK model row to ``ModelCatalogEntry`` (no raw SDK leak).
+
+    Raises:
+        ConfigError: When ``id`` or ``display_name`` is missing/empty so CLI
+            callers that only catch ``CursorAgentError`` stay on the domain path.
+    """
     model_id = str(getattr(raw, "id", "") or "")
     display_name = str(getattr(raw, "display_name", "") or "")
     if not model_id or not display_name:
-        raise ValueError(
+        raise ConfigError(
             "invalid SDK model row: received "
             f"id={model_id!r} display_name={display_name!r}, "
             "expected non-empty id and display_name"
@@ -136,7 +142,8 @@ async def probe_api_key(
             # WHY: discard SDKUser identity — ADR-025 boolean-only probe surface.
             await AsyncCursor.me(client=client, api_key=api_key)
             return True
-        except BaseException as exc:
+        except Exception as exc:
+            # WHY: keep KeyboardInterrupt/CancelledError out of map_sdk_exception.
             raise map_sdk_exception(exc) from exc
     finally:
         if client is not None:
@@ -169,7 +176,8 @@ async def list_models(
                 api_key=api_key,
             )
             return [_model_catalog_entry_from_sdk(row) for row in raw_models]
-        except BaseException as exc:
+        except Exception as exc:
+            # WHY: keep KeyboardInterrupt/CancelledError out of map_sdk_exception.
             raise map_sdk_exception(exc) from exc
     finally:
         if client is not None:
