@@ -50,6 +50,19 @@ class ConfigError(CursorAgentError):
     is_retryable = False
 
 
+class SeedSkillError(CursorAgentError):
+    """Per-skill seed soft-failure; does not abort the overall seed run.
+
+    Raised for invalid slugs, unsafe pack entries, copy failures, and similar
+    per-skill problems. Fatal seed-root problems remain ``ConfigError``.
+
+    Example:
+        >>> raise SeedSkillError("invalid skill slug: received '../x'")
+    """
+
+    is_retryable = False
+
+
 class NetworkError(CursorAgentError):
     """Timeout, connection reset, or transient upstream 5xx."""
 

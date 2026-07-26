@@ -1,4 +1,4 @@
-"""Idempotent flatten-seed of bundled product skills (PRD-016, FR-3/4/7, A6/A6b)."""
+"""Idempotent flatten-seed of bundled product skills into a flat user root."""
 
 from __future__ import annotations
 
@@ -13,15 +13,16 @@ from typing import Final
 
 import yaml
 
-from cursor_agent.errors import ConfigError
+from cursor_agent.errors import ConfigError, SeedSkillError
 from cursor_agent.skills.skill_frontmatter import (
     SKILL_FILENAME,
     is_safe_skill_file,
     parse_yaml_frontmatter,
     read_frontmatter_text,
+    skill_name_from_frontmatter,
 )
 
-# WHY: A6b — slug must be a single path segment ≤64 chars; rejects ``../x`` escapes.
+# WHY: slug must be a single path segment ≤64 chars; rejects ``../x`` escapes.
 _SLUG_PATTERN: Final[Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _SLUG_PATTERN_HELP: Final[str] = (
     "^[a-z0-9][a-z0-9-]{0,63}$ "
@@ -95,7 +96,7 @@ def seed_bundled_skills(
         try:
             attempted_slug = _slug_for_pack_skill(skill_md, pack_root=pack_root)
             if attempted_slug in seen_slugs:
-                raise ConfigError(
+                raise SeedSkillError(
                     f"duplicate skill slug in pack: received {attempted_slug!r} "
                     f"from {skill_md}, expected unique frontmatter name / "
                     f"directory slug per pack run"
@@ -112,7 +113,7 @@ def seed_bundled_skills(
             else:
                 seeded.append(attempted_slug)
             seen_slugs.add(attempted_slug)
-        except ConfigError as exc:
+        except SeedSkillError as exc:
             label = _failed_label(skill_md, attempted_slug=attempted_slug)
             failed.append(SeedFailure(slug=label, reason=str(exc)))
             _MODULE_LOGGER.warning(
@@ -137,7 +138,7 @@ def _failed_label(skill_md: Path, *, attempted_slug: str | None) -> str:
 
 
 def _validate_seed_roots(pack_root: Path, destination_root: Path) -> None:
-    """Refuse missing pack roots and symlink destinations (A6b)."""
+    """Refuse missing pack roots and symlink destinations."""
     if not pack_root.is_dir():
         raise ConfigError(
             f"missing pack root: received {pack_root}, "
@@ -151,49 +152,50 @@ def _validate_seed_roots(pack_root: Path, destination_root: Path) -> None:
 
 
 def _slug_for_pack_skill(skill_md: Path, *, pack_root: Path) -> str:
-    """Return frontmatter name (or dir fallback) validated later by A6b slug checks.
+    """Return frontmatter name (or dir fallback) validated later by slug checks.
 
-    WHY: validate-and-fail (A6b) — do not sanitize; callers refuse invalid slugs.
+    WHY: validate-and-fail — do not sanitize; callers refuse invalid slugs via
+    ``SeedSkillError`` into ``summary.failed``.
     """
     # WHY: reuse discovery safety so seed and list share the same symlink policy.
     if not is_safe_skill_file(skill_md, pack_root):
-        raise ConfigError(
+        raise SeedSkillError(
             f"unsafe pack SKILL.md: received {skill_md}, "
             "expected a regular file under the pack root (not a symlink)"
         )
     try:
         frontmatter = parse_yaml_frontmatter(read_frontmatter_text(skill_md))
     except (OSError, UnicodeDecodeError, ValueError, yaml.YAMLError) as exc:
-        # WHY: Wave 3 CLI maps ConfigError → non-zero exit; raw parse errors omit path.
-        raise ConfigError(
+        # WHY: SeedSkillError soft-fails into summary.failed; raw parse errors omit path.
+        raise SeedSkillError(
             f"unparseable pack SKILL.md: received {skill_md}, "
             f"expected agentskills.io YAML frontmatter with string name/description "
             f"fields; parse error={exc!r}"
         ) from exc
-    return frontmatter.get("name", "").strip() or skill_md.parent.name
+    return skill_name_from_frontmatter(frontmatter, directory_name=skill_md.parent.name)
 
 
 def _validated_destination_dir(destination_root: Path, slug: str) -> Path:
-    """Return unresolved ``destination_root / slug`` after A6b safety checks.
+    """Return unresolved ``destination_root / slug`` after path-safety checks.
 
     Refuses symlink destinations (in-tree or escaping) so force overwrite cannot
     follow a slug symlink and clobber a sibling skill tree.
     """
     if not _SLUG_PATTERN.fullmatch(slug):
-        raise ConfigError(
+        raise SeedSkillError(
             f"invalid skill slug: received {slug!r}, "
             f"expected pattern matching {_SLUG_PATTERN_HELP}"
         )
     dest_dir = destination_root / slug
     if dest_dir.is_symlink():
-        raise ConfigError(
+        raise SeedSkillError(
             f"skill destination is a symlink: received {dest_dir}, "
             "expected a real (non-symlink) directory path under destination_root"
         )
     resolved_root = destination_root.resolve()
     resolved_dest = dest_dir.resolve()
     if not resolved_dest.is_relative_to(resolved_root):
-        raise ConfigError(
+        raise SeedSkillError(
             f"skill destination escapes destination_root: "
             f"received slug={slug!r} resolved={resolved_dest}, "
             f"expected path relative to {resolved_root}"
@@ -202,7 +204,7 @@ def _validated_destination_dir(destination_root: Path, slug: str) -> Path:
 
 
 def _ignore_symlinks_in_skill_tree(directory: str, names: list[str]) -> set[str]:
-    """Skip symlink entries so copytree does not dereference pack contents (A6b)."""
+    """Skip symlink entries so copytree does not dereference pack contents."""
     ignored: set[str] = set()
     for name in names:
         if (Path(directory) / name).is_symlink():
@@ -232,7 +234,7 @@ def _copy_skill_directory(source_dir: Path, dest_dir: Path) -> None:
         destination_root, prefix="seed-staging", slug=dest_dir.name
     )
     try:
-        # WHY: default copytree dereferences sibling symlinks into user skills (C4).
+        # WHY: default copytree dereferences sibling symlinks into user skills.
         shutil.copytree(source_dir, staging_dir, ignore=_ignore_symlinks_in_skill_tree)
         if dest_dir.exists() or dest_dir.is_symlink():
             backup_dir = _unique_sibling_path(
@@ -251,7 +253,7 @@ def _copy_skill_directory(source_dir: Path, dest_dir: Path) -> None:
     except OSError as exc:
         # WHY: never rmtree backup here — it may still hold the operator's prior skill.
         _cleanup_tree_if_exists(staging_dir)
-        raise ConfigError(
+        raise SeedSkillError(
             f"failed to copy skill directory: received source={source_dir}, "
             f"dest={dest_dir}, expected readable pack skill dir and writable "
             f"destination; os_error={exc!r}"

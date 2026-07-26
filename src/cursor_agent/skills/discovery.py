@@ -17,6 +17,7 @@ from cursor_agent.skills.skill_frontmatter import (
     is_safe_skill_file,
     parse_yaml_frontmatter,
     read_frontmatter_text,
+    skill_name_from_frontmatter,
 )
 from cursor_agent.utf8_io import (
     decode_without_split_code_point,
@@ -90,7 +91,7 @@ def skill_discovery_from_config(
     entries: dict[str, SkillEntry] = {}
 
     if "user" in setting_sources:
-        # WHY: pack_paths is the single source for BYO / seed destinations (PRD-016).
+        # WHY: pack_paths is the single source for BYO / seed destinations.
         user_root = (
             override_user_skills
             if override_user_skills is not None
@@ -182,7 +183,7 @@ def _load_skill_entry(
     frontmatter_text = read_frontmatter_text(skill_path)
     frontmatter = parse_yaml_frontmatter(frontmatter_text)
 
-    name = frontmatter.get("name", "").strip() or directory_name
+    name = skill_name_from_frontmatter(frontmatter, directory_name=directory_name)
     description = frontmatter.get("description", "").strip()
     relative_path = skill_path.relative_to(skills_root).as_posix()
     content = _read_bounded_skill_content(skill_path) if include_content else ""
