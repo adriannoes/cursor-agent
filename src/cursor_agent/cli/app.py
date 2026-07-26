@@ -13,6 +13,7 @@ import typer
 
 from cursor_agent.cli.auth_command import auth_app
 from cursor_agent.cli.cron_commands import cron_app
+from cursor_agent.cli.doctor_command import doctor_command
 from cursor_agent.cli.error_display import format_startup_error
 from cursor_agent.cli.exit_codes import exit_code_for_error, exit_code_for_status
 from cursor_agent.cli.first_run_marker import (
@@ -48,6 +49,7 @@ app.add_typer(setup_app, name="setup")
 app.add_typer(skills_app, name="skills")
 app.add_typer(auth_app, name="auth")
 app.command("usage")(usage_command)
+app.command("doctor")(doctor_command)
 
 _EMPTY_SESSIONS_MESSAGE = "No sessions found for this workspace."
 _UNTITLED_PLACEHOLDER = "(untitled)"
