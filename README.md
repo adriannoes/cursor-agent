@@ -104,8 +104,8 @@ More product examples: [examples/README.md](examples/README.md).
 
 ## Releases
 
+- **v1.2.1** — skills discovery harden + package-smoke isolation after the v1.2.0 review follow-up.
 - **v1.2.0** — product skills pack (`skills/`, `skills path|list|seed`, BYO paste).
-- **v1.2.1** (pending tag) — skills discovery harden + package-smoke isolation after the v1.2.0 review follow-up.
 - Earlier: v1.1.0 (`full` profile, Grok default), v1.0 (first-run banner + setup index).
 
 Roadmap: logging persistence (PRD-015), Discord/Slack onboarding (PRD-014), Unicode terminal fallback, session search / queueing / TUI when demand justifies.
