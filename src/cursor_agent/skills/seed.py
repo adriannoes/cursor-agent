@@ -83,7 +83,15 @@ def seed_bundled_skills(
         >>> # seed_bundled_skills(pack_root=Path("skills"), destination_root=Path("out"))
     """
     _validate_seed_roots(pack_root, destination_root)
-    destination_root.mkdir(parents=True, exist_ok=True)
+    try:
+        destination_root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        # WHY: uncaught PermissionError/OSError becomes a Typer traceback in the CLI;
+        # map to ConfigError so operators get a clean exit (mega-review finding).
+        raise ConfigError(
+            f"cannot create destination root: received {destination_root}, "
+            f"expected a writable directory path; os_error={exc!r}"
+        ) from exc
 
     seeded: list[str] = []
     skipped: list[str] = []
