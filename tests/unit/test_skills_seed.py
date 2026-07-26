@@ -918,21 +918,32 @@ def test_seed_bundled_skills_records_resolved_destination_escape_in_failed(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """Non-symlink dest whose resolve() escapes destination_root must fail (A6b)."""
+    """When resolved dest escapes destination_root, seed records A6b failure.
+
+    WHY (PR review): avoid class-wide ``Path.is_relative_to`` patches. Remap
+    ``Path.resolve`` only for ``{destination_root}/{slug}`` so production
+    ``_validated_destination_dir`` hits the real ``is_relative_to`` guard.
+    """
     pack_root: Path = _mini_pack_with_category_tree(tmp_path / "mini-pack")
     destination_root: Path = tmp_path / "dest"
     destination_root.mkdir()
-    resolved_root: Path = destination_root.resolve()
-    real_is_relative_to = Path.is_relative_to
+    outside_root: Path = tmp_path / "outside"
+    outside_root.mkdir()
+    real_resolve = Path.resolve
 
-    def _force_escape_check(self: Path, other: Path | str) -> bool:
-        """Simulate resolve() escape for slug children under destination_root."""
-        other_path = Path(other)
-        if self.parent == resolved_root and other_path == resolved_root:
-            return False
-        return real_is_relative_to(self, other)
+    def _resolve_slug_outside_destination(
+        self: Path,
+        strict: bool = False,
+    ) -> Path:
+        """Resolve ``{destination_root}/{slug}`` to a sibling outside the dest root."""
+        if self.parent == destination_root and self.name in {
+            "alpha-skill",
+            "beta-skill",
+        }:
+            return (outside_root / self.name).resolve()
+        return real_resolve(self, strict=strict)
 
-    monkeypatch.setattr(Path, "is_relative_to", _force_escape_check)
+    monkeypatch.setattr(Path, "resolve", _resolve_slug_outside_destination)
 
     summary: SeedSummary = seed_bundled_skills(
         pack_root=pack_root,

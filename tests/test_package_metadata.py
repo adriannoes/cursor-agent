@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import ast
 import re
+import tomllib
 from importlib import import_module
 from importlib.util import find_spec
 from pathlib import Path
+from typing import Any
 
 import pytest
 from typer.testing import CliRunner
@@ -14,8 +16,28 @@ from typer.testing import CliRunner
 from cursor_agent.cli.app import app
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
+_PYPROJECT_TOML = _REPO_ROOT / "pyproject.toml"
 _EXAMPLES_DIR = _REPO_ROOT / "examples"
 _EXAMPLES_README = _EXAMPLES_DIR / "README.md"
+
+
+def _project_version_from_pyproject() -> str:
+    """Return ``[project].version`` from the repo-root ``pyproject.toml``."""
+    with _PYPROJECT_TOML.open("rb") as handle:
+        loaded: dict[str, Any] = tomllib.load(handle)
+    project = loaded.get("project")
+    if not isinstance(project, dict):
+        raise AssertionError(
+            f"invalid pyproject [project]: received {project!r}, expected mapping"
+        )
+    version = project.get("version")
+    if not isinstance(version, str) or not version:
+        raise AssertionError(
+            f"invalid pyproject [project].version: received {version!r}, "
+            "expected non-empty string"
+        )
+    return version
+
 
 # Commands documented in examples/README.md — kept in sync by smoke tests.
 _DOCUMENTED_CLI_COMMANDS: tuple[tuple[list[str], str], ...] = (
@@ -27,11 +49,20 @@ _DOCUMENTED_CLI_COMMANDS: tuple[tuple[list[str], str], ...] = (
 )
 
 
-def test_package_exposes_initial_version() -> None:
-    """The package scaffold exposes the project version without SDK access."""
+def test_package_version_matches_pyproject() -> None:
+    """Runtime ``__version__`` stays in sync with ``[project].version`` (no SDK).
+
+    WHY: release closeouts bump dual sources (pyproject + ``__init__``); hardcoding
+    the version string cannot catch the next cut shipping mismatched wheel metadata.
+    """
     assert find_spec("cursor_agent") is not None
     cursor_agent = import_module("cursor_agent")
-    assert cursor_agent.__version__ == "1.2.0"
+    pyproject_version = _project_version_from_pyproject()
+    assert cursor_agent.__version__ == pyproject_version, (
+        f"version drift: __version__={cursor_agent.__version__!r}, "
+        f"pyproject [project].version={pyproject_version!r}, "
+        f"expected identical strings"
+    )
 
 
 def test_examples_readme_exists_and_documents_product_commands() -> None:
