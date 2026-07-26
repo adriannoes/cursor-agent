@@ -160,7 +160,9 @@ Further roadmap:
 
 Thanks to everyone who has improved Cursor Agent:
 
-- [wing-kit](https://github.com/wing-kit) — gateway `model:` key support ([#59](https://github.com/adriannoes/cursor-agent/pull/59))
+- [wing-kit](https://github.com/wing-kit) — first external contributions:
+  - gateway `model:` key support ([#59](https://github.com/adriannoes/cursor-agent/pull/59))
+  - `cursor-agent usage` plan quota snapshot ([#60](https://github.com/adriannoes/cursor-agent/pull/60))
 
 ## Contributing
 
