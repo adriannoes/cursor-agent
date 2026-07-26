@@ -26,9 +26,11 @@ from typer.testing import CliRunner
 from cursor_agent.cli.app import app
 from cursor_agent.cli.rich_display import format_skills_list_output
 from cursor_agent.cli.skills_commands import (
+    resolve_skills_cli_paths,
     resolve_skills_cwd,
     resolve_skills_home,
     resolve_skills_pack_root,
+    resolve_skills_seed_roots,
 )
 from cursor_agent.config.loader import load_config
 from cursor_agent.errors import ConfigError
@@ -451,6 +453,27 @@ def test_skills_path_exits_one_on_config_error(
     )
 
 
+def test_skills_path_succeeds_when_pack_root_resolution_raises(
+    skills_cli_env: SkillsCliEnv,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """``skills path`` must not resolve the bundled pack (BYO roots only)."""
+
+    def _pack_must_not_be_resolved() -> Path:
+        raise ConfigError(
+            "bundled skills pack root not found: received missing-pack, "
+            "expected packaged cursor_agent/skills_pack or checkout skills/"
+        )
+
+    monkeypatch.setattr(_RESOLVE_SKILLS_PACK_ROOT, _pack_must_not_be_resolved)
+
+    result = CliRunner().invoke(app, ["skills", "path"])
+
+    assert result.exit_code == 0, result.output
+    assert f"project: {skills_cli_env.project_skills.resolve()}" in result.stdout
+    assert f"user: {skills_cli_env.user_skills.resolve()}" in result.stdout
+
+
 def test_skills_list_exits_one_on_config_error(
     skills_cli_env: SkillsCliEnv,
     monkeypatch: MonkeyPatch,
@@ -470,6 +493,28 @@ def test_skills_list_exits_one_on_config_error(
     combined = f"{result.stderr}\n{result.output}"
     assert "invalid config" in combined.lower(), (
         f"expected actionable ConfigError on stderr, received {combined!r}"
+    )
+
+
+def test_skills_list_succeeds_when_pack_root_resolution_raises(
+    skills_cli_env: SkillsCliEnv,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """``skills list`` must not resolve the bundled pack (discovery is BYO-only)."""
+
+    def _pack_must_not_be_resolved() -> Path:
+        raise ConfigError(
+            "bundled skills pack root not found: received missing-pack, "
+            "expected packaged cursor_agent/skills_pack or checkout skills/"
+        )
+
+    monkeypatch.setattr(_RESOLVE_SKILLS_PACK_ROOT, _pack_must_not_be_resolved)
+
+    result = CliRunner().invoke(app, ["skills", "list"])
+
+    assert result.exit_code == 0, result.output
+    assert (
+        _EMPTY_SKILLS_LIST_MESSAGE in result.stdout or "skills" in result.stdout.lower()
     )
 
 
@@ -575,6 +620,56 @@ def test_resolve_skills_pack_root_defaults_to_bundled_pack() -> None:
     assert resolved.is_dir(), (
         f"bundled pack root must be an existing directory, received {resolved!r}"
     )
+
+
+def test_resolve_skills_cli_paths_uses_cwd_and_home_hooks_not_pack(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """``resolve_skills_cli_paths`` composes cwd/home hooks and never touches pack."""
+    workspace: Path = tmp_path / "cli-paths-cwd"
+    home: Path = tmp_path / "cli-paths-home"
+    workspace.mkdir()
+    home.mkdir()
+    config = load_config(
+        config_path=tmp_path / "missing.yaml",
+        cli_overrides={"runtime": {"local": {"cwd": str(workspace)}}},
+    )
+    monkeypatch.setattr(_RESOLVE_SKILLS_CWD, lambda _config: workspace.resolve())
+    monkeypatch.setattr(_RESOLVE_SKILLS_HOME, lambda: home.resolve())
+
+    def _pack_must_not_be_resolved() -> Path:
+        raise AssertionError(
+            "resolve_skills_cli_paths must not call resolve_skills_pack_root"
+        )
+
+    monkeypatch.setattr(_RESOLVE_SKILLS_PACK_ROOT, _pack_must_not_be_resolved)
+
+    paths = resolve_skills_cli_paths(config)
+
+    assert paths.cwd == workspace.resolve()
+    assert paths.home == home.resolve()
+    assert paths.project_skills == project_skills_root(workspace.resolve())
+    assert paths.user_skills == user_skills_root(home.resolve())
+    assert not hasattr(paths, "pack_root")
+
+
+def test_resolve_skills_seed_roots_uses_home_and_pack_hooks(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """``resolve_skills_seed_roots`` returns injectable home and pack roots."""
+    home: Path = tmp_path / "seed-home"
+    pack_root: Path = tmp_path / "seed-pack"
+    home.mkdir()
+    pack_root.mkdir()
+    monkeypatch.setattr(_RESOLVE_SKILLS_HOME, lambda: home.resolve())
+    monkeypatch.setattr(_RESOLVE_SKILLS_PACK_ROOT, lambda: pack_root.resolve())
+
+    resolved_home, resolved_pack = resolve_skills_seed_roots()
+
+    assert resolved_home == home.resolve()
+    assert resolved_pack == pack_root.resolve()
 
 
 # --- seed summary formatting edges --------------------------------------------

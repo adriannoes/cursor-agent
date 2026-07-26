@@ -86,6 +86,9 @@ def resolve_skills_pack_root() -> Path:
 class SkillsCliPaths:
     """Resolved hermetic roots for skills CLI path/list commands.
 
+    WHY: path/list never need the bundled pack — pack resolution stays on
+    ``resolve_skills_seed_roots`` so a missing pack does not break BYO inspect.
+
     Example:
         >>> # paths = resolve_skills_cli_paths(load_config())
         >>> # paths.project_skills
@@ -93,7 +96,6 @@ class SkillsCliPaths:
 
     cwd: Path
     home: Path
-    pack_root: Path
 
     @property
     def project_skills(self) -> Path:
@@ -120,7 +122,7 @@ class SkillsCliRuntime:
 
 
 def resolve_skills_cli_paths(config: CursorAgentConfig) -> SkillsCliPaths:
-    """Compose ``SkillsCliPaths`` via the public ``resolve_skills_*`` hooks.
+    """Compose cwd/home via the public ``resolve_skills_*`` hooks (no pack).
 
     Example:
         >>> # resolve_skills_cli_paths(load_config()).cwd.is_absolute()
@@ -128,7 +130,6 @@ def resolve_skills_cli_paths(config: CursorAgentConfig) -> SkillsCliPaths:
     return SkillsCliPaths(
         cwd=resolve_skills_cwd(config),
         home=resolve_skills_home(),
-        pack_root=resolve_skills_pack_root(),
     )
 
 

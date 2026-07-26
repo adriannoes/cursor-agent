@@ -9,29 +9,32 @@ from pathlib import Path
 
 from cursor_agent.skills.seed import SeedFailure, SeedSummary
 
-# Locked catalog names (flat destination slugs after seed).
+# Locked catalog (category → skill name) — single source for layout + seed slug tests.
+EXPECTED_SKILLS_PACK_ENTRIES: tuple[tuple[str, str], ...] = (
+    ("research", "deep-research"),
+    ("research", "brief"),
+    ("research", "compare-sources"),
+    ("research", "summarize-url"),
+    ("software-development", "plan"),
+    ("software-development", "debug"),
+    ("software-development", "tdd"),
+    ("software-development", "spike"),
+    ("software-development", "dogfood"),
+    ("software-development", "simplify"),
+    ("github", "pr-review"),
+    ("github", "pr-workflow"),
+    ("github", "issues"),
+    ("meta", "build-skill"),
+)
+
+# Flat destination slugs after seed (derived — do not maintain a second list).
 EXPECTED_SEEDED_SKILL_SLUGS: frozenset[str] = frozenset(
-    {
-        "deep-research",
-        "brief",
-        "compare-sources",
-        "summarize-url",
-        "plan",
-        "debug",
-        "tdd",
-        "spike",
-        "dogfood",
-        "simplify",
-        "pr-review",
-        "pr-workflow",
-        "issues",
-        "build-skill",
-    }
+    skill_name for _, skill_name in EXPECTED_SKILLS_PACK_ENTRIES
 )
 
 # Repo-only category dirs must not appear under the flat destination root.
 PACK_CATEGORY_DIR_NAMES: frozenset[str] = frozenset(
-    {"research", "software-development", "github", "meta"}
+    category for category, _ in EXPECTED_SKILLS_PACK_ENTRIES
 )
 
 

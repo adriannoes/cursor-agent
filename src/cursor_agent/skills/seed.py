@@ -138,7 +138,7 @@ def _failed_label(skill_md: Path, *, attempted_slug: str | None) -> str:
 
 
 def _validate_seed_roots(pack_root: Path, destination_root: Path) -> None:
-    """Refuse missing pack roots and symlink destinations."""
+    """Refuse missing pack roots, symlink destinations, and non-directory files."""
     if not pack_root.is_dir():
         raise ConfigError(
             f"missing pack root: received {pack_root}, "
@@ -148,6 +148,11 @@ def _validate_seed_roots(pack_root: Path, destination_root: Path) -> None:
         raise ConfigError(
             f"destination root is a symlink: received {destination_root}, "
             "expected a real (non-symlink) directory path"
+        )
+    if destination_root.exists() and not destination_root.is_dir():
+        raise ConfigError(
+            f"destination root is not a directory: received {destination_root}, "
+            "expected a directory path (or a path that can be created as one)"
         )
 
 
@@ -247,7 +252,8 @@ def _copy_skill_directory(source_dir: Path, dest_dir: Path) -> None:
                 # WHY: restore prior tree; leave backup if restore itself fails.
                 backup_dir.rename(dest_dir)
                 raise
-            shutil.rmtree(backup_dir)
+            # WHY: skill is already at dest_dir — backup cleanup must not soft-fail.
+            _cleanup_tree_if_exists(backup_dir)
         else:
             staging_dir.rename(dest_dir)
     except OSError as exc:

@@ -28,37 +28,6 @@ if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 
 
-def test_seed_soft_fail_records_seed_skill_error_without_propagating(
-    tmp_path: Path,
-) -> None:
-    """Known soft-fail (invalid slug) must record SeedFailure and not raise."""
-    pack_root: Path = tmp_path / "soft-fail-pack"
-    write_skill_md(
-        pack_root / "meta" / "evil",
-        name="../x",
-        description="Soft-fail via invalid slug",
-    )
-    write_skill_md(
-        pack_root / "research" / "ok-skill",
-        name="ok-skill",
-        description="Valid sibling",
-    )
-    destination_root: Path = tmp_path / "dest"
-    destination_root.mkdir()
-
-    summary: SeedSummary = seed_bundled_skills(
-        pack_root=pack_root,
-        destination_root=destination_root,
-        force=False,
-    )
-
-    assert_seed_summary_shape(summary)
-    assert "../x" in failed_slugs(summary)
-    assert_failure_has_reason(summary, "../x")
-    assert "ok-skill" in summary.seeded
-    assert summary.failed[0].reason  # non-empty; raised as SeedSkillError internally
-
-
 def test_seed_config_error_mid_loop_aborts_run(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -136,7 +105,7 @@ def test_seed_skill_error_mid_loop_records_failed_and_continues(
 def test_seed_bundled_skills_records_invalid_slug_in_failed(
     tmp_path: Path,
 ) -> None:
-    """Frontmatter name ``../x`` must land in failed; sibling valid skill still seeds."""
+    """Invalid slug soft-fails as SeedSkillError (no raise); sibling still seeds."""
     pack_root: Path = tmp_path / "evil-pack"
     write_skill_md(
         pack_root / "research" / "evil",
@@ -163,6 +132,9 @@ def test_seed_bundled_skills_records_invalid_slug_in_failed(
         f"invalid slug must appear in failed, received failed={summary.failed!r}"
     )
     assert_failure_has_reason(summary, "../x")
+    assert summary.failed[0].reason, (
+        "soft-fail reason must be non-empty (SeedSkillError message captured)"
+    )
     assert "good-skill" in summary.seeded, (
         f"valid sibling must still seed, received seeded={summary.seeded!r}"
     )
@@ -202,6 +174,31 @@ def test_seed_bundled_skills_refuses_symlink_destination(
     assert destination_skill_slugs(real_dest) == set(), (
         f"refused symlink dest must not receive copies, "
         f"received={sorted(destination_skill_slugs(real_dest))!r}"
+    )
+
+
+def test_seed_bundled_skills_refuses_file_destination_root(
+    tmp_path: Path,
+) -> None:
+    """destination_root that is a regular file must raise ConfigError (not mkdir OSError)."""
+    pack_root: Path = mini_pack_with_category_tree(tmp_path / "mini-pack")
+    file_dest: Path = tmp_path / "dest-is-a-file"
+    file_dest.write_text("not a directory\n", encoding="utf-8")
+
+    with pytest.raises(ConfigError) as exc_info:
+        seed_bundled_skills(
+            pack_root=pack_root,
+            destination_root=file_dest,
+            force=False,
+        )
+
+    message: str = str(exc_info.value)
+    assert str(file_dest) in message, (
+        f"file dest error must include offending path {file_dest!r}, "
+        f"received {message!r}"
+    )
+    assert "directory" in message.lower(), (
+        f"error must state directory expectation, received {message!r}"
     )
 
 

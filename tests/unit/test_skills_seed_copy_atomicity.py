@@ -201,3 +201,73 @@ def test_seed_bundled_skills_force_restores_prior_when_staging_rename_fails(
         f"_cleanup_tree_if_exists must remove leftover staging trees, "
         f"received leftover={leftover_staging!r}"
     )
+
+
+def test_seed_force_backup_cleanup_failure_does_not_soft_fail(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """After a successful staging→dest swap, backup rmtree must be best-effort.
+
+    Bare ``shutil.rmtree(backup)`` (ignore_errors=False) would raise into the
+    outer OSError handler and false soft-fail a skill that is already in place.
+    """
+    pack_root: Path = tmp_path / "backup-cleanup-pack"
+    write_skill_md(
+        pack_root / "meta" / "stable-skill",
+        name="stable-skill",
+        description="Original body before force",
+    )
+    destination_root: Path = tmp_path / "dest"
+    destination_root.mkdir()
+
+    first: SeedSummary = seed_bundled_skills(
+        pack_root=pack_root,
+        destination_root=destination_root,
+        force=False,
+    )
+    assert "stable-skill" in first.seeded
+
+    write_skill_md(
+        pack_root / "meta" / "stable-skill",
+        name="stable-skill",
+        description="Updated body after force",
+    )
+
+    real_rmtree = shutil.rmtree
+
+    def _rmtree_raises_on_backup_without_ignore(
+        path: object,
+        *args: object,
+        ignore_errors: bool = False,
+        **kwargs: object,
+    ) -> None:
+        path_name = Path(str(path)).name
+        if path_name.startswith(".seed-backup-") and not ignore_errors:
+            raise OSError(
+                f"simulated backup cleanup failure: received path={path!r}, "
+                "expected best-effort cleanup with ignore_errors=True"
+            )
+        real_rmtree(path, *args, ignore_errors=ignore_errors, **kwargs)
+
+    monkeypatch.setattr(
+        "cursor_agent.skills.seed.shutil.rmtree",
+        _rmtree_raises_on_backup_without_ignore,
+    )
+
+    forced: SeedSummary = seed_bundled_skills(
+        pack_root=pack_root,
+        destination_root=destination_root,
+        force=True,
+    )
+
+    assert_seed_summary_shape(forced)
+    assert forced.failed == (), (
+        f"successful force swap must not soft-fail on backup cleanup, "
+        f"received failed={forced.failed!r}"
+    )
+    assert "stable-skill" in forced.overwritten, (
+        f"force must report overwritten, received overwritten={forced.overwritten!r}"
+    )
+    skill_md: Path = destination_root / "stable-skill" / "SKILL.md"
+    assert "Updated body after force" in skill_md.read_text(encoding="utf-8")

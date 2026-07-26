@@ -17,24 +17,7 @@ from cursor_agent.skills.skill_frontmatter import (
     parse_yaml_frontmatter,
     read_frontmatter_text,
 )
-
-# Locked catalog (category → skill name).
-EXPECTED_SKILLS_PACK_ENTRIES: tuple[tuple[str, str], ...] = (
-    ("research", "deep-research"),
-    ("research", "brief"),
-    ("research", "compare-sources"),
-    ("research", "summarize-url"),
-    ("software-development", "plan"),
-    ("software-development", "debug"),
-    ("software-development", "tdd"),
-    ("software-development", "spike"),
-    ("software-development", "dogfood"),
-    ("software-development", "simplify"),
-    ("github", "pr-review"),
-    ("github", "pr-workflow"),
-    ("github", "issues"),
-    ("meta", "build-skill"),
-)
+from tests.unit.skills_fixtures import EXPECTED_SKILLS_PACK_ENTRIES
 
 
 def _skill_md_path(category: str, skill_name: str) -> Path:
