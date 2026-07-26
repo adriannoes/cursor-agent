@@ -15,6 +15,7 @@ import pytest
 from typer.testing import CliRunner
 
 from cursor_agent.cli.app import app
+from cursor_agent.cli.sessions_commands import _EOF_YES_HINT
 from cursor_agent.cli.startup import session_key_for
 from cursor_agent.config.loader import load_config
 from cursor_agent.sessions.models import SessionCreateParams
@@ -263,7 +264,7 @@ def test_sessions_delete_eof_without_yes_exits_one_and_mentions_yes(
 
     assert result.exit_code == 1
     combined = _combined_output(result)
-    assert "--yes" in combined
+    assert _EOF_YES_HINT in combined
     remaining = asyncio.run(SessionStore(db_path).list(session_key))
     assert len(remaining) == 1
     assert remaining[0].id == session_id
@@ -324,7 +325,7 @@ def test_sessions_prune_or_caveat_deletes_all_old_keep_window(
 
     assert result.exit_code == 0, result.output
     combined = _combined_output(result)
-    assert "5" in combined
+    assert "Deleted 5, kept 0." in combined
     remaining = asyncio.run(SessionStore(db_path).list(session_key))
     assert remaining == []
 
@@ -411,7 +412,7 @@ def test_sessions_prune_eof_without_yes_exits_one_and_mentions_yes(
     )
 
     assert result.exit_code == 1
-    assert "--yes" in _combined_output(result)
+    assert _EOF_YES_HINT in _combined_output(result)
     remaining = asyncio.run(SessionStore(db_path).list(session_key))
     assert len(remaining) == 1
 
@@ -514,3 +515,147 @@ def test_sessions_prune_isolates_cross_session_key(
     assert len(surviving) == 1
     assert surviving[0].id == id_b
     assert id_a != id_b
+
+
+def test_sessions_delete_y_proceeds_without_yes_flag(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Interactive ``y`` confirms delete and removes the row (exit 0)."""
+    db_path = tmp_path / "sessions.db"
+    monkeypatch.setenv("CURSOR_AGENT__RUNTIME__LOCAL__CWD", str(tmp_path))
+    config = load_config(config_path=Path("/nonexistent/config.yaml"))
+    session_key = session_key_for(config)
+
+    store = SessionStore(db_path)
+    session_id = asyncio.run(
+        _seed_session(
+            store,
+            session_key,
+            workspace=tmp_path,
+            agent_id="agent-y",
+            title="Confirm y",
+        )
+    )
+    _stub_create_store(monkeypatch, db_path)
+
+    result = CliRunner().invoke(
+        app,
+        ["sessions", "delete", session_id],
+        input="y\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert asyncio.run(SessionStore(db_path).list(session_key)) == []
+
+
+def test_sessions_delete_yes_word_proceeds_without_yes_flag(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Interactive ``yes`` confirms delete and removes the row (exit 0)."""
+    db_path = tmp_path / "sessions.db"
+    monkeypatch.setenv("CURSOR_AGENT__RUNTIME__LOCAL__CWD", str(tmp_path))
+    config = load_config(config_path=Path("/nonexistent/config.yaml"))
+    session_key = session_key_for(config)
+
+    store = SessionStore(db_path)
+    session_id = asyncio.run(
+        _seed_session(
+            store,
+            session_key,
+            workspace=tmp_path,
+            agent_id="agent-yes-word",
+            title="Confirm yes",
+        )
+    )
+    _stub_create_store(monkeypatch, db_path)
+
+    result = CliRunner().invoke(
+        app,
+        ["sessions", "delete", session_id],
+        input="yes\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert asyncio.run(SessionStore(db_path).list(session_key)) == []
+
+
+def test_sessions_delete_empty_enter_cancels_with_exit_zero(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Empty Enter on confirm cancels with exit 0 and leaves the row."""
+    db_path = tmp_path / "sessions.db"
+    monkeypatch.setenv("CURSOR_AGENT__RUNTIME__LOCAL__CWD", str(tmp_path))
+    config = load_config(config_path=Path("/nonexistent/config.yaml"))
+    session_key = session_key_for(config)
+
+    store = SessionStore(db_path)
+    session_id = asyncio.run(
+        _seed_session(
+            store,
+            session_key,
+            workspace=tmp_path,
+            agent_id="agent-enter",
+            title="Keep on empty",
+        )
+    )
+    _stub_create_store(monkeypatch, db_path)
+
+    result = CliRunner().invoke(
+        app,
+        ["sessions", "delete", session_id],
+        input="\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    remaining = asyncio.run(SessionStore(db_path).list(session_key))
+    assert len(remaining) == 1
+    assert remaining[0].id == session_id
+
+
+def test_sessions_prune_negative_older_than_exits_one_without_traceback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Negative --older-than exits 1 with a clean message (no ValueError traceback)."""
+    db_path = tmp_path / "sessions.db"
+    monkeypatch.setenv("CURSOR_AGENT__RUNTIME__LOCAL__CWD", str(tmp_path))
+    store = SessionStore(db_path)
+    asyncio.run(store.initialize())
+    _stub_create_store(monkeypatch, db_path)
+
+    result = CliRunner().invoke(
+        app,
+        ["sessions", "prune", "--older-than", "-1", "--yes"],
+    )
+
+    assert result.exit_code == 1
+    combined = _combined_output(result)
+    assert "older_than_days" in combined
+    assert "-1" in combined
+    assert "Traceback" not in combined
+
+
+def test_sessions_prune_negative_keep_exits_one_without_traceback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Negative --keep exits 1 with a clean message (no ValueError traceback)."""
+    db_path = tmp_path / "sessions.db"
+    monkeypatch.setenv("CURSOR_AGENT__RUNTIME__LOCAL__CWD", str(tmp_path))
+    store = SessionStore(db_path)
+    asyncio.run(store.initialize())
+    _stub_create_store(monkeypatch, db_path)
+
+    result = CliRunner().invoke(
+        app,
+        ["sessions", "prune", "--keep", "-1", "--yes"],
+    )
+
+    assert result.exit_code == 1
+    combined = _combined_output(result)
+    assert "keep_last" in combined
+    assert "-1" in combined
+    assert "Traceback" not in combined

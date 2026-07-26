@@ -555,3 +555,115 @@ async def test_prune_workspace_sessions_requires_at_least_one_criterion(
 
     with pytest.raises(ValueError, match="older_than_days|keep_last"):
         await store.prune_workspace_sessions(session_key)
+
+
+@pytest.mark.asyncio
+async def test_prune_workspace_sessions_rejects_negative_older_than(
+    tmp_path: Path,
+) -> None:
+    """older_than_days < 0 raises ValueError with the offending value."""
+    store = await initialized_store(tmp_path, SteppingClock([datetime.now(tz=UTC)]))
+    session_key = build_cli_session_key(tmp_path)
+
+    with pytest.raises(ValueError, match="older_than_days.*-1"):
+        await store.prune_workspace_sessions(session_key, older_than_days=-1)
+
+
+@pytest.mark.asyncio
+async def test_prune_workspace_sessions_rejects_negative_keep_last(
+    tmp_path: Path,
+) -> None:
+    """keep_last < 0 raises ValueError with the offending value."""
+    store = await initialized_store(tmp_path, SteppingClock([datetime.now(tz=UTC)]))
+    session_key = build_cli_session_key(tmp_path)
+
+    with pytest.raises(ValueError, match="keep_last.*-1"):
+        await store.prune_workspace_sessions(session_key, keep_last=-1)
+
+
+@pytest.mark.asyncio
+async def test_prune_workspace_sessions_or_mixed_fresh_and_stale(
+    tmp_path: Path,
+) -> None:
+    """OR mixed fixture: stale inside keep window deleted; fresh outside kept out.
+
+    Three rows ordered newest→oldest by updated_at: fresh, stale-in-window,
+    stale-outside. With --older-than 7 --keep 2, delete both stale rows (age)
+    and the outside-keep stale; keep only the fresh newest.
+    """
+    now = datetime(2026, 7, 26, 12, 0, 0, tzinfo=UTC)
+    clock = ControllableClock(now - timedelta(days=30))
+    store = await initialized_store(tmp_path, clock)
+    session_key = build_cli_session_key(tmp_path)
+
+    stale_outside = await _create_workspace_session(
+        store,
+        session_key=session_key,
+        workspace=tmp_path,
+        agent_id="agent-stale-out",
+        title="Stale outside keep",
+    )
+    clock.moment = now - timedelta(days=20)
+    stale_inside = await _create_workspace_session(
+        store,
+        session_key=session_key,
+        workspace=tmp_path,
+        agent_id="agent-stale-in",
+        title="Stale inside keep",
+    )
+    clock.moment = now - timedelta(days=1)
+    fresh = await _create_workspace_session(
+        store,
+        session_key=session_key,
+        workspace=tmp_path,
+        agent_id="agent-fresh",
+        title="Fresh",
+    )
+
+    clock.moment = now
+    deleted_ids = await store.prune_workspace_sessions(
+        session_key,
+        older_than_days=7,
+        keep_last=2,
+    )
+
+    assert set(deleted_ids) == {stale_outside.id, stale_inside.id}
+    remaining = await store.list(session_key)
+    assert [row.id for row in remaining] == [fresh.id]
+
+
+@pytest.mark.asyncio
+async def test_session_store_list_tiebreaks_by_id_desc(tmp_path: Path) -> None:
+    """list orders by updated_at DESC, id DESC — same tie-break as prune keep."""
+    same_moment = datetime(2026, 7, 26, 12, 0, 0, tzinfo=UTC)
+    store = await initialized_store(
+        tmp_path,
+        SteppingClock([same_moment, same_moment, same_moment]),
+    )
+    session_key = build_cli_session_key(tmp_path)
+    first = await _create_workspace_session(
+        store,
+        session_key=session_key,
+        workspace=tmp_path,
+        agent_id="agent-a",
+        title="A",
+    )
+    second = await _create_workspace_session(
+        store,
+        session_key=session_key,
+        workspace=tmp_path,
+        agent_id="agent-b",
+        title="B",
+    )
+    third = await _create_workspace_session(
+        store,
+        session_key=session_key,
+        workspace=tmp_path,
+        agent_id="agent-c",
+        title="C",
+    )
+
+    listed = await store.list(session_key)
+    listed_ids = [row.id for row in listed]
+    # Lexicographic id DESC among equal timestamps.
+    assert listed_ids == sorted([first.id, second.id, third.id], reverse=True)

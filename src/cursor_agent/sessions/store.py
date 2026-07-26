@@ -355,22 +355,27 @@ class SessionStore:
                 keep_last=keep_last,
                 cutoff_iso=cutoff_iso,
             )
-            for session_id in deleted_ids:
-                await db.execute(
-                    "DELETE FROM sessions WHERE session_key = ? AND id = ?",
-                    (session_key, session_id),
-                )
             if deleted_ids:
+                placeholders = ", ".join("?" for _ in deleted_ids)
+                await db.execute(
+                    "DELETE FROM sessions "
+                    f"WHERE session_key = ? AND id IN ({placeholders})",
+                    (session_key, *deleted_ids),
+                )
                 await db.commit()
         return deleted_ids
 
     async def list(self, session_key: str) -> list[SessionRecord]:
-        """List sessions for ``session_key`` ordered by ``updated_at`` descending."""
+        """List sessions for ``session_key`` (newest ``updated_at``, then ``id``).
+
+        Tie-break matches ``prune_workspace_sessions`` so ``sessions list`` order
+        agrees with which rows ``--keep N`` retains when timestamps collide.
+        """
         sql = f"""
             SELECT {_SELECT_COLUMNS}
             FROM sessions
             WHERE session_key = ?
-            ORDER BY updated_at DESC
+            ORDER BY updated_at DESC, id DESC
             """
 
         async with aiosqlite.connect(self._db_path) as db:

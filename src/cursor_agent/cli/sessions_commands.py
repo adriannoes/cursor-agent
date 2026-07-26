@@ -18,6 +18,9 @@ from cursor_agent.cli.startup import create_store, session_key_for
 from cursor_agent.config.loader import CursorAgentConfig, load_config
 from cursor_agent.errors import CursorAgentError
 from cursor_agent.sessions.models import SessionRecord
+from cursor_agent.sessions.workspace_session_prune import (
+    validate_prune_workspace_params,
+)
 
 sessions_app = typer.Typer(help="Manage sessions")
 
@@ -134,7 +137,10 @@ def sessions_delete(
         bool,
         typer.Option(
             "--yes",
-            help="Skip confirmation and delete immediately.",
+            help=(
+                "Skip confirmation and delete immediately. "
+                "SQLite row only (Q5: does not dispose SDK agents)."
+            ),
         ),
     ] = False,
 ) -> None:
@@ -182,18 +188,29 @@ def sessions_prune(
         bool,
         typer.Option(
             "--yes",
-            help="Skip confirmation and prune immediately.",
+            help=(
+                "Skip confirmation and prune immediately. "
+                "SQLite rows only (Q5: does not dispose SDK agents)."
+            ),
         ),
     ] = False,
 ) -> None:
     """Prune workspace sessions by age and/or keep window (OR semantics).
 
+    SQLite only (Q5): does not dispose SDK agents / cloud history.
+
     Example:
         cursor-agent sessions prune --older-than 30 --keep 10 --yes
     """
-    if older_than is None and keep is None:
-        typer.echo(_PRUNE_CRITERIA_HINT, err=True)
-        raise typer.Exit(1)
+    # WHY: validate before confirm so negative flags never prompt then traceback.
+    try:
+        validate_prune_workspace_params(older_than, keep)
+    except ValueError as exc:
+        if older_than is None and keep is None:
+            typer.echo(_PRUNE_CRITERIA_HINT, err=True)
+        else:
+            typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
 
     confirm_session_mutation(
         yes=yes,
