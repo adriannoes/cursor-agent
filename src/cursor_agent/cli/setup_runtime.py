@@ -359,8 +359,23 @@ def _wizard_success_detail_lines(
     return details
 
 
-def run_setup_check(*, config_path: Path, env_file: Path) -> None:
-    """Run offline FR-18 checks; exit 1 when any check fails."""
+def collect_setup_check_lines(
+    *,
+    config_path: Path,
+    env_file: Path,
+) -> tuple[list[str], bool]:
+    """Collect offline FR-18 setup check lines without printing.
+
+    Loads ``env_file`` into the process environ (same as ``setup check``), then
+    returns ``(lines, failed)`` for CLI echo or ``doctor`` reuse.
+
+    Example::
+
+        lines, failed = collect_setup_check_lines(
+            config_path=Path("~/.cursor-agent/config.yaml"),
+            env_file=Path(".env"),
+        )
+    """
     load_setup_dotenv(env_file)
     lines: list[str] = []
     failed = False
@@ -383,6 +398,15 @@ def run_setup_check(*, config_path: Path, env_file: Path) -> None:
     if config is not None:
         failed = _append_path_check_lines(config, lines) or failed
 
+    return lines, failed
+
+
+def run_setup_check(*, config_path: Path, env_file: Path) -> None:
+    """Run offline FR-18 checks; exit 1 when any check fails."""
+    lines, failed = collect_setup_check_lines(
+        config_path=config_path,
+        env_file=env_file,
+    )
     for line in lines:
         typer.echo(line)
     if failed:

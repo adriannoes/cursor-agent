@@ -9,14 +9,23 @@ from typer.testing import CliRunner
 
 from cursor_agent.cli import startup as startup_mod
 from cursor_agent.cli.app import app
+from cursor_agent.cli.setup_runtime import collect_setup_check_lines
 from cursor_agent.config.effective import REDACTION_TOKEN
 from tests.unit.setup_cli_test_fakes import PLACEHOLDER_API_KEY
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 
+_DEFAULT_SESSIONS_DB_PARENT = Path.home() / ".cursor-agent"
+
+
+def _golden_stdout(lines: list[str]) -> str:
+    """Join check lines the same way ``typer.echo`` writes them (trailing newline)."""
+    return "".join(f"{line}\n" for line in lines)
+
 
 # --- Task 4.5 / 4.10: check and show ------------------------------------------
+# --- PRD-017 Task 3.2: golden byte-identical stdout guards (A8) ---------------
 
 
 def test_check_missing_api_key_exit_one(
@@ -42,10 +51,17 @@ def test_check_missing_api_key_exit_one(
         ],
         env={"CURSOR_API_KEY": ""},
     )
+    expected = _golden_stdout(
+        [
+            "ok: config load",
+            "error: API key — CURSOR_API_KEY is empty or unset",
+            "ok: workspace — .",
+            "ok: memory root — (unset)",
+            f"ok: sessions-db parent — {_DEFAULT_SESSIONS_DB_PARENT}",
+        ]
+    )
     assert result.exit_code == 1
-    combined = f"{result.stdout}\n{result.output}"
-    assert "error:" in combined
-    assert "api" in combined.lower() or "CURSOR_API_KEY" in combined
+    assert result.stdout == expected
 
 
 def test_check_bad_workspace_exit_one(
@@ -74,9 +90,20 @@ def test_check_bad_workspace_exit_one(
             str(env_file),
         ],
     )
+    expected = _golden_stdout(
+        [
+            "ok: config load",
+            "ok: API key",
+            (
+                f"error: workspace — received {str(missing_ws)!r}, "
+                "expected existing directory"
+            ),
+            "ok: memory root — (unset)",
+            f"ok: sessions-db parent — {_DEFAULT_SESSIONS_DB_PARENT}",
+        ]
+    )
     assert result.exit_code == 1
-    assert "error:" in f"{result.stdout}\n{result.output}"
-    assert "workspace" in f"{result.stdout}\n{result.output}".lower()
+    assert result.stdout == expected
 
 
 def test_check_all_pass_exit_zero(
@@ -125,10 +152,66 @@ def test_check_all_pass_exit_zero(
             str(env_file),
         ],
     )
+    expected = _golden_stdout(
+        [
+            "ok: config load",
+            "ok: API key",
+            f"ok: workspace — {workspace}",
+            f"ok: memory root — {memory_root}",
+            f"ok: sessions-db parent — {sessions_parent}",
+        ]
+    )
     assert result.exit_code == 0, result.output
-    combined = f"{result.stdout}\n{result.output}"
-    assert "ok:" in combined
-    assert "error:" not in combined
+    assert result.stdout == expected
+
+
+def test_collect_setup_check_lines_matches_cli_golden_pass(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Shared collector returns the same lines CLI prints on the pass path."""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    memory_root = tmp_path / "memory"
+    memory_root.mkdir()
+    sessions_parent = tmp_path / "sessions_parent"
+    sessions_parent.mkdir()
+    sessions_db = sessions_parent / "sessions.db"
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "model: composer-2.5",
+                f"memory_root: {memory_root}",
+                "runtime:",
+                "  local:",
+                f"    cwd: {workspace}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        f"CURSOR_API_KEY={PLACEHOLDER_API_KEY}\n"
+        f"CURSOR_AGENT_SESSIONS_DB={sessions_db}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("CURSOR_API_KEY", raising=False)
+    monkeypatch.delenv("CURSOR_AGENT_SESSIONS_DB", raising=False)
+
+    lines, failed = collect_setup_check_lines(
+        config_path=config_path,
+        env_file=env_file,
+    )
+    assert failed is False
+    assert lines == [
+        "ok: config load",
+        "ok: API key",
+        f"ok: workspace — {workspace}",
+        f"ok: memory root — {memory_root}",
+        f"ok: sessions-db parent — {sessions_parent}",
+    ]
 
 
 def test_show_prints_redacted_effective_config(
