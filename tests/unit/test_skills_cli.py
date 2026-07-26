@@ -28,9 +28,18 @@ from typer.testing import CliRunner
 
 from cursor_agent.cli.app import app
 from cursor_agent.cli.rich_display import format_skills_list_output
+from cursor_agent.cli.skills_commands import (
+    resolve_skills_cwd,
+    resolve_skills_home,
+    resolve_skills_pack_root,
+)
 from cursor_agent.config.loader import load_config
 from cursor_agent.errors import ConfigError
-from cursor_agent.skills.pack_paths import project_skills_root, user_skills_root
+from cursor_agent.skills.pack_paths import (
+    bundled_skills_pack_root,
+    project_skills_root,
+    user_skills_root,
+)
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
@@ -543,4 +552,116 @@ def test_skills_cli_seed_writes_only_under_injected_user_root(
     )
     assert (skills_cli_env.user_skills / "alpha-skill" / "SKILL.md").is_file()
     assert (skills_cli_env.user_skills / "beta-skill" / "SKILL.md").is_file()
+    _assert_no_writes_outside_tmp(skills_cli_env, before=before)
+
+
+# --- resolve_* defaults (unpatched bodies) ------------------------------------
+
+
+def test_resolve_skills_cwd_defaults_to_config_runtime_cwd(tmp_path: Path) -> None:
+    """Unpatched ``resolve_skills_cwd`` returns resolved ``config.runtime.local.cwd``."""
+    workspace: Path = tmp_path / "default-cwd-workspace"
+    workspace.mkdir()
+    config = load_config(
+        config_path=tmp_path / "missing.yaml",
+        cli_overrides={"runtime": {"local": {"cwd": str(workspace)}}},
+    )
+
+    resolved: Path = resolve_skills_cwd(config)
+
+    assert resolved == workspace.resolve(), (
+        f"resolve_skills_cwd default must use config cwd, "
+        f"received {resolved!r}, expected {workspace.resolve()!r}"
+    )
+
+
+def test_resolve_skills_home_defaults_to_path_home(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Unpatched ``resolve_skills_home`` returns ``Path.home()`` (hermetic home)."""
+    fake_home: Path = tmp_path / "fake-home"
+    fake_home.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+
+    resolved: Path = resolve_skills_home()
+
+    assert resolved == fake_home, (
+        f"resolve_skills_home default must call Path.home(), "
+        f"received {resolved!r}, expected {fake_home!r}"
+    )
+
+
+def test_resolve_skills_pack_root_defaults_to_bundled_pack() -> None:
+    """Unpatched ``resolve_skills_pack_root`` returns ``bundled_skills_pack_root()``."""
+    resolved: Path = resolve_skills_pack_root()
+
+    assert resolved == bundled_skills_pack_root(), (
+        f"resolve_skills_pack_root default must match bundled_skills_pack_root(), "
+        f"received {resolved!r}, expected {bundled_skills_pack_root()!r}"
+    )
+    assert resolved.is_dir(), (
+        f"bundled pack root must be an existing directory, received {resolved!r}"
+    )
+
+
+# --- seed summary formatting edges --------------------------------------------
+
+
+def test_skills_seed_empty_pack_prints_no_skills_summary(
+    skills_cli_env: SkillsCliEnv,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Empty pack (no SKILL.md) prints the empty-summary stdout line and exits 0."""
+    empty_pack: Path = skills_cli_env.tmp_path / "empty-pack"
+    empty_pack.mkdir()
+    monkeypatch.setattr(_RESOLVE_SKILLS_PACK_ROOT, lambda: empty_pack.resolve())
+    before = _snapshot_sibling_tree(skills_cli_env.tmp_path)
+
+    result = CliRunner().invoke(app, ["skills", "seed"])
+
+    assert result.exit_code == 0, result.output
+    assert "No skills seeded, skipped, overwritten, or failed." in result.stdout, (
+        f"empty pack must print empty-summary line, received stdout={result.stdout!r}"
+    )
+    assert "Failed:" not in result.stderr, (
+        f"empty pack must not emit Failed on stderr, received stderr={result.stderr!r}"
+    )
+    _assert_no_writes_outside_tmp(skills_cli_env, before=before)
+
+
+def test_skills_seed_failures_only_skips_empty_stdout_summary(
+    skills_cli_env: SkillsCliEnv,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Failures-only seed: empty stdout summary, Failed lines on stderr, exit 1."""
+    broken_pack: Path = skills_cli_env.tmp_path / "failures-only-pack"
+    _write_skill_md(
+        broken_pack / "escape" / "bad",
+        name="../x",
+        description="Invalid slug that must fail seed alone",
+    )
+    monkeypatch.setattr(_RESOLVE_SKILLS_PACK_ROOT, lambda: broken_pack.resolve())
+    before = _snapshot_sibling_tree(skills_cli_env.tmp_path)
+
+    result = CliRunner().invoke(app, ["skills", "seed"])
+
+    assert result.exit_code == 1, (
+        f"failures-only seed must exit 1, "
+        f"received exit_code={result.exit_code!r} output={result.output!r}"
+    )
+    assert "No skills seeded, skipped, overwritten, or failed." not in result.stdout, (
+        f"failures-only must not print empty-summary line, "
+        f"received stdout={result.stdout!r}"
+    )
+    assert "Seeded:" not in result.stdout, (
+        f"failures-only stdout must omit Seeded lines, received stdout={result.stdout!r}"
+    )
+    assert result.stdout.strip() == "", (
+        f"failures-only must leave stdout empty (skip empty summary_text branch), "
+        f"received stdout={result.stdout!r}"
+    )
+    assert "Failed: ../x (" in result.stderr, (
+        f"Failed lines must go to stderr, received stderr={result.stderr!r}"
+    )
     _assert_no_writes_outside_tmp(skills_cli_env, before=before)
