@@ -8,40 +8,7 @@
 
 > **Humans:** quick start below. **AI Agents:** start at **[AGENTS.md](AGENTS.md)**.
 
-Clean-room agent inspired by [Hermes Agent](https://github.com/NousResearch/hermes-agent) behavior and [OpenClaw](https://github.com/openclaw/openclaw) gateway patterns, powered by the [Cursor Python SDK](https://cursor.com/docs/sdk/python). First-party models: **Grok 4.5** (default) and **Composer 2.5** (pin via config / `CURSOR_AGENT__MODEL` / `/model`).
-
-Orchestration layer only — the SDK owns the agent loop, tools, and inference. **Cursor Agent** adds sessions, configuration, CLI UX, concurrency and security policy (tool profiles, hooks, allowlists).
-
-## What it provides
-
-- Interactive local REPL (`cursor-agent`)
-- Persistent sessions (`cursor-agent sessions list`)
-- Long-running messaging gateway, including Telegram (`cursor-agent gateway`)
-- Plan usage snapshot (`cursor-agent usage`) via the Cursor dashboard endpoint
-- Local Memory v1 from `~/.cursor-agent/USER.md` and `~/.cursor-agent/MEMORY.md`
-- Embedded cron scheduler managed by `cursor-agent cron list|add|remove`
-- `coding`, `messaging`, and `full` tool profiles for trusted dev, untrusted input, and curated MCP
-
-## Documentation
-
-| Document | Description |
-|----------|-------------|
-| [Setup guide](docs/setup.md) | Install, API key, gateway index for humans and AI agents |
-| [Architecture](docs/architecture.md) | System design — sessions, facade, concurrency, profiles |
-| [Architecture decisions](docs/decisions/README.md) | Curated ADR index for contributors |
-| [AGENTS.md](AGENTS.md) | **Agent entry point** — conventions, verification, tool profiles |
-| [SECURITY.md](SECURITY.md) | Messaging threat model, hooks, and acceptance probes |
-| [Cursor API Key Onboarding](docs/cursor-api-key-onboarding.md) | Local setup guide for creating and exporting `CURSOR_API_KEY` |
-| [Telegram Gateway Onboarding](docs/telegram-gateway-onboarding.md) | Local setup guide for BotFather, `TELEGRAM_BOT_TOKEN`, allowlist, and gateway testing |
-| [.env.example](.env.example) | Environment variable reference |
-| [examples/README.md](examples/README.md) | Product-facing CLI, gateway, profiles, memory, and cron examples |
-
-## Prerequisites
-
-- Python 3.11+
-- [uv](https://docs.astral.sh/uv/) (dependency manager used by this repo)
-- [Cursor API key](https://cursor.com/dashboard/api) → `CURSOR_API_KEY`
-- `cursor-sdk-bridge` on PATH (installed with `cursor-sdk`)
+Clean-room orchestration for the [Cursor Python SDK](https://cursor.com/docs/sdk/python) — sessions, CLI, concurrency, and security policy. The SDK owns the agent loop, tools, and inference. Default model: **Grok 4.5** (pin **Composer 2.5** via config / `CURSOR_AGENT__MODEL` / `/model`).
 
 ## Quick start
 
@@ -51,17 +18,13 @@ export CURSOR_API_KEY="your-cursor-api-key"
 uv run cursor-agent
 ```
 
-The first command installs project dependencies into the local virtual environment.
+Or copy [.env.example](.env.example) → `.env`, set `CURSOR_API_KEY`, and run `uv run cursor-agent` (CWD `.env` loads without overriding shell exports). Key setup: [Cursor API Key Onboarding](docs/cursor-api-key-onboarding.md). Full config: [Setup guide](docs/setup.md#configuration).
 
-The second command exports your Cursor API key for the current shell session.
-
-The third command starts the interactive REPL with the default `coding` profile.
-
-Alternatively, copy [.env.example](.env.example) to `.env` in the project directory, set `CURSOR_API_KEY`, and run `uv run cursor-agent` — the CLI loads CWD `.env` at startup without overriding variables already exported in your shell. Full key setup: [Cursor API Key Onboarding](docs/cursor-api-key-onboarding.md). Configuration precedence and overrides: [Setup guide](docs/setup.md#configuration).
+**Needs:** Python 3.11+, [uv](https://docs.astral.sh/uv/), `CURSOR_API_KEY`, and `cursor-sdk-bridge` on PATH (comes with `cursor-sdk`).
 
 ## First run
 
-On your first interactive launch (`uv run cursor-agent`), the CLI prints a welcome banner before the REPL prompt. The banner lists only real local commands — not gateway, cron, or Telegram shortcuts.
+On first interactive launch the CLI prints a welcome banner (local commands only — not gateway/cron/Telegram):
 
 ```text
 ==========================================================
@@ -84,91 +47,72 @@ Get started:
 ==========================================================
 ```
 
-On later launches the banner is shorter (logo, tagline, and a ready line). Suppress it with `--no-banner`, or when stdout is not a TTY or `CI=1` is set.
+Later launches are shorter. Suppress with `--no-banner`, or when stdout is not a TTY / `CI=1`. Interactive config: `cursor-agent setup` — see [Interactive setup](docs/setup.md#interactive-setup).
 
-Before the first session, export `CURSOR_API_KEY` — see [Setup guide](docs/setup.md) and [Cursor API Key Onboarding](docs/cursor-api-key-onboarding.md). For Telegram gateway setup, see [Telegram Gateway Onboarding](docs/telegram-gateway-onboarding.md).
-
-Run the unit test gate without an API key (matches the CI `quality` job):
+## Common commands
 
 ```bash
-uv run pytest -m "not integration and not package_smoke" -v
-```
-
-This command runs unit tests and skips integration tests (require `CURSOR_API_KEY`) and package smoke (built in a separate CI job). Before a release tag, also run `uv run pytest -m package_smoke -v`.
-
-## Usage
-
-```bash
-uv run cursor-agent                         # interactive REPL (default: coding profile)
+uv run cursor-agent                         # REPL (default: coding profile)
 uv run cursor-agent --profile messaging     # validate messaging hooks locally
-uv run cursor-agent sessions list             # list sessions for the workspace key
-uv run cursor-agent cron list                 # list scheduled jobs
-uv run cursor-agent usage                     # current plan usage (total / auto / API)
-uv run cursor-agent usage --json              # same snapshot as JSON
-uv run cursor-agent gateway                   # gateway using ~/.cursor-agent/gateway.yaml
+uv run cursor-agent --profile full          # curated MCP (local only)
+uv run cursor-agent sessions list           # past sessions for this workspace
+uv run cursor-agent skills list             # discovered skills
+uv run cursor-agent skills seed             # copy starter pack into .cursor/skills/
+uv run cursor-agent cron list               # scheduled jobs
+uv run cursor-agent usage                   # plan usage snapshot (total / auto / API)
+uv run cursor-agent usage --json
+uv run cursor-agent gateway                 # ~/.cursor-agent/gateway.yaml
 uv run cursor-agent gateway --config /path/to/gateway.yaml
 ```
 
-`cursor-agent usage` queries Cursor's undocumented dashboard endpoint (not the SDK; best-effort — the API may change without notice). Auth is the OAuth access token from the official Cursor Agent CLI store at `~/.config/cursor/auth.json` (outside `~/.cursor-agent/`), or `CURSOR_AGENT_USAGE_TOKEN`. Refresh that store with `agent login` from the official CLI — this package has no `login` command. `CURSOR_API_KEY` is not accepted by this endpoint.
+Runtime data lives under `~/.cursor-agent/`. Overrides: [Setup — Configuration](docs/setup.md#configuration) and [.env.example](.env.example).
 
-Runtime config and session data live under `~/.cursor-agent/`. Override workspace, sessions DB, memory root, model, or tool profile via environment variables or YAML — see [Setup guide — Configuration](docs/setup.md#configuration) and [.env.example](.env.example).
+`cursor-agent usage` hits Cursor's dashboard endpoint (best-effort; not the SDK). Auth: OAuth token from `~/.config/cursor/auth.json` (via official `agent login`) or `CURSOR_AGENT_USAGE_TOKEN` — not `CURSOR_API_KEY`.
 
-## Memory
+## Skills
 
-Memory (v1) reads `~/.cursor-agent/USER.md` and `~/.cursor-agent/MEMORY.md` by default. Override the directory with `memory_root` in `~/.cursor-agent/config.yaml` or `CURSOR_AGENT__MEMORY_ROOT` (see [Setup guide — Configuration](docs/setup.md#configuration)). On the first user turn for a session, `cursor-agent` injects up to 8 KB before the message: up to 4 KB from `USER.md`, then the remaining budget from `MEMORY.md`. Oversized sections keep the end of the file.
+Starter playbooks ship under [`skills/`](skills/). Paste third-party AgentSkills into project or user `.cursor/skills/`. CLI: `skills path` / `list` / `seed`. Details: [`skills/README.md`](skills/README.md) and [Setup — skills](docs/setup.md).
 
-After that first turn, memory is frozen for the session: edits or new files on disk are not picked up until `/new` starts a fresh session row (or `/resume` on a row that has not yet injected memory). `/memory show` always reads from disk at command time.
+## Tool profiles
 
-Use `/memory show` in the CLI to inspect the exact effective payload, quotas, byte counts, and truncation state. Missing files are treated as empty.
+| Profile | Use when |
+|---------|----------|
+| `coding` (default) | Trusted local dev — SDK auto-approve |
+| `messaging` | Gateways / bots / untrusted input — read-only + deny hooks |
+| `full` | Trusted local operator + curated MCP (GitHub, Brave, Playwright) |
 
-## Gateway (Telegram)
+For bots and gateways, always use `messaging`. Threat model: [SECURITY.md](SECURITY.md). Profile matrix: [Architecture](docs/architecture.md#mcp-and-sandbox-by-profile-create-and-resume).
 
-The gateway runs **cursor-agent** as a long-running bot process with `tool_profile: messaging` — read-only workspace, deny hooks, empty MCP, sandbox network off. See [SECURITY.md](SECURITY.md) and the step-by-step [Telegram Gateway Onboarding](docs/telegram-gateway-onboarding.md).
+## Gateway, cron, and memory
 
-Example config: [examples/gateway.yaml.example](examples/gateway.yaml.example). More examples: [examples/README.md](examples/README.md). Set `TELEGRAM_BOT_TOKEN` in the environment; do not commit real tokens.
+- **Telegram gateway:** long-running bot with `tool_profile: messaging`. Setup: [Telegram Gateway Onboarding](docs/telegram-gateway-onboarding.md). Sample: [examples/gateway.yaml.example](examples/gateway.yaml.example).
+- **Cron:** `~/.cursor-agent/cron/jobs.yaml`, managed by `cursor-agent cron list|add|remove`, runs inside the gateway. Demo: [Telegram guide — cron](docs/telegram-gateway-onboarding.md#9-optional-scheduled-cron-jobs).
+- **Memory (v1):** injects `USER.md` + `MEMORY.md` on the first turn of a session (frozen afterward until `/new`). Inspect with `/memory show`. Details: [Setup](docs/setup.md).
 
-## Cron Jobs
+More product examples: [examples/README.md](examples/README.md).
 
-Scheduled jobs are configured in `~/.cursor-agent/cron/jobs.yaml` and run inside `cursor-agent gateway`. Use `cursor-agent cron list|add|remove` to manage them without hand-editing YAML. Job prompts are capped at 64 KiB, schedules use UTC by default, and jobs with `delivery.telegram.chat_id` deliver formatted output through the Telegram gateway. See [Telegram Gateway Onboarding](docs/telegram-gateway-onboarding.md#9-optional-scheduled-cron-jobs) for the full setup and demo flow.
+## Docs
 
-## Auto-approve risk (`coding` vs `messaging`)
+| Document | Description |
+|----------|-------------|
+| [Setup guide](docs/setup.md) | Install, API key, config, skills, gateway index |
+| [AGENTS.md](AGENTS.md) | Conventions and verification for AI agents |
+| [SECURITY.md](SECURITY.md) | Messaging threat model and hooks |
+| [Architecture](docs/architecture.md) | Sessions, facade, concurrency, profiles |
+| [Architecture decisions](docs/decisions/README.md) | ADR index |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Issues, PRs, local quality gate |
 
-The default **`coding`** profile runs the local SDK with **auto-approve** — tools execute without interactive prompts. That posture is a **developer convenience**, not a security boundary for public gateways or untrusted input. Optional dev hooks do not make `coding` gateway-safe.
+## Releases
 
-On **create** and **resume**, profile policy differs by tool profile — see [Architecture — MCP and sandbox by profile](docs/architecture.md#mcp-and-sandbox-by-profile-create-and-resume).
+- **v1.2.0** — product skills pack (`skills/`, `skills path|list|seed`, BYO paste).
+- **v1.2.1** (pending tag) — skills discovery harden + package-smoke isolation after the v1.2.0 review follow-up.
+- Earlier: v1.1.0 (`full` profile, Grok default), v1.0 (first-run banner + setup index).
 
-The **`messaging`** profile is read-only over the workspace: it auto-deploys deny hooks to `.cursor/hooks/messaging/` before the first agent run. Use `cursor-agent --profile messaging` to validate hooks locally before gateway work.
-
-For bots and gateways, use `tool_profile: messaging` as specified in [SECURITY.md](SECURITY.md). Do not rely on `coding` + auto-approve outside a trusted local dev session.
-
-## What's next
-
-**v1.0** (tagged) ships the first-run welcome banner, one-time getting-started hints, and a [setup docs index](docs/setup.md). Interactive local configuration is available via `cursor-agent setup` — see [Interactive setup](docs/setup.md#interactive-setup).
-
-**v1.1.0** (tagged) ships the **`full`** tool profile (curated MCP: GitHub, Brave Search, Playwright) — enable it via [Setup](docs/setup.md); see [SECURITY.md](SECURITY.md) and [Architecture](docs/architecture.md) for the three-profile matrix. The unset default model is **Grok 4.5** (`grok-4.5`); pin **Composer 2.5** via setup index `2`, YAML, `CURSOR_AGENT__MODEL`, or `/model`. Interactive setup uses guided step chrome (model + tool profile including `full` when local).
-
-**v1.2.0** (tagged) ships the **product skills pack**: 14 starter playbooks under repo-root [`skills/`](skills/), CLI `skills path` / `skills list` / `skills seed`, and bring-your-own paste into project or user `.cursor/skills/` — see [`skills/README.md`](skills/README.md) and [Setup — skills](docs/setup.md).
-
-**v1.2.1** (pending tag) hardens skills discovery after the v1.2.0 review follow-up: skip seed staging/backup leftovers, refuse symlinked skills roots, accept CRLF frontmatter, map seed destination `mkdir` failures to clean CLI errors, and tighten package-smoke isolation.
-
-Further roadmap:
-
-- Logging bootstrap + disk persistence (PRD-015).
-- Discord and Slack gateway onboarding at the same bar as the Telegram guides (PRD-014).
-- Terminal output fallback when the locale cannot render Unicode symbols (for example, replacing checkmarks with ASCII).
-- Session search, gateway queueing, and a Textual-based TUI — promoted when demand justifies scope.
-
-## Contributors
-
-Thanks to everyone who has improved Cursor Agent:
-
-- [wing-kit](https://github.com/wing-kit) — first external contributions:
-  - gateway `model:` key support ([#59](https://github.com/adriannoes/cursor-agent/pull/59))
-  - `cursor-agent usage` plan quota snapshot ([#60](https://github.com/adriannoes/cursor-agent/pull/60))
+Roadmap: logging persistence (PRD-015), Discord/Slack onboarding (PRD-014), Unicode terminal fallback, session search / queueing / TUI when demand justifies.
 
 ## Contributing
 
-Bug reports, feature ideas and PRs are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for issue templates and the local verification gate.
+Bug reports, ideas, and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
