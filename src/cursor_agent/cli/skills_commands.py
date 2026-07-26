@@ -82,7 +82,11 @@ def resolve_skills_pack_root() -> Path:
 
 
 def _format_seed_summary(summary: SeedSummary) -> str:
-    """Render seed outcomes as human-readable stdout lines."""
+    """Render non-failure seed outcomes as human-readable stdout lines.
+
+    WHY: soft ``Failed:`` lines go to stderr (see ``_echo_seed_failures``) so
+    scripts that watch stderr do not miss them, matching cron warning sink.
+    """
     lines: list[str] = []
     if summary.seeded:
         lines.append(f"Seeded: {', '.join(summary.seeded)}")
@@ -90,12 +94,15 @@ def _format_seed_summary(summary: SeedSummary) -> str:
         lines.append(f"Skipped: {', '.join(summary.skipped)}")
     if summary.overwritten:
         lines.append(f"Overwritten: {', '.join(summary.overwritten)}")
-    if summary.failed:
-        for failure in summary.failed:
-            lines.append(f"Failed: {failure.slug} ({failure.reason})")
-    if not lines:
+    if not lines and not summary.failed:
         lines.append("No skills seeded, skipped, overwritten, or failed.")
     return "\n".join(lines)
+
+
+def _echo_seed_failures(summary: SeedSummary) -> None:
+    """Echo each soft seed failure on stderr for operators/scripts."""
+    for failure in summary.failed:
+        typer.echo(f"Failed: {failure.slug} ({failure.reason})", err=True)
 
 
 @skills_app.command("path")
@@ -120,6 +127,7 @@ def skills_path() -> None:
         "",
         "Bring your own skills: paste an AgentSkills folder (with SKILL.md)",
         "into either root above. No marketplace — paste third-party skills only.",
+        "Note: path always prints both roots; skills list respects setting_sources.",
     ]
     typer.echo("\n".join(lines))
 
@@ -176,6 +184,9 @@ def skills_seed(
     except CursorAgentError as exc:
         _exit_on_cursor_agent_error(exc)
 
-    typer.echo(_format_seed_summary(summary))
+    summary_text = _format_seed_summary(summary)
+    if summary_text:
+        typer.echo(summary_text)
+    _echo_seed_failures(summary)
     if summary.failed:
         raise typer.Exit(1)

@@ -19,7 +19,7 @@ Project wins over user when the same `name` exists in both (same precedence as R
 
 Third-party skills are **untrusted instructions** the agent may follow. Only paste from sources you trust. Prefer reading each `SKILL.md` before enabling it.
 
-## CLI (intended UX)
+## CLI
 
 | Command | Purpose |
 |---------|---------|
@@ -28,9 +28,9 @@ Third-party skills are **untrusted instructions** the agent may follow. Only pas
 | `cursor-agent skills seed` | Copy missing starters from this pack into `~/.cursor/skills/<slug>/` (flat; categories are repo-only) |
 | `cursor-agent skills seed --force` | Overwrite existing same-name dirs under the user skills root |
 
-> **Until the CLI wave lands:** paste manually into the destinations above. Do not assume `skills seed` / `skills list` / `skills path` are available yet — those commands are the intended UX for this pack.
+`skills path` always prints **both** destination roots (paste targets). `skills list` only shows skills from roots enabled in `runtime.local.setting_sources` (default: `project` and `user`) — same filter as REPL `/skills`.
 
-Bare `cursor-agent skills` will show Typer help once the group exists. Seed is idempotent: existing destinations are skipped unless `--force`. Any seed failure exits non-zero; skips-only is success.
+Bare `cursor-agent skills` shows Typer help. Seed is idempotent: existing destinations are skipped unless `--force`. Soft per-skill failures print `Failed:` on stderr and exit non-zero; skips-only is success.
 
 ## Starter catalog
 

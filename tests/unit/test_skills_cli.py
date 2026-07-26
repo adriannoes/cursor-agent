@@ -234,6 +234,9 @@ def test_skills_path_prints_labeled_absolute_roots(
     assert "paste" in stdout.lower(), (
         f"skills path must include a short BYO paste blurb, received {stdout!r}"
     )
+    assert "setting_sources" in stdout.lower(), (
+        f"skills path should clarify list respects setting_sources, received {stdout!r}"
+    )
     _assert_no_writes_outside_tmp(skills_cli_env, before=before)
 
 
@@ -278,6 +281,28 @@ def test_skills_list_sees_pasted_project_byo_skill(
         f"received stdout={result.stdout!r}"
     )
     assert "Pasted third-party BYO skill" in result.stdout
+    _assert_no_writes_outside_tmp(skills_cli_env, before=before)
+
+
+def test_skills_list_sees_pasted_user_byo_skill(
+    skills_cli_env: SkillsCliEnv,
+) -> None:
+    """After pasting under the user skills root, list shows Source: user."""
+    before = _snapshot_sibling_tree(skills_cli_env.tmp_path)
+    _write_skill_md(
+        skills_cli_env.user_skills / "user-byo",
+        name="user-byo",
+        description="Pasted user-root BYO skill",
+    )
+
+    result = CliRunner().invoke(app, ["skills", "list"])
+
+    assert result.exit_code == 0, result.output
+    assert "user-byo" in result.stdout
+    assert "Source: user" in result.stdout, (
+        f"BYO under user root must show Source: user, received stdout={result.stdout!r}"
+    )
+    assert "Pasted user-root BYO skill" in result.stdout
     _assert_no_writes_outside_tmp(skills_cli_env, before=before)
 
 
@@ -376,7 +401,7 @@ def test_skills_seed_exits_nonzero_when_any_failed(
     skills_cli_env: SkillsCliEnv,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """Any seed failure must make the CLI exit with code 1 and Failed: lines."""
+    """Any seed failure must exit 1, echo Failed on stderr, and keep valid siblings."""
     broken_pack = skills_cli_env.tmp_path / "broken-pack"
     _write_skill_md(
         broken_pack / "escape" / "bad",
@@ -398,12 +423,22 @@ def test_skills_seed_exits_nonzero_when_any_failed(
         f"received exit_code={result.exit_code!r} output={result.output!r}"
     )
     combined = f"{result.stdout}\n{result.stderr}\n{result.output}"
-    assert "Failed: ../x (" in combined, (
-        f"failed seed must print 'Failed: <slug> (<reason>)', "
-        f"received output={combined!r}"
+    assert "Failed: ../x (" in result.stderr, (
+        f"soft Failed: lines must go to stderr, received stderr={result.stderr!r} "
+        f"stdout={result.stdout!r}"
+    )
+    assert "Failed:" not in result.stdout, (
+        f"Failed: lines must not remain only on stdout, received stdout={result.stdout!r}"
     )
     assert "invalid" in combined.lower(), (
         f"failed seed must include invalid-slug reason, received output={combined!r}"
+    )
+    assert "good-skill" in result.stdout, (
+        f"valid sibling should appear in Seeded stdout, received stdout={result.stdout!r}"
+    )
+    assert (skills_cli_env.user_skills / "good-skill" / "SKILL.md").is_file(), (
+        f"continue-on-failure must still seed good-skill under "
+        f"{skills_cli_env.user_skills!r}"
     )
     _assert_no_writes_outside_tmp(skills_cli_env, before=before)
 
