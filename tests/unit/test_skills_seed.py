@@ -912,3 +912,132 @@ def test_seed_bundled_skills_records_invalid_directory_fallback_in_failed(
     assert "ok-skill" in summary.seeded, (
         f"valid sibling must still seed, received seeded={summary.seeded!r}"
     )
+
+
+def test_seed_bundled_skills_records_resolved_destination_escape_in_failed(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """When resolved dest escapes destination_root, seed records A6b failure.
+
+    WHY (PR review): avoid class-wide ``Path.is_relative_to`` patches. Remap
+    ``Path.resolve`` only for ``{destination_root}/{slug}`` so production
+    ``_validated_destination_dir`` hits the real ``is_relative_to`` guard.
+    """
+    pack_root: Path = _mini_pack_with_category_tree(tmp_path / "mini-pack")
+    destination_root: Path = tmp_path / "dest"
+    destination_root.mkdir()
+    outside_root: Path = tmp_path / "outside"
+    outside_root.mkdir()
+    real_resolve = Path.resolve
+
+    def _resolve_slug_outside_destination(
+        self: Path,
+        strict: bool = False,
+    ) -> Path:
+        """Resolve ``{destination_root}/{slug}`` to a sibling outside the dest root."""
+        if self.parent == destination_root and self.name in {
+            "alpha-skill",
+            "beta-skill",
+        }:
+            return (outside_root / self.name).resolve()
+        return real_resolve(self, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", _resolve_slug_outside_destination)
+
+    summary: SeedSummary = seed_bundled_skills(
+        pack_root=pack_root,
+        destination_root=destination_root,
+        force=False,
+    )
+
+    _assert_seed_summary_shape(summary)
+    assert "alpha-skill" in _failed_slugs(summary), (
+        f"escaped alpha-skill must appear in failed, received failed={summary.failed!r}"
+    )
+    assert "beta-skill" in _failed_slugs(summary), (
+        f"escaped beta-skill must appear in failed, received failed={summary.failed!r}"
+    )
+    _assert_failure_has_reason(summary, "alpha-skill")
+    assert any(
+        "escapes destination_root" in failure.reason for failure in summary.failed
+    ), (
+        f"escape failure must name destination_root escape, "
+        f"received failed={summary.failed!r}"
+    )
+    assert summary.seeded == (), (
+        f"escaped destinations must not seed, received seeded={summary.seeded!r}"
+    )
+    assert _destination_skill_slugs(destination_root) == set(), (
+        f"escaped seed must leave dest empty, "
+        f"received={sorted(_destination_skill_slugs(destination_root))!r}"
+    )
+
+
+def test_seed_bundled_skills_force_restores_prior_when_staging_rename_fails(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """OSError on staging→dest rename must restore backup and record failure.
+
+    Also exercises ``_cleanup_tree_if_exists`` when the leftover staging tree exists.
+    """
+    pack_root: Path = tmp_path / "rename-fail-pack"
+    _write_skill_md(
+        pack_root / "meta" / "stable-skill",
+        name="stable-skill",
+        description="Survives failed staging rename",
+    )
+    destination_root: Path = tmp_path / "dest"
+    destination_root.mkdir()
+
+    first: SeedSummary = seed_bundled_skills(
+        pack_root=pack_root,
+        destination_root=destination_root,
+        force=False,
+    )
+    assert "stable-skill" in first.seeded
+    skill_md: Path = destination_root / "stable-skill" / "SKILL.md"
+    original_text: str = skill_md.read_text(encoding="utf-8")
+
+    real_rename = Path.rename
+
+    def _fail_staging_rename(self: Path, target: Path | str) -> Path:
+        """Fail only the staging→dest rename; allow backup/restore renames."""
+        if self.name.startswith(".seed-staging-"):
+            raise OSError(
+                f"simulated staging rename failure: source={self!r}, target={target!r}"
+            )
+        return real_rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", _fail_staging_rename)
+
+    forced: SeedSummary = seed_bundled_skills(
+        pack_root=pack_root,
+        destination_root=destination_root,
+        force=True,
+    )
+
+    _assert_seed_summary_shape(forced)
+    assert "stable-skill" in _failed_slugs(forced), (
+        f"failed staging rename must record slug in failed, "
+        f"received failed={forced.failed!r}"
+    )
+    _assert_failure_has_reason(forced, "stable-skill")
+    assert skill_md.is_file(), (
+        f"prior SKILL.md must be restored after staging rename failure at {skill_md}"
+    )
+    assert skill_md.read_text(encoding="utf-8") == original_text, (
+        f"restore path must leave prior SKILL.md unchanged, "
+        f"received={skill_md.read_text(encoding='utf-8')!r}, "
+        f"expected={original_text!r}"
+    )
+    leftover_staging = [
+        path
+        for path in destination_root.iterdir()
+        if path.name.startswith(".seed-staging-")
+    ]
+    assert leftover_staging == [], (
+        f"_cleanup_tree_if_exists must remove leftover staging trees, "
+        f"received leftover={leftover_staging!r}"
+    )
