@@ -21,6 +21,7 @@ from cursor_agent.cli.first_run_marker import (
     is_first_run,
     mark_complete,
 )
+from cursor_agent.cli.gateway_check import GatewayConfigPathOpt, gateway_app
 from cursor_agent.cli.repl_session import run_repl
 from cursor_agent.cli.rich_display import RichDisplay
 from cursor_agent.cli.setup_commands import setup_app
@@ -48,6 +49,7 @@ app.add_typer(cron_app, name="cron")
 app.add_typer(setup_app, name="setup")
 app.add_typer(skills_app, name="skills")
 app.add_typer(auth_app, name="auth")
+app.add_typer(gateway_app, name="gateway")
 app.command("usage")(usage_command)
 app.command("doctor")(doctor_command)
 
@@ -160,21 +162,17 @@ def sessions_list() -> None:
         _print_session_row(row)
 
 
-@app.command("gateway")
-def gateway_command(
-    config: Annotated[
-        Path | None,
-        typer.Option(
-            "--config",
-            help="Path to gateway YAML configuration.",
-            dir_okay=False,
-            file_okay=True,
-            resolve_path=True,
-        ),
-    ] = None,
+@gateway_app.callback(invoke_without_command=True)
+def gateway_callback(
+    ctx: typer.Context,
+    config: GatewayConfigPathOpt = None,
 ) -> None:
-    """Run the long-running messaging gateway."""
+    """Run the long-running messaging gateway (default when no subcommand)."""
+    if ctx.invoked_subcommand is not None:
+        return
     try:
+        # WHY: call ``run_gateway`` from this module so tests that monkeypatch
+        # ``cursor_agent.cli.app.run_gateway`` keep working after the Typer group.
         exit_code = asyncio.run(run_gateway(config_path=config))
     except CursorAgentError as exc:
         raise typer.Exit(exit_code_for_error(exc)) from exc
