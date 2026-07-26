@@ -5,13 +5,17 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import aiosqlite
 
 from cursor_agent.sessions.models import SessionCreateParams, SessionRecord
+from cursor_agent.sessions.workspace_session_prune import (
+    select_workspace_prune_target_ids,
+    validate_prune_workspace_params,
+)
 
 _SESSIONS_DDL = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -241,6 +245,34 @@ class SessionStore:
             return None
         return _row_to_session_record(row)
 
+    async def get(self, session_key: str, session_id: str) -> SessionRecord | None:
+        """Return the session when ``session_key`` and ``id`` both match.
+
+        Example:
+            >>> record = await store.get(session_key, session_id)
+        """
+        return await self.resolve(session_key, session_id)
+
+    async def delete(self, session_key: str, session_id: str) -> bool:
+        """Delete the session when ``session_key`` and ``id`` both match.
+
+        Returns:
+            True if a row was deleted; False if the key/id pair is absent
+            (wrong ``session_key`` or missing id — never raises).
+
+        Example:
+            >>> removed = await store.delete(session_key, session_id)
+        """
+        async with aiosqlite.connect(self._db_path) as db:
+            cursor = await db.execute(
+                "DELETE FROM sessions WHERE session_key = ? AND id = ?",
+                (session_key, session_id),
+            )
+            deleted = cursor.rowcount > 0
+            if deleted:
+                await db.commit()
+        return deleted
+
     async def prune_cron_sessions(self, job_id: str, *, keep_last: int) -> list[str]:
         """Delete cron rows for ``job_id`` beyond the most recent ``keep_last``.
 
@@ -279,6 +311,58 @@ class SessionStore:
             if pruned_agent_ids:
                 await db.commit()
         return pruned_agent_ids
+
+    async def prune_workspace_sessions(
+        self,
+        session_key: str,
+        *,
+        older_than_days: int | None = None,
+        keep_last: int | None = None,
+    ) -> list[str]:
+        """Delete workspace sessions for ``session_key`` by age and/or keep window.
+
+        Distinct from ``prune_cron_sessions``: scopes by exact ``session_key``,
+        orders by ``updated_at``, and returns deleted session ids (not agent ids).
+
+        When both criteria are set, deletes the union (OR). ``keep_last`` does not
+        protect rows that also match ``older_than_days`` (PRD-017 Q3).
+
+        Example:
+            >>> deleted = await store.prune_workspace_sessions(
+            ...     session_key, older_than_days=30, keep_last=10
+            ... )
+        """
+        validate_prune_workspace_params(older_than_days, keep_last)
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT id, updated_at FROM sessions "
+                "WHERE session_key = ? "
+                "ORDER BY updated_at DESC, id DESC",
+                (session_key,),
+            )
+            rows = list(await cursor.fetchall())
+            # Only advance the store clock for age pruning — keep_last alone must
+            # not consume SteppingClock ticks used by create() in unit tests.
+            cutoff_iso: str | None = None
+            if older_than_days is not None:
+                cutoff_iso = _timestamp_iso(
+                    self._clock() - timedelta(days=older_than_days)
+                )
+            deleted_ids = select_workspace_prune_target_ids(
+                rows,
+                older_than_days=older_than_days,
+                keep_last=keep_last,
+                cutoff_iso=cutoff_iso,
+            )
+            for session_id in deleted_ids:
+                await db.execute(
+                    "DELETE FROM sessions WHERE session_key = ? AND id = ?",
+                    (session_key, session_id),
+                )
+            if deleted_ids:
+                await db.commit()
+        return deleted_ids
 
     async def list(self, session_key: str) -> list[SessionRecord]:
         """List sessions for ``session_key`` ordered by ``updated_at`` descending."""
