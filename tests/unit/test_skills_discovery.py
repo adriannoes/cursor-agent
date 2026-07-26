@@ -618,3 +618,203 @@ def test_metadata_only_discovery_does_not_load_skill_body(tmp_path: Path) -> Non
     entry = _entry_by_name(metadata_discovery.list_skills(), "metadata-only")
     assert entry.description == "Metadata only."
     assert entry.content == ""
+
+
+def test_user_root_skipped_when_setting_sources_omit_user(tmp_path: Path) -> None:
+    """When ``setting_sources`` lacks ``user``, user skills are not discovered."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    user_skills_root = tmp_path / "user-skills"
+    user_skills_root.mkdir()
+    project_root = _project_skills_root(workspace)
+    _write_skill_md(
+        project_root,
+        "project-only",
+        name="project-only",
+        description="Project skill.",
+        body="Project body.",
+    )
+    _write_skill_md(
+        user_skills_root,
+        "user-hidden",
+        name="user-hidden",
+        description="Must be skipped.",
+        body="User body.",
+    )
+
+    discovery = _discovery_from_fixtures(
+        tmp_path,
+        workspace=workspace,
+        user_skills_root=user_skills_root,
+        setting_sources=["project"],
+    )
+    skills = discovery.list_skills()
+
+    assert [skill.name for skill in skills] == ["project-only"]
+    assert discovery.get_skill("user-hidden") is None
+
+
+def test_project_root_skipped_when_setting_sources_omit_project(
+    tmp_path: Path,
+) -> None:
+    """When ``setting_sources`` lacks ``project``, workspace skills are not discovered."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    user_skills_root = tmp_path / "user-skills"
+    user_skills_root.mkdir()
+    project_root = _project_skills_root(workspace)
+    _write_skill_md(
+        project_root,
+        "project-hidden",
+        name="project-hidden",
+        description="Must be skipped.",
+        body="Project body.",
+    )
+    _write_skill_md(
+        user_skills_root,
+        "user-only",
+        name="user-only",
+        description="User skill.",
+        body="User body.",
+    )
+
+    discovery = _discovery_from_fixtures(
+        tmp_path,
+        workspace=workspace,
+        user_skills_root=user_skills_root,
+        setting_sources=["user"],
+    )
+    skills = discovery.list_skills()
+
+    assert [skill.name for skill in skills] == ["user-only"]
+    assert discovery.get_skill("project-hidden") is None
+
+
+def test_invalid_frontmatter_skill_file_is_skipped(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Non-string frontmatter fields raise ValueError and skip the skill with a warning."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    project_root = _project_skills_root(workspace)
+    skill_dir = project_root / "bad-frontmatter"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "\n".join(
+            [
+                "---",
+                "name: 123",
+                "description: Not a string name.",
+                "---",
+                "",
+                "Body should never load.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    caplog.set_level("WARNING", logger="cursor_agent.skills.discovery")
+    discovery = _discovery_from_fixtures(
+        tmp_path,
+        workspace=workspace,
+        user_skills_root=tmp_path / "user-skills",
+    )
+
+    assert discovery.list_skills() == []
+    assert "skipping invalid skill file" in caplog.text
+    assert "bad-frontmatter" in caplog.text
+
+
+def test_malformed_yaml_frontmatter_skill_file_is_skipped(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """YAML parse errors skip the skill instead of aborting discovery."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    project_root = _project_skills_root(workspace)
+    skill_dir = project_root / "broken-yaml"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "\n".join(
+            [
+                "---",
+                "name: [unclosed",
+                "description: broken",
+                "---",
+                "",
+                "Body ignored.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    caplog.set_level("WARNING", logger="cursor_agent.skills.discovery")
+    discovery = _discovery_from_fixtures(
+        tmp_path,
+        workspace=workspace,
+        user_skills_root=tmp_path / "user-skills",
+    )
+
+    assert discovery.list_skills() == []
+    assert "skipping invalid skill file" in caplog.text
+
+
+def test_empty_skill_md_returns_empty_content(tmp_path: Path) -> None:
+    """An empty ``SKILL.md`` is discovered with empty content (zero-byte path)."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    project_root = _project_skills_root(workspace)
+    skill_dir = project_root / "empty-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_bytes(b"")
+
+    discovery = _discovery_from_fixtures(
+        tmp_path,
+        workspace=workspace,
+        user_skills_root=tmp_path / "user-skills",
+    )
+    entry = _entry_by_name(discovery.list_skills(), "empty-skill")
+
+    assert entry.content == ""
+    assert entry.description == ""
+    assert entry.path == "empty-skill/SKILL.md"
+
+
+def test_frontmatter_filling_budget_returns_truncated_prefix_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When frontmatter alone exceeds the content budget, only the truncated prefix remains."""
+    # WHY: production frontmatter is capped below SKILL_CONTENT_MAX_BYTES; shrink
+    # the discovery budget so the body_budget_bytes <= 0 branch is reachable hermetically.
+    tiny_budget = 64
+    monkeypatch.setattr(
+        "cursor_agent.skills.discovery.SKILL_CONTENT_MAX_BYTES",
+        tiny_budget,
+    )
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    project_root = _project_skills_root(workspace)
+    skill_dir = project_root / "huge-frontmatter"
+    skill_dir.mkdir(parents=True)
+    description = "D" * 120
+    frontmatter = f"---\nname: huge-frontmatter\ndescription: {description}\n---\n\n"
+    body = "BODY_SHOULD_NOT_APPEAR"
+    assert len(frontmatter.encode("utf-8")) > tiny_budget
+    (skill_dir / "SKILL.md").write_text(frontmatter + body, encoding="utf-8")
+
+    discovery = _discovery_from_fixtures(
+        tmp_path,
+        workspace=workspace,
+        user_skills_root=tmp_path / "user-skills",
+    )
+    entry = _entry_by_name(discovery.list_skills(), "huge-frontmatter")
+
+    assert len(entry.content.encode("utf-8")) <= tiny_budget
+    assert body not in entry.content
+    # truncate_utf8_from_end keeps the tail of the oversized frontmatter prefix
+    assert entry.content.endswith("---\n\n")
+    assert "name: huge-frontmatter" not in entry.content

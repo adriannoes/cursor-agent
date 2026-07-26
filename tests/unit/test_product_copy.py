@@ -92,13 +92,24 @@ def test_welcome_logo_is_ascii_wordmark_within_prd_width() -> None:
 
 
 def test_first_commands_hint_includes_onboarding_discoverability_items() -> None:
-    """Shared first-command hint lists the six PRD onboarding bullets."""
+    """Shared first-command hint lists the PRD onboarding discoverability bullets."""
     assert "plain language" in FIRST_COMMANDS_HINT
     assert "/help" in FIRST_COMMANDS_HINT
     assert "/new" in FIRST_COMMANDS_HINT
     assert "/skills" in FIRST_COMMANDS_HINT
     assert "sessions list" in FIRST_COMMANDS_HINT
     assert "docs/setup.md" in FIRST_COMMANDS_HINT
+
+
+def test_first_commands_hint_mentions_skills_cli_discoverability() -> None:
+    """FR-6 / A7: first-commands hint lists /skills plus CLI list, seed, and path."""
+    assert "/skills" in FIRST_COMMANDS_HINT
+    assert "skills list" in FIRST_COMMANDS_HINT
+    assert "skills seed" in FIRST_COMMANDS_HINT
+    assert "skills path" in FIRST_COMMANDS_HINT
+    _assert_cli_hint_exclusions(FIRST_COMMANDS_HINT)
+    _assert_no_secret_like_values(FIRST_COMMANDS_HINT)
+    assert _max_rendered_line_width(FIRST_COMMANDS_HINT) <= PRD_MAX_LINE_WIDTH
 
 
 def test_first_commands_hint_is_english_without_forbidden_cli_topics() -> None:
