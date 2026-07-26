@@ -1,8 +1,8 @@
 """Package artifact smoke tests (PRD-012 Task 8.1; PRD-016 skills_pack).
 
 Builds the wheel, installs into a fresh virtualenv, and verifies the
-console script, bundled messaging hook scripts, and skills_pack catalog.
-No CURSOR_API_KEY.
+console script (including ``skills --help``), bundled messaging hook
+scripts, and skills_pack catalog. No CURSOR_API_KEY.
 """
 
 from __future__ import annotations
@@ -110,6 +110,22 @@ def _verify_setup_help(console_script: Path) -> None:
     )
 
 
+def _verify_skills_help(console_script: Path) -> None:
+    """Installed package must expose registered ``skills`` subcommands (FR-7 / Q5).
+
+    WHY: substring checks on group help can match prose in the description;
+    per-subcommand ``--help`` proves Typer registered path/list/seed.
+    """
+    group_help = _run_command([str(console_script), "skills", "--help"])
+    _assert_success(group_help, step="cursor-agent skills --help")
+    for subcommand in ("path", "list", "seed"):
+        sub_help = _run_command([str(console_script), "skills", subcommand, "--help"])
+        _assert_success(
+            sub_help,
+            step=f"cursor-agent skills {subcommand} --help",
+        )
+
+
 def _verify_packaged_hooks(python_bin: Path) -> None:
     """Installed package must ship complete messaging hook sources."""
     probe = "\n".join(
@@ -148,6 +164,9 @@ def _verify_packaged_skills_pack(python_bin: Path) -> None:
             "    f'expected installed pack under skills_pack, received {pack_root!r}'",
             ")",
             "skill_files = sorted(pack_root.rglob('SKILL.md'))",
+            "assert len(skill_files) >= 1, (",
+            "    f'expected at least one SKILL.md under skills_pack, received none at {pack_root!r}'",
+            ")",
             "assert len(skill_files) == 14, (",
             "    f'expected 14 SKILL.md under skills_pack, received {len(skill_files)}: '",
             "    f'{[str(p.relative_to(pack_root)) for p in skill_files]!r}'",
@@ -165,12 +184,13 @@ def _verify_packaged_skills_pack(python_bin: Path) -> None:
 
 
 def test_installed_wheel_exposes_cli_and_hooks(tmp_path: Path) -> None:
-    """Wheel install smoke: CLI help, setup help, hooks, and skills pack are present."""
+    """Wheel install smoke: CLI help, setup/skills help, hooks, and skills pack."""
     wheel_path = _build_wheel()
     python_bin = _create_smoke_venv(tmp_path / "smoke-venv")
     console_script = _install_wheel(python_bin, wheel_path)
     _verify_console_help(console_script)
     _verify_setup_help(console_script)
+    _verify_skills_help(console_script)
     _verify_packaged_hooks(python_bin)
     _verify_packaged_skills_pack(python_bin)
     assert MESSAGING_HOOK_FILENAMES, "expected non-empty hook filename manifest"
