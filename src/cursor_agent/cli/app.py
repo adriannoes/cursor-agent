@@ -11,6 +11,7 @@ from typing import Annotated
 
 import typer
 
+from cursor_agent.cli.auth_command import auth_app
 from cursor_agent.cli.cron_commands import cron_app
 from cursor_agent.cli.error_display import format_startup_error
 from cursor_agent.cli.exit_codes import exit_code_for_error, exit_code_for_status
@@ -45,6 +46,7 @@ app.add_typer(sessions_app, name="sessions")
 app.add_typer(cron_app, name="cron")
 app.add_typer(setup_app, name="setup")
 app.add_typer(skills_app, name="skills")
+app.add_typer(auth_app, name="auth")
 app.command("usage")(usage_command)
 
 _EMPTY_SESSIONS_MESSAGE = "No sessions found for this workspace."

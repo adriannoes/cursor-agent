@@ -33,3 +33,19 @@ class StreamCallbacks:
     on_assistant_text: Callable[[str], Awaitable[None]] | None = None
     on_tool_start: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None
     on_tool_end: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None
+
+
+@dataclass(frozen=True)
+class ModelCatalogEntry:
+    """One live catalog row from ``Cursor.models.list`` (project DTO, not SDK).
+
+    ``(recommended)`` markers belong in the CLI — not on this DTO.
+
+    Example::
+
+        ModelCatalogEntry(id="grok-4.5", display_name="Grok 4.5")
+    """
+
+    id: str
+    display_name: str
+    description: str | None = None

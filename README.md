@@ -61,6 +61,8 @@ uv run cursor-agent skills seed             # copy starter pack into .cursor/ski
 uv run cursor-agent cron list               # scheduled jobs
 uv run cursor-agent usage                   # plan usage snapshot (total / auto / API)
 uv run cursor-agent usage --json
+uv run cursor-agent auth status --no-probe  # local API key + usage OAuth (offline)
+uv run cursor-agent auth status             # same + live probes when credentials present
 uv run cursor-agent gateway                 # ~/.cursor-agent/gateway.yaml
 uv run cursor-agent gateway --config /path/to/gateway.yaml
 ```
@@ -68,6 +70,8 @@ uv run cursor-agent gateway --config /path/to/gateway.yaml
 Runtime data lives under `~/.cursor-agent/`. Overrides: [Setup — Configuration](docs/setup.md#configuration) and [.env.example](.env.example).
 
 `cursor-agent usage` hits Cursor's dashboard endpoint (best-effort; not the SDK). Auth: OAuth token from `~/.config/cursor/auth.json` (via official `agent login`) or `CURSOR_AGENT_USAGE_TOKEN` — not `CURSOR_API_KEY`.
+
+`cursor-agent auth status` reports both channels without printing secrets. Use `--no-probe` for a fast/air-gapped local check; default probes when a credential is present (API-key probe launches the SDK bridge).
 
 ## Skills
 

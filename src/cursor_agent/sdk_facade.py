@@ -5,6 +5,26 @@ This module hosts ``SdkFacade`` and ``AsyncSdkFacade``. It is an approved
 
 Stream strategy: drain ``run.messages()`` once, then ``await run.wait()``;
 never call ``run.text()`` after consuming messages (PRD-000 double-consume bug).
+
+PRD-017 Q2 LOCKED (operator CLI hygiene):
+
+- API-key probe = SDK ``AsyncCursor.me`` (async ``Cursor.me``) via
+  module-level ``probe_api_key``. Return boolean ok only; never expose
+  ``SDKUser`` identity fields (``api_key_name``, ``user_email``, names,
+  etc. — ADR-025).
+- Live model catalog = SDK ``AsyncCursor.models.list`` via module-level
+  ``list_models``. Emit project DTOs (``ModelCatalogEntry``), not raw SDK
+  types, to the CLI.
+- Both use an **ephemeral** bridge lifecycle:
+  ``AsyncClient.launch_bridge`` → single call → ``aclose()``.
+- Named timeouts live **per surface**
+  (``AUTH_PROBE_TIMEOUT_SECONDS``, ``MODELS_LIST_TIMEOUT_SECONDS``) — do not
+  reuse ``usage.DEFAULT_TIMEOUT_SECONDS`` (dashboard HTTP only).
+- Bridge launch/spawn failure is an environment fault, not auth: map via
+  existing ``map_sdk_exception`` → ``ConfigError``. WHY: ``sdk_error_mapping``
+  already maps ``cursor_sdk.errors.ConfigurationError`` (and other non-auth
+  SDK config/env faults) to ``ConfigError`` — do not invent a second mapping
+  layer in the CLI or facade.
 """
 
 from __future__ import annotations
@@ -16,6 +36,7 @@ import uuid
 from collections.abc import Sequence
 from typing import Any
 
+from cursor_agent.errors import ConfigError
 from cursor_agent.facade_logging import (
     LogContext,
     emit_mcp_servers_injected,
@@ -24,8 +45,17 @@ from cursor_agent.facade_logging import (
 )
 from cursor_agent.first_party_models import DEFAULT_AGENT_MODEL
 from cursor_agent.sdk_error_mapping import map_sdk_exception
-from cursor_agent.sdk_facade_models import RunResult, RunStatus, StreamCallbacks
-from cursor_agent.sdk_facade_protocol import SdkFacade
+from cursor_agent.sdk_facade_models import (
+    ModelCatalogEntry,
+    RunResult,
+    RunStatus,
+    StreamCallbacks,
+)
+from cursor_agent.sdk_facade_protocol import (
+    ApiKeyProber,
+    ModelCatalogReader,
+    SdkFacade,
+)
 from cursor_agent.sdk_fake import FakeSdkFacade
 from cursor_agent.sdk_retry import retry_sdk_call
 from cursor_agent.sdk_streaming import (
@@ -49,10 +79,109 @@ _extract_assistant_delta = extract_assistant_delta
 _extract_text_from_messages = extract_text_from_messages
 _map_sdk_exception = map_sdk_exception
 
+# WHY: bridge spawn + me/list RPC dwarfs the 15s usage-dashboard HTTP timeout;
+# keep probe/list budgets independent so a slow bridge does not inherit the
+# short dashboard constant (and vice versa).
+AUTH_PROBE_TIMEOUT_SECONDS: float = 45.0
+MODELS_LIST_TIMEOUT_SECONDS: float = 60.0
+
 
 # SDK import boundary (see AGENTS.md).
-from cursor_sdk import AsyncClient, LocalAgentOptions, SandboxOptions  # noqa: E402
+from cursor_sdk import (  # noqa: E402
+    AsyncClient,
+    AsyncCursor,
+    LocalAgentOptions,
+    SandboxOptions,
+)
 from cursor_sdk.types import options_to_json  # noqa: E402
+
+
+def _model_catalog_entry_from_sdk(raw: Any) -> ModelCatalogEntry:
+    """Map one SDK model row to ``ModelCatalogEntry`` (no raw SDK leak).
+
+    Raises:
+        ConfigError: When ``id`` or ``display_name`` is missing/empty so CLI
+            callers that only catch ``CursorAgentError`` stay on the domain path.
+    """
+    model_id = str(getattr(raw, "id", "") or "")
+    display_name = str(getattr(raw, "display_name", "") or "")
+    if not model_id or not display_name:
+        raise ConfigError(
+            "invalid SDK model row: received "
+            f"id={model_id!r} display_name={display_name!r}, "
+            "expected non-empty id and display_name"
+        )
+    description_raw = getattr(raw, "description", None)
+    description = str(description_raw) if description_raw else None
+    return ModelCatalogEntry(
+        id=model_id,
+        display_name=display_name,
+        description=description,
+    )
+
+
+async def probe_api_key(
+    *,
+    api_key: str,
+    timeout_seconds: float | None = None,
+) -> bool:
+    """Probe ``CURSOR_API_KEY`` via ephemeral ``AsyncCursor.me``; return bool only.
+
+    Example::
+
+        ok = await probe_api_key(api_key=os.environ["CURSOR_API_KEY"])
+    """
+    timeout = AUTH_PROBE_TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds
+    client: AsyncClient | None = None
+    try:
+        try:
+            client = await AsyncClient.launch_bridge(
+                workspace=os.getcwd(),
+                timeout=timeout,
+            )
+            # WHY: discard SDKUser identity — ADR-025 boolean-only probe surface.
+            await AsyncCursor.me(client=client, api_key=api_key)
+            return True
+        except Exception as exc:
+            # WHY: keep KeyboardInterrupt/CancelledError out of map_sdk_exception.
+            raise map_sdk_exception(exc) from exc
+    finally:
+        if client is not None:
+            await client.aclose()
+
+
+async def list_models(
+    *,
+    api_key: str,
+    timeout_seconds: float | None = None,
+) -> list[ModelCatalogEntry]:
+    """List live models via ephemeral ``AsyncCursor.models.list`` as project DTOs.
+
+    Example::
+
+        rows = await list_models(api_key=os.environ["CURSOR_API_KEY"])
+    """
+    timeout = (
+        MODELS_LIST_TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds
+    )
+    client: AsyncClient | None = None
+    try:
+        try:
+            client = await AsyncClient.launch_bridge(
+                workspace=os.getcwd(),
+                timeout=timeout,
+            )
+            raw_models = await AsyncCursor.models.list(
+                client=client,
+                api_key=api_key,
+            )
+            return [_model_catalog_entry_from_sdk(row) for row in raw_models]
+        except Exception as exc:
+            # WHY: keep KeyboardInterrupt/CancelledError out of map_sdk_exception.
+            raise map_sdk_exception(exc) from exc
+    finally:
+        if client is not None:
+            await client.aclose()
 
 
 def _resolve_sandbox_options(tool_profile: str) -> SandboxOptions | None:
@@ -433,11 +562,18 @@ class AsyncSdkFacade:
 
 
 __all__ = [
+    "AUTH_PROBE_TIMEOUT_SECONDS",
+    "ApiKeyProber",
     "AsyncSdkFacade",
     "FakeSdkFacade",
     "LogContext",
+    "MODELS_LIST_TIMEOUT_SECONDS",
+    "ModelCatalogEntry",
+    "ModelCatalogReader",
     "RunResult",
     "RunStatus",
     "SdkFacade",
     "StreamCallbacks",
+    "list_models",
+    "probe_api_key",
 ]
