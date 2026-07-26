@@ -1,7 +1,8 @@
-"""Package artifact smoke tests (PRD-012 Task 8.1).
+"""Package artifact smoke tests (PRD-012 Task 8.1; PRD-016 skills_pack).
 
 Builds the wheel, installs into a fresh virtualenv, and verifies the
-console script and bundled messaging hook scripts. No CURSOR_API_KEY.
+console script, bundled messaging hook scripts, and skills_pack catalog.
+No CURSOR_API_KEY.
 """
 
 from __future__ import annotations
@@ -130,12 +131,46 @@ def _verify_packaged_hooks(python_bin: Path) -> None:
     _assert_success(check, step="packaged hook source probe")
 
 
+def _verify_packaged_skills_pack(python_bin: Path) -> None:
+    """Installed wheel must embed skills under skills_pack, never the Python package.
+
+    WHY (PRD-016 Q5): unit tests can pass via checkout fallback; smoke must lock
+    the installed ``cursor_agent/skills_pack`` contract on a real wheel.
+    """
+    probe = "\n".join(
+        [
+            "from pathlib import Path",
+            "import cursor_agent.skills as skills_pkg",
+            "from cursor_agent.skills.pack_paths import bundled_skills_pack_root",
+            "pack_root = bundled_skills_pack_root()",
+            "assert pack_root.is_dir(), pack_root",
+            "assert pack_root.name == 'skills_pack', (",
+            "    f'expected installed pack under skills_pack, received {pack_root!r}'",
+            ")",
+            "skill_files = sorted(pack_root.rglob('SKILL.md'))",
+            "assert len(skill_files) == 14, (",
+            "    f'expected 14 SKILL.md under skills_pack, received {len(skill_files)}: '",
+            "    f'{[str(p.relative_to(pack_root)) for p in skill_files]!r}'",
+            ")",
+            "python_skills = Path(skills_pkg.__file__).resolve().parent",
+            "leaked = sorted(python_skills.rglob('SKILL.md'))",
+            "assert not leaked, (",
+            "    f'SKILL.md must not ship under cursor_agent/skills package: '",
+            "    f'{[str(p) for p in leaked]!r}'",
+            ")",
+        ]
+    )
+    check = _run_command([str(python_bin), "-c", probe])
+    _assert_success(check, step="packaged skills_pack probe")
+
+
 def test_installed_wheel_exposes_cli_and_hooks(tmp_path: Path) -> None:
-    """Wheel install smoke: CLI help, setup help, and messaging hooks are present."""
+    """Wheel install smoke: CLI help, setup help, hooks, and skills pack are present."""
     wheel_path = _build_wheel()
     python_bin = _create_smoke_venv(tmp_path / "smoke-venv")
     console_script = _install_wheel(python_bin, wheel_path)
     _verify_console_help(console_script)
     _verify_setup_help(console_script)
     _verify_packaged_hooks(python_bin)
+    _verify_packaged_skills_pack(python_bin)
     assert MESSAGING_HOOK_FILENAMES, "expected non-empty hook filename manifest"
