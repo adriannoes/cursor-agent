@@ -83,6 +83,18 @@ uv run cursor-agent cron show <job_id>
 
 Jobs are stored in `~/.cursor-agent/cron/jobs.yaml`. Full operator notes: [docs/setup.md — Cron operator notes](../docs/setup.md#cron-operator-notes).
 
+## Skills
+
+Shipped starter playbooks live under repo-root [skills/](../skills/) (see [skills/README.md](../skills/README.md)). Discovery reads project/user `.cursor/skills/` after `skills seed` or BYO paste — not the catalog tree directly.
+
+```bash
+uv run cursor-agent skills path
+uv run cursor-agent skills list
+uv run cursor-agent skills seed
+```
+
+Operator notes (destinations, trust warning, empty list until seed/BYO): [docs/setup.md — Skills operator notes](../docs/setup.md#skills-operator-notes). Do not paste full skill bodies into examples.
+
 ## Historical SDK spikes
 
 Early bridge and tool-introspection probes are preserved for provenance only:

@@ -275,13 +275,13 @@ Start from [AGENTS.md](../AGENTS.md) for repository conventions, then use this t
 
 | Document | When to use | Verify command |
 |----------|-------------|----------------|
-| [docs/setup.md](setup.md) | Install, API key, config contract, gateway index, cron operator notes | `uv run pytest -m "not integration and not package_smoke" -v` |
+| [docs/setup.md](setup.md) | Install, API key, config contract, gateway index, cron and skills operator notes | `uv run pytest -m "not integration and not package_smoke" -v` |
 | [docs/architecture.md](architecture.md) | System design, sessions, facade, tool profiles | — |
 | [docs/decisions/README.md](decisions/README.md) | Recorded architecture decisions (ADRs) | — |
 | [docs/cursor-api-key-onboarding.md](cursor-api-key-onboarding.md) | Create or export `CURSOR_API_KEY` | `test -n "$CURSOR_API_KEY" && echo "CURSOR_API_KEY is set"` |
 | [docs/telegram-gateway-onboarding.md](telegram-gateway-onboarding.md) | BotFather, `TELEGRAM_BOT_TOKEN`, gateway config, cron setup | `uv run cursor-agent gateway --config ~/.cursor-agent/gateway.yaml` (after config) |
 | [README.md](../README.md) | Project overview, first-run banner shape, usage examples | `uv run cursor-agent --help` |
-| [examples/README.md](../examples/README.md) | Product-facing CLI, gateway, profiles, memory, and cron examples | `uv run cursor-agent --help` |
+| [examples/README.md](../examples/README.md) | Product-facing CLI, gateway, profiles, memory, cron, and skills examples | `uv run cursor-agent --help` |
 | [SECURITY.md](../SECURITY.md) | Messaging threat model, `messaging` profile, hook policy | `uv run pytest tests/unit/test_messaging_profile.py -v` |
 | [.env.example](../.env.example) | Canonical `CURSOR_AGENT__*` and `CURSOR_API_KEY` placeholders | `grep CURSOR_AGENT .env.example` |
 
@@ -306,3 +306,26 @@ Scheduled jobs run inside the long-running gateway process. These notes are for 
 - `cursor-agent cron show <job_id>` — load the full prompt body for one job.
 - Jobs live in `~/.cursor-agent/cron/jobs.yaml` and reload when the file mtime changes. After fixing a YAML parse error, save or touch the file so the scheduler picks up the correction.
 - Full setup, demo flow, and delivery behavior: [Optional scheduled cron jobs](telegram-gateway-onboarding.md#9-optional-scheduled-cron-jobs) (section 9 of the gateway onboarding guide).
+
+## Skills operator notes
+
+Product skills are [AgentSkills](https://agentskills.io/specification) playbooks discovered from project and user roots — not from the repo catalog tree directly. These notes are for operators; full catalog and paste layout: [skills/README.md](../skills/README.md).
+
+**Destinations (bring-your-own):**
+
+| Scope | Path | Prefer when |
+|-------|------|-------------|
+| Project | `{cwd}/.cursor/skills/<name>/` | Team repos (check into git) |
+| User | `~/.cursor/skills/<name>/` | Personal globals across projects |
+
+Project wins over user when the same `name` exists in both (same precedence as REPL `/skills`).
+
+**BYO paste:** copy a skill folder so it contains `SKILL.md` at one of the destinations above. Third-party skills are **untrusted instructions** the agent may follow — only paste from sources you trust; prefer reading each `SKILL.md` before enabling it.
+
+**CLI:**
+
+- `cursor-agent skills path` — print absolute project and user skills roots (paste targets)
+- `cursor-agent skills list` — list discoverable skills from those roots (same as `/skills`)
+- `cursor-agent skills seed` — copy missing starters from the shipped pack into `~/.cursor/skills/<slug>/`
+
+Until you seed or paste, `/skills` and `skills list` are empty — that is expected. There is no marketplace or hub install flow; operators use seed or BYO paste only.
