@@ -52,21 +52,39 @@ def _assert_success(
     )
 
 
-def _build_wheel() -> Path:
-    """Build the project wheel and return the artifact path."""
-    build = _run_command(["uv", "build", "--wheel"])
+def _build_wheel(out_dir: Path) -> Path:
+    """Build the project wheel into ``out_dir`` and return the sole artifact path.
+
+    WHY (PR #69): ``sorted(dist/*.whl)[-1]`` can pick a stale wheel from a dirty
+    repo ``dist/``; isolate builds under a temp out-dir instead.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    build = _run_command(
+        ["uv", "build", "--wheel", "--out-dir", str(out_dir), "--clear"],
+    )
     _assert_success(build, step="uv build --wheel")
-    wheels = sorted((REPO_ROOT / "dist").glob("*.whl"))
-    assert wheels, f"expected wheel under {REPO_ROOT / 'dist'}, got none"
-    return wheels[-1]
+    wheels = sorted(out_dir.glob("*.whl"))
+    assert len(wheels) == 1, (
+        f"expected exactly one wheel under {out_dir}, "
+        f"received {len(wheels)}: {[path.name for path in wheels]!r}"
+    )
+    wheel_path = wheels[0]
+    assert wheel_path.is_relative_to(out_dir.resolve()), (
+        f"wheel must live under smoke out-dir: received {wheel_path}, expected under {out_dir}"
+    )
+    return wheel_path
 
 
 def _create_smoke_venv(venv_dir: Path) -> Path:
-    """Create an isolated virtualenv for installed-package verification."""
+    """Create an isolated virtualenv via ``uv venv`` for installed-package verification.
+
+    WHY (PR #69): ``python -m venv`` depends on ensurepip; ``uv venv`` matches
+    the project toolchain and avoids that fragility.
+    """
     if venv_dir.exists():
         shutil.rmtree(venv_dir)
-    create = _run_command([sys.executable, "-m", "venv", str(venv_dir)])
-    _assert_success(create, step="python -m venv")
+    create = _run_command(["uv", "venv", "--seed", "--clear", str(venv_dir)])
+    _assert_success(create, step="uv venv")
     python_bin = venv_dir / ("Scripts" if sys.platform == "win32" else "bin") / "python"
     assert python_bin.is_file(), f"expected venv python at {python_bin!r}"
     return python_bin
@@ -182,7 +200,7 @@ def _verify_packaged_skills_pack(python_bin: Path) -> None:
 
 def test_installed_wheel_exposes_cli_and_hooks(tmp_path: Path) -> None:
     """Wheel install smoke: CLI help, setup/skills help, hooks, and skills pack."""
-    wheel_path = _build_wheel()
+    wheel_path = _build_wheel(tmp_path / "dist")
     python_bin = _create_smoke_venv(tmp_path / "smoke-venv")
     console_script = _install_wheel(python_bin, wheel_path)
     _verify_console_help(console_script)
