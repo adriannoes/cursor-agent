@@ -20,21 +20,36 @@ from cursor_agent.config.yaml_io import expand_vars, load_yaml_dict
 from cursor_agent.errors import ConfigError
 from cursor_agent.first_party_models import DEFAULT_AGENT_MODEL
 
-DEFAULT_GATEWAY_CONFIG_PATH = Path.home() / ".cursor-agent" / "gateway.yaml"
 MESSAGING_TOOL_PROFILE: ToolProfile = "messaging"
 
 _DEFAULT_SETTING_SOURCES: list[str] = ["project", "user"]
 _DEFAULT_RUNTIME_MODE: RuntimeMode = "local"
 _REDACTED_SECRET = "[REDACTED]"
 _SENSITIVE_PLATFORM_FIELDS = frozenset({"bot_token"})
-# WHY: PyYAML YAMLError embeds the offending line (e.g. ``bot_token: "sekret``)
-# before Pydantic can sanitize — redact YAML key values in ConfigError text.
+# WHY: PyYAML YAMLError embeds the offending line (e.g. ``bot_token: "first second``)
+# before Pydantic can sanitize — redact the remainder of the line after the key.
 _BOT_TOKEN_YAML_VALUE_RE = re.compile(
-    r"(?P<prefix>\bbot_token\s*:\s*)(?P<value>\S+)",
+    r"(?P<prefix>\bbot_token\s*:\s*)(?P<value>[^\n]*)",
     flags=re.IGNORECASE,
 )
 # Telegram bot tokens look like ``123456789:AAH...``; redact if they leak raw.
 _TELEGRAM_BOT_TOKEN_SHAPE_RE = re.compile(r"\b\d{8,}:[A-Za-z0-9_-]{20,}\b")
+
+
+def default_gateway_config_path() -> Path:
+    """Return ``~/.cursor-agent/gateway.yaml`` using the current process HOME.
+
+    Example::
+
+        path = default_gateway_config_path()
+        assert path.name == "gateway.yaml"
+    """
+    return Path.home() / ".cursor-agent" / "gateway.yaml"
+
+
+# Backward-compatible import-time alias; prefer :func:`default_gateway_config_path`
+# so HOME monkeypatches apply without patching every importer.
+DEFAULT_GATEWAY_CONFIG_PATH = default_gateway_config_path()
 
 
 class TelegramPlatformConfig(BaseModel):
@@ -74,25 +89,6 @@ def _loc_includes_sensitive_field(loc: Sequence[object]) -> bool:
     )
 
 
-def _sanitize_validation_error_details(
-    errors: Sequence[Mapping[str, Any]],
-) -> list[dict[str, Any]]:
-    """Redact secret ``input`` values from Pydantic ValidationError error dicts.
-
-    WHY: ``exc.errors()`` embeds raw ``input`` even when received-data is redacted;
-    invalid shapes (lists, nested values) must not leak via ConfigError messages.
-    """
-    sanitized: list[dict[str, Any]] = []
-    for error in errors:
-        item = dict(error)
-        loc = item.get("loc", ())
-        if isinstance(loc, Sequence) and _loc_includes_sensitive_field(loc):
-            if "input" in item:
-                item["input"] = _REDACTED_SECRET
-        sanitized.append(item)
-    return sanitized
-
-
 def _redact_gateway_config_data(data: object) -> object:
     """Return a copy of raw gateway YAML data with secret fields redacted.
 
@@ -112,16 +108,39 @@ def _redact_gateway_config_data(data: object) -> object:
     return data
 
 
-def _redact_secrets_in_error_text(message: str) -> str:
-    """Redact secret-bearing substrings from gateway ConfigError text.
+def _sanitize_validation_error_details(
+    errors: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Redact secret values from Pydantic ValidationError error dicts.
 
-    Covers YAML parse errors that echo ``bot_token: <value>`` and known
-    Telegram bot-token shapes, without altering unrelated YAML diagnostics.
+    WHY: ``exc.errors()`` embeds raw ``input`` even when received-data is
+    redacted. For ``extra_forbidden`` on ``platforms.evil``, ``loc`` does not
+    contain ``bot_token`` but ``input`` is ``{'bot_token': '<secret>'}`` —
+    recurse into every ``input`` value, not only when ``loc`` names the field.
+    """
+    sanitized: list[dict[str, Any]] = []
+    for error in errors:
+        item = dict(error)
+        loc = item.get("loc", ())
+        if "input" in item:
+            if isinstance(loc, Sequence) and _loc_includes_sensitive_field(loc):
+                item["input"] = _REDACTED_SECRET
+            else:
+                item["input"] = _redact_gateway_config_data(item["input"])
+        sanitized.append(item)
+    return sanitized
+
+
+def redact_gateway_secrets_in_text(message: str) -> str:
+    """Redact secret-bearing substrings from gateway ConfigError / CLI text.
+
+    Covers YAML parse errors that echo ``bot_token: <value>`` (remainder of
+    line, including spaces) and known Telegram bot-token shapes.
 
     Example::
 
-        safe = _redact_secrets_in_error_text('bot_token: "sekretTok9')
-        assert "sekretTok9" not in safe
+        safe = redact_gateway_secrets_in_text('bot_token: "first second')
+        assert "second" not in safe
     """
     redacted = _BOT_TOKEN_YAML_VALUE_RE.sub(
         rf"\g<prefix>{_REDACTED_SECRET}",
@@ -140,22 +159,24 @@ def enabled_platform_names(gateway_config: GatewayConfig) -> list[str]:
 
 def load_gateway_config(config_path: Path | None = None) -> GatewayConfig:
     """Load and validate gateway configuration from YAML."""
-    path = config_path if config_path is not None else DEFAULT_GATEWAY_CONFIG_PATH
+    path = config_path if config_path is not None else default_gateway_config_path()
     try:
         data = expand_vars(load_yaml_dict(path, config_label="gateway config"))
     except ConfigError as exc:
-        raise ConfigError(_redact_secrets_in_error_text(str(exc))) from exc
+        # WHY: do not chain unsanitized YAML/ConfigError — traceback.format_exception
+        # would re-expose bot_token from __cause__ (ADR-025).
+        raise ConfigError(redact_gateway_secrets_in_text(str(exc))) from None
     try:
         return GatewayConfig.model_validate(data)
     except ValidationError as exc:
         safe_errors = _sanitize_validation_error_details(exc.errors(include_url=False))
         safe_data = _redact_gateway_config_data(data)
         raise ConfigError(
-            _redact_secrets_in_error_text(
+            redact_gateway_secrets_in_text(
                 f"invalid gateway configuration: {safe_errors!r}, "
                 f"received data {safe_data!r}"
             ),
-        ) from exc
+        ) from None
 
 
 def to_cursor_agent_config(gateway_config: GatewayConfig) -> CursorAgentConfig:

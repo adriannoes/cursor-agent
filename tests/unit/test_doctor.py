@@ -535,7 +535,11 @@ def test_cli_doctor_json_omits_secrets(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``doctor --json`` is machine-readable and never echoes secrets."""
+    """``doctor --json`` is machine-readable and never echoes secrets.
+
+    Exit may be 1 when a present messaging gateway makes hooks required —
+    secrecy still holds in the JSON payload.
+    """
     workspace = _prepare_doctor_env(
         tmp_path,
         monkeypatch,
@@ -546,10 +550,41 @@ def test_cli_doctor_json_omits_secrets(
     _write_minimal_gateway_yaml(gateway_path, workspace=workspace)
 
     result = _invoke_doctor("--json", "--gateway-config", str(gateway_path))
-    assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     assert isinstance(data, dict)
     serialized = json.dumps(data)
     assert _PLACEHOLDER_API_KEY not in serialized
     assert "oauth-secret-json-never-print" not in serialized
     assert _PLACEHOLDER_BOT_TOKEN not in serialized
+    assert _PLACEHOLDER_API_KEY not in result.output
+    assert _PLACEHOLDER_BOT_TOKEN not in result.output
+
+
+def test_cli_doctor_hooks_use_gateway_workspace_when_gateway_config_present(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Present gateway.yaml drives hooks profile even if agent profile is coding.
+
+    A coding agent config must not report hooks as "not required" when the
+    operator points doctor at a messaging gateway with incomplete hooks.
+    """
+    agent_workspace = _prepare_doctor_env(
+        tmp_path,
+        monkeypatch,
+        tool_profile="coding",
+    )
+    gateway_workspace = tmp_path / "gateway_ws"
+    gateway_workspace.mkdir()
+    gateway_path = tmp_path / "gateway.yaml"
+    _write_minimal_gateway_yaml(gateway_path, workspace=gateway_workspace)
+
+    result = _invoke_doctor("--gateway-config", str(gateway_path))
+
+    assert result.exit_code == 1, result.output
+    lower = result.output.lower()
+    assert "error:" in lower
+    assert "messaging hooks" in lower or "hooks" in lower
+    assert "not required for profile coding" not in result.output
+    # Agent workspace must not be the sole hooks target when gateway differs.
+    assert agent_workspace != gateway_workspace

@@ -6,7 +6,9 @@ from cursor_agent.gateway.config import (
     GatewayConfig,
     PlatformsConfig,
     TelegramPlatformConfig,
+    default_gateway_config_path,
     load_gateway_config,
+    redact_gateway_secrets_in_text,
     resolve_gateway_startup_config,
     to_cursor_agent_config,
 )
@@ -17,7 +19,9 @@ __all__ = [
     "MESSAGING_TOOL_PROFILE",
     "PlatformsConfig",
     "TelegramPlatformConfig",
+    "default_gateway_config_path",
     "load_gateway_config",
+    "redact_gateway_secrets_in_text",
     "resolve_gateway_startup_config",
     "to_cursor_agent_config",
 ]

@@ -81,13 +81,15 @@ def test_default_gateway_config_path() -> None:
 
 def test_load_gateway_config_uses_default_path_when_missing(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    """Missing default file yields validation error for required workspace."""
+    """Missing default file yields ConfigError for the expected path."""
+    missing = tmp_path / "nonexistent" / "gateway.yaml"
     monkeypatch.setattr(
-        "cursor_agent.gateway.config.DEFAULT_GATEWAY_CONFIG_PATH",
-        Path("/nonexistent/gateway.yaml"),
+        "cursor_agent.gateway.config.default_gateway_config_path",
+        lambda: missing,
     )
-    with pytest.raises(ConfigError, match="workspace"):
+    with pytest.raises(ConfigError, match="gateway"):
         load_gateway_config()
 
 

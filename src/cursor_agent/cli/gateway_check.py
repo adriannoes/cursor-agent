@@ -14,10 +14,10 @@ import typer
 
 from cursor_agent.errors import ConfigError
 from cursor_agent.gateway.config import (
-    DEFAULT_GATEWAY_CONFIG_PATH,
-    _redact_secrets_in_error_text,
+    default_gateway_config_path,
     enabled_platform_names,
     load_gateway_config,
+    redact_gateway_secrets_in_text,
     resolve_gateway_startup_config,
 )
 from cursor_agent.platforms.factory import validate_telegram_bot_token
@@ -64,8 +64,8 @@ def collect_gateway_check_lines(config_path: Path) -> tuple[list[str], bool]:
         # WHY: load/resolve accept empty bot_token strings; startup factory does not.
         validate_telegram_bot_token(gateway_config)
     except ConfigError as exc:
-        # Defense in depth: redact even if an upstream ConfigError skipped sanitize.
-        safe_message = _redact_secrets_in_error_text(str(exc))
+        # Defense in depth: load_gateway_config already sanitizes; keep public API.
+        safe_message = redact_gateway_secrets_in_text(str(exc))
         return ([f"error: gateway.yaml — {safe_message}"], True)
 
     lines: list[str] = [f"ok: gateway.yaml — {path}"]
@@ -100,7 +100,7 @@ def gateway_check_command(config: GatewayConfigPathOpt = None) -> None:
 
         cursor-agent gateway check --config ~/.cursor-agent/gateway.yaml
     """
-    path = DEFAULT_GATEWAY_CONFIG_PATH if config is None else config
+    path = default_gateway_config_path() if config is None else config
     lines, failed = collect_gateway_check_lines(path)
     for line in lines:
         typer.echo(line)

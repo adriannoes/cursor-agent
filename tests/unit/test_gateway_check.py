@@ -42,7 +42,6 @@ from cursor_agent.cli.gateway_check import (
     GATEWAY_ABSENT_OK_LINE,
     collect_gateway_check_lines,
 )
-from cursor_agent.gateway import DEFAULT_GATEWAY_CONFIG_PATH
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
 _PLACEHOLDER_BOT_TOKEN = "telegram-bot-token-secret-never-print-gw-check"
@@ -274,15 +273,16 @@ def test_collect_gateway_check_lines_malformed_yaml_redacts_bot_token(
     Unclosed quotes keep ``bot_token: <secret>`` in PyYAML's exception text,
     bypassing Pydantic sanitization — gateway load/check must redact it.
     """
+    import traceback
+
     from cursor_agent.errors import ConfigError
     from cursor_agent.gateway.config import load_gateway_config
 
     workspace = tmp_path / "ws"
     workspace.mkdir()
     config_path = tmp_path / "gateway.yaml"
-    # Keep short so PyYAML's error snippet includes the full scalar (not truncated).
-    secret = "sekretTok9"
-    # Unclosed quote: YAMLError message includes the offending scalar line.
+    # Spaced unclosed quote: regex must redact through end-of-line, not first token.
+    secret = "first second third-secret"
     config_path.write_text(
         "\n".join(
             [
@@ -303,16 +303,77 @@ def test_collect_gateway_check_lines_malformed_yaml_redacts_bot_token(
     with pytest.raises(ConfigError) as exc_info:
         load_gateway_config(config_path=config_path)
     assert secret not in str(exc_info.value)
+    assert "second" not in str(exc_info.value)
+    assert "third-secret" not in str(exc_info.value)
+    # ADR-025: do not chain unsanitized YAML/ConfigError on __cause__.
+    assert exc_info.value.__cause__ is None
+    formatted = "".join(traceback.format_exception(exc_info.value))
+    assert secret not in formatted
+    assert "third-secret" not in formatted
 
     lines, failed = collect_gateway_check_lines(config_path)
     assert failed is True
     joined = "\n".join(lines)
     assert any(line.startswith("error: gateway.yaml —") for line in lines)
     assert secret not in joined
+    assert "third-secret" not in joined
 
     result = _invoke_gateway_check("--config", str(config_path))
     assert result.exit_code == 1, result.output
     assert secret not in result.output
+    assert "third-secret" not in result.output
+
+
+def test_collect_gateway_check_lines_extra_platform_nested_bot_token_redacted(
+    tmp_path: Path,
+) -> None:
+    """extra_forbidden platform block with nested bot_token must not leak in errors.
+
+    Pydantic loc is ``('platforms', 'evil')`` while input is
+    ``{'bot_token': '<secret>'}`` — sanitizer must recurse into input mappings.
+    """
+    import traceback
+
+    from cursor_agent.errors import ConfigError
+    from cursor_agent.gateway.config import load_gateway_config
+
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    config_path = tmp_path / "gateway.yaml"
+    secret = "nested-secret-never-print"
+    config_path.write_text(
+        "\n".join(
+            [
+                f"workspace: {workspace}",
+                "tool_profile: messaging",
+                "platforms:",
+                "  evil:",
+                f"    bot_token: {secret}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError) as exc_info:
+        load_gateway_config(config_path=config_path)
+    assert secret not in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+    assert secret not in "".join(traceback.format_exception(exc_info.value))
+
+    lines, failed = collect_gateway_check_lines(config_path)
+    assert failed is True
+    assert secret not in "\n".join(lines)
+
+    result = _invoke_gateway_check("--config", str(config_path))
+    assert result.exit_code == 1, result.output
+    assert secret not in result.output
+
+    doctor = CliRunner().invoke(
+        app,
+        ["doctor", "--json", "--gateway-config", str(config_path)],
+    )
+    assert secret not in doctor.output
 
 
 # ---------------------------------------------------------------------------
@@ -398,31 +459,18 @@ def test_cli_gateway_check_default_path_uses_home_cursor_agent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """With no ``--config``, check uses the default gateway YAML path.
+    """With no ``--config``, check uses call-time ``default_gateway_config_path``.
 
-    ``DEFAULT_GATEWAY_CONFIG_PATH`` is import-time (real HOME); patch the
-    constant the CLI / loader consult when ``--config`` is omitted.
+    HOME is resolved at call time so a single env monkeypatch covers loaders
+    without patching every importer of the import-time constant.
     """
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
     workspace = tmp_path / "ws"
     workspace.mkdir()
-    default_path = tmp_path / "home" / ".cursor-agent" / "gateway.yaml"
+    default_path = home / ".cursor-agent" / "gateway.yaml"
     _write_minimal_gateway_yaml(default_path, workspace=workspace)
-    monkeypatch.setattr(
-        "cursor_agent.gateway.config.DEFAULT_GATEWAY_CONFIG_PATH",
-        default_path,
-    )
-    # CLI may re-export or import the constant; patch if present after 4.2.
-    monkeypatch.setattr(
-        "cursor_agent.cli.gateway_check.DEFAULT_GATEWAY_CONFIG_PATH",
-        default_path,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        "cursor_agent.cli.app.DEFAULT_GATEWAY_CONFIG_PATH",
-        default_path,
-        raising=False,
-    )
-    assert DEFAULT_GATEWAY_CONFIG_PATH.name == "gateway.yaml"
 
     result = _invoke_gateway_check()
 

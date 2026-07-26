@@ -29,16 +29,15 @@ from cursor_agent.cli.setup_runtime import (
     resolve_env_file,
 )
 from cursor_agent.config.loader import CursorAgentConfig, load_config
-from cursor_agent.errors import CursorAgentError
+from cursor_agent.errors import ConfigError, CursorAgentError
+from cursor_agent.gateway.config import (
+    default_gateway_config_path,
+    load_gateway_config,
+)
 from cursor_agent.messaging_hooks import (
     MessagingHooksStatusReport,
     messaging_hooks_status,
 )
-
-
-def _default_gateway_config_path() -> Path:
-    """Return ``~/.cursor-agent/gateway.yaml`` using current ``HOME``."""
-    return Path.home() / ".cursor-agent" / "gateway.yaml"
 
 
 def _resolve_doctor_config(config_path: Path) -> CursorAgentConfig | None:
@@ -52,10 +51,33 @@ def _resolve_doctor_config(config_path: Path) -> CursorAgentConfig | None:
 def _workspace_and_profile(
     config: CursorAgentConfig | None,
 ) -> tuple[Path, str]:
-    """Return workspace cwd and tool_profile for hooks status."""
+    """Return agent workspace cwd and tool_profile for hooks status fallback."""
     if config is None:
         return Path.cwd(), "coding"
     return Path(config.runtime.local.cwd), str(config.tool_profile)
+
+
+def _hooks_workspace_and_profile(
+    *,
+    agent_config: CursorAgentConfig | None,
+    gateway_path: Path,
+) -> tuple[Path, str]:
+    """Prefer gateway.yaml workspace/profile when that file is present.
+
+    WHY: operators often keep a coding-profile agent config while running a
+    messaging gateway. Hooks severity must follow the gateway perspective when
+    ``--gateway-config`` (or the default path) points at an existing file, so
+    incomplete messaging hooks are not reported as "not required".
+    """
+    agent_workspace, agent_profile = _workspace_and_profile(agent_config)
+    resolved = gateway_path.expanduser()
+    if not resolved.is_file():
+        return agent_workspace, agent_profile
+    try:
+        gateway_config = load_gateway_config(resolved)
+    except ConfigError:
+        return agent_workspace, agent_profile
+    return Path(gateway_config.workspace).expanduser(), str(gateway_config.tool_profile)
 
 
 def _auth_human_lines(report: AuthChannelReport) -> list[str]:
@@ -148,7 +170,10 @@ def doctor_command(
 ) -> None:
     """Aggregate setup, auth, messaging hooks, and gateway offline checks.
 
-    Never prints API keys, OAuth tokens, or Telegram ``bot_token`` (ADR-025).
+    Hooks status uses the gateway YAML workspace/profile when
+    ``--gateway-config`` (or the default path) exists; otherwise it falls back
+    to the agent config. Never prints API keys, OAuth tokens, or Telegram
+    ``bot_token`` (ADR-025).
     """
     config_path = resolve_config_path(None)
     env_file = resolve_env_file(None)
@@ -157,18 +182,20 @@ def doctor_command(
         env_file=env_file,
     )
     config = _resolve_doctor_config(config_path)
-    workspace, tool_profile = _workspace_and_profile(config)
 
     auth_report = collect_auth_channel_report(probe=probe)
     auth_lines = _auth_human_lines(auth_report)
 
+    gateway_path = (
+        gateway_config if gateway_config is not None else default_gateway_config_path()
+    )
+    workspace, tool_profile = _hooks_workspace_and_profile(
+        agent_config=config,
+        gateway_path=gateway_path,
+    )
     hooks_report = messaging_hooks_status(
         workspace=workspace,
         tool_profile=tool_profile,
-    )
-
-    gateway_path = (
-        gateway_config if gateway_config is not None else _default_gateway_config_path()
     )
     gateway_lines, gateway_failed = _collect_gateway_section(gateway_path)
 
