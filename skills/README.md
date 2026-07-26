@@ -2,7 +2,7 @@
 
 Starter [AgentSkills](https://agentskills.io/specification) shipped with cursor-agent. The catalog is **visible in git** under this `skills/` tree (and embedded in the wheel).
 
-**How to use today:** **paste** a skill folder into project or user `.cursor/skills/` (bring-your-own). Playbooks are **not** auto-discovered from this tree — empty `/skills` (and an empty skills list) until you paste (or later seed) is expected.
+**How to use today:** **paste** a skill folder into project or user `.cursor/skills/` (bring-your-own), or run `cursor-agent skills seed` for the starter pack. Playbooks are **not** auto-discovered from this tree — empty `/skills` (and an empty skills list) until you paste or seed is expected.
 
 ## Paste destinations (bring-your-own)
 

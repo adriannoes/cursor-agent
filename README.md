@@ -76,7 +76,8 @@ Get started:
   - describe what you want, in plain language
   - /help            list commands
   - /new             start a fresh session
-  - /skills          list available workspace skills
+  - /skills          list skills (also: skills list)
+  - skills seed      optional starters; skills path
   - sessions list    see past sessions
 
   Setup & docs: docs/setup.md
