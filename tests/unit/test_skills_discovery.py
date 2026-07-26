@@ -856,8 +856,44 @@ def test_seed_staging_leftover_is_not_discovered(tmp_path: Path) -> None:
     assert "Phantom" not in skills[0].description
 
 
+def test_seed_backup_leftover_is_not_discovered(tmp_path: Path) -> None:
+    """Dot-prefixed backup leftovers must not collide with a real skill slug.
+
+    WHY (PR #70): seed also creates ``.seed-backup-*`` siblings during force;
+    same skip policy as staging leftovers.
+    """
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    user_root = tmp_path / "user-skills"
+    user_root.mkdir()
+    _write_skill_md(
+        user_root,
+        "plan",
+        name="plan",
+        description="Real seeded plan skill.",
+        body="Plan work carefully.",
+    )
+    backup_dir = user_root / ".seed-backup-plan-cafebabe"
+    backup_dir.mkdir()
+    (backup_dir / "SKILL.md").write_text(
+        "---\nname: plan\ndescription: Phantom backup leftover.\n---\n\nbackup",
+        encoding="utf-8",
+    )
+
+    discovery = _discovery_from_fixtures(
+        tmp_path,
+        workspace=workspace,
+        user_skills_root=user_root,
+    )
+    skills = discovery.list_skills()
+
+    assert [skill.name for skill in skills] == ["plan"]
+    assert skills[0].path == "plan/SKILL.md"
+    assert "Phantom" not in skills[0].description
+
+
 def test_symlinked_skills_root_is_skipped(tmp_path: Path) -> None:
-    """A symlinked skills root is ignored (aligned with seed destination policy).
+    """A symlinked project skills root is ignored (aligned with seed policy).
 
     WHY (PR #69 review): seed refuses symlink destinations; discovery must not
     follow a symlinked ``.cursor/skills`` as a normal root.
@@ -881,6 +917,35 @@ def test_symlinked_skills_root_is_skipped(tmp_path: Path) -> None:
         tmp_path,
         workspace=workspace,
         user_skills_root=tmp_path / "user-skills",
+    )
+
+    assert discovery.list_skills() == []
+
+
+def test_symlinked_user_skills_root_is_skipped(tmp_path: Path) -> None:
+    """A symlinked user skills root is ignored (same policy as project roots).
+
+    WHY (PR #70): documents that override_user_skills / home user root also
+    soft-skips when the path itself is a symlink.
+    """
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    real_user_skills = tmp_path / "real-user-skills"
+    real_user_skills.mkdir()
+    _write_skill_md(
+        real_user_skills,
+        "leaked-user",
+        name="leaked-user",
+        description="Behind a user symlink root.",
+        body="Should not be discovered.",
+    )
+    user_link = tmp_path / "user-skills-link"
+    user_link.symlink_to(real_user_skills)
+
+    discovery = _discovery_from_fixtures(
+        tmp_path,
+        workspace=workspace,
+        user_skills_root=user_link,
     )
 
     assert discovery.list_skills() == []

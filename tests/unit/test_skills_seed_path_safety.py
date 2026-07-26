@@ -204,36 +204,41 @@ def test_seed_bundled_skills_refuses_file_destination_root(
 
 def test_seed_bundled_skills_mkdir_oserror_maps_to_config_error(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Unwritable destination mkdir must raise ConfigError, not a raw traceback.
 
     WHY (mega-review): PermissionError on ``destination_root.mkdir`` previously
     escaped as an uncaught OSError through the CLI.
+
+    WHY (PR #70): use chmod on the parent instead of class-wide Path.mkdir
+    monkeypatch (review pattern #17) — PosixPath.mkdir is also instance-readonly.
     """
     pack_root: Path = mini_pack_with_category_tree(tmp_path / "mini-pack")
-    destination_root: Path = tmp_path / "dest" / "skills"
-
-    def _raise_permission(self: Path, *args: object, **kwargs: object) -> None:
-        raise PermissionError(f"[Errno 1] Operation not permitted: {self}")
-
-    monkeypatch.setattr(Path, "mkdir", _raise_permission)
-
-    with pytest.raises(ConfigError) as exc_info:
-        seed_bundled_skills(
-            pack_root=pack_root,
-            destination_root=destination_root,
-            force=False,
-        )
+    parent: Path = tmp_path / "ro-parent"
+    parent.mkdir()
+    destination_root: Path = parent / "skills"
+    parent.chmod(0o555)
+    try:
+        with pytest.raises(ConfigError) as exc_info:
+            seed_bundled_skills(
+                pack_root=pack_root,
+                destination_root=destination_root,
+                force=False,
+            )
+    finally:
+        parent.chmod(0o755)
 
     message: str = str(exc_info.value)
     assert str(destination_root) in message, (
         f"mkdir failure must include destination path {destination_root!r}, "
         f"received {message!r}"
     )
-    assert "Operation not permitted" in message or "PermissionError" in message, (
-        f"error must include OS reason, received {message!r}"
-    )
+    assert (
+        "PermissionError" in message
+        or "Operation not permitted" in message
+        or "Permission denied" in message
+        or "Errno" in message
+    ), f"error must include OS reason, received {message!r}"
 
 
 def test_seed_bundled_skills_missing_pack_root_errors_clearly(

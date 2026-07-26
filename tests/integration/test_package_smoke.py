@@ -69,7 +69,8 @@ def _build_wheel(out_dir: Path) -> Path:
         f"received {len(wheels)}: {[path.name for path in wheels]!r}"
     )
     wheel_path = wheels[0]
-    assert wheel_path.is_relative_to(out_dir.resolve()), (
+    # WHY: resolve both sides so a symlinked out_dir cannot false-fail (PR #70).
+    assert wheel_path.resolve().is_relative_to(out_dir.resolve()), (
         f"wheel must live under smoke out-dir: received {wheel_path}, expected under {out_dir}"
     )
     return wheel_path
