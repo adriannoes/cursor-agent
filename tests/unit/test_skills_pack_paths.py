@@ -1,4 +1,4 @@
-"""Unit tests for bundled pack and project/user skills roots (PRD-016, FR-1, FR-3)."""
+"""Unit tests for bundled pack and project/user skills roots."""
 
 from __future__ import annotations
 
