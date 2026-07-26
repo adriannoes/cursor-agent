@@ -92,7 +92,7 @@ def test_welcome_logo_is_ascii_wordmark_within_prd_width() -> None:
 
 
 def test_first_commands_hint_includes_onboarding_discoverability_items() -> None:
-    """Shared first-command hint lists the six PRD onboarding bullets."""
+    """Shared first-command hint lists the PRD onboarding discoverability bullets."""
     assert "plain language" in FIRST_COMMANDS_HINT
     assert "/help" in FIRST_COMMANDS_HINT
     assert "/new" in FIRST_COMMANDS_HINT

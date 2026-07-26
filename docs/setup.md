@@ -325,7 +325,7 @@ Project wins over user when the same `name` exists in both (same precedence as R
 **CLI:**
 
 - `cursor-agent skills path` — print absolute project and user skills roots (paste targets)
-- `cursor-agent skills list` — list discoverable skills from those roots (same as `/skills`)
-- `cursor-agent skills seed` — copy missing starters from the shipped pack into `~/.cursor/skills/<slug>/`
+- `cursor-agent skills list` — list discoverable skills from those roots (same as `/skills`); only roots enabled in `runtime.local.setting_sources` (default: project + user)
+- `cursor-agent skills seed` — copy missing starters from the shipped pack into `~/.cursor/skills/<slug>/` (skips existing; use `--force` to overwrite)
 
-Until you seed or paste, `/skills` and `skills list` are empty — that is expected. There is no marketplace or hub install flow; operators use seed or BYO paste only.
+Until you seed or paste, `/skills` and `skills list` are empty — that is expected. There is no marketplace or hub install flow; operators use seed or BYO paste only. Details: [skills/README.md](../skills/README.md).
