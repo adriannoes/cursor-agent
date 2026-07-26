@@ -25,6 +25,7 @@ Use when the operator wants a scannable brief for a decision: a topic name, past
 ## Tools to prefer
 
 - Tool profile: `full` when a web refresh helps; otherwise SDK-native reads of pasted/local notes.
+- Prefer `full` only on trusted **local** CLI. Never switch gateways/bots off `messaging` (SECURITY.md / ADR-029).
 - Brave (or equivalent) search MCP for optional refresh.
 - Skip Playwright unless a single critical page will not yield text via fetch/search snippets.
 

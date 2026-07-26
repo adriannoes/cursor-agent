@@ -1,6 +1,6 @@
 ---
 name: build-skill
-description: Author or adapt a pasted AgentSkills folder for cursor-agent — frontmatter, denylist, size cap, and verify with skills list.
+description: Author or adapt a pasted AgentSkills folder for cursor-agent — frontmatter, reserved names, size cap, and verify with skills list.
 ---
 
 # Build skill
@@ -20,7 +20,7 @@ Use when the operator is writing a new AgentSkill or adapting a third-party `SKI
    ---
    ```
    Frontmatter `name` is what `/my-skill` and discovery use; the folder name should match but discovery keys off `name`.
-3. **Avoid ADR-013 denylist collisions** — do not use these reserved names: `help`, `quit`, `new`, `reset`, `resume`, `stop`, `model`, `retry`, `usage`, `compress`, `skills`, `memory`, `personality`, `title`.
+3. **Avoid reserved slash-command names** — do not use: `help`, `quit`, `new`, `reset`, `resume`, `stop`, `model`, `retry`, `usage`, `compress`, `skills`, `memory`, `personality`, `title`.
 4. Keep the body ≤ **32 KB**. Prefer sections: When to use → Procedure → Tools to prefer → Pitfalls → Verification.
 5. Paste under project `.cursor/skills/<name>/SKILL.md` or user `~/.cursor/skills/<name>/SKILL.md` (project wins on name clash).
 6. Verify: `cursor-agent skills list` shows the skill. Invoke with `/<name>` in the REPL when listed.
@@ -35,12 +35,12 @@ Use when the operator is writing a new AgentSkill or adapting a third-party `SKI
 
 - `name` colliding with a reserved slash command (skill will not route).
 - Folder name ≠ frontmatter `name` causing operator confusion.
-- Body over 32 KB (discovery rejects oversized skills).
+- Body over 32 KB — discovery **truncates** oversized content at the 32 KB cap; it does not reject the file. Prefer keeping skills well under the limit so nothing important is cut.
 - Pasting unreviewed third-party content that exfiltrates data or weakens security posture.
 
 ## Verification
 
 - `cursor-agent skills list` includes the new `name` and description.
-- `name` is not on the ADR-013 denylist.
+- `name` is not a reserved slash-command name.
 - File is under project or user `.cursor/skills/<name>/` and ≤ 32 KB.
 - Operator was warned if the skill came from a third party.

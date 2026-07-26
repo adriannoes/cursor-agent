@@ -62,6 +62,24 @@ def test_bundled_skills_pack_root_prefers_packaged_over_checkout(
     )
 
 
+def test_bundled_skills_pack_root_falls_back_to_checkout_when_packaged_missing(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """When packaged skills_pack is absent, resolve checkout skills/ (dual resolve)."""
+    packaged: Path = tmp_path / "missing_packaged"
+    checkout: Path = tmp_path / "checkout_skills"
+    checkout.mkdir()
+    monkeypatch.setattr(pack_paths, "_packaged_skills_pack_dir", lambda: packaged)
+    monkeypatch.setattr(pack_paths, "_checkout_skills_pack_dir", lambda: checkout)
+
+    resolved: Path = bundled_skills_pack_root()
+    assert resolved == checkout.resolve(), (
+        f"expected checkout fallback, received {resolved!r}, "
+        f"expected {checkout.resolve()!r}"
+    )
+
+
 def test_bundled_skills_pack_root_raises_when_both_sources_missing(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -103,8 +121,8 @@ def test_skill_discovery_from_config_uses_pack_paths_roots(
 ) -> None:
     """Discovery must build project/user roots via pack_paths (single source of truth).
 
-    WHY (review C.7): duplicated ``.cursor/skills`` literals in discovery.py would
-    drift from ``skills path`` / seed destinations once CLI lands.
+    WHY: discovery, ``skills path``, and seed must share one root helper so BYO
+    destinations cannot drift across surfaces.
     """
     workspace: Path = tmp_path / "workspace"
     home: Path = tmp_path / "home"

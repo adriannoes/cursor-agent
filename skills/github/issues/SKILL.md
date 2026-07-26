@@ -25,6 +25,7 @@ Use when the operator wants to triage an issue backlog, file a new bug/feature r
 ## Tools to prefer
 
 - Tool profile: `full` + GitHub MCP (preferred).
+- Prefer `full` only on trusted **local** CLI. Never switch gateways/bots off `messaging` (SECURITY.md / ADR-029).
 - `gh issue` as fallback; otherwise return copy-pasteable markdown.
 - Do not invent issue numbers, labels, or project board state you did not fetch.
 

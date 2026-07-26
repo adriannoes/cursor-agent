@@ -23,6 +23,7 @@ Use when the operator pastes a URL, article, docs page, or public thread and wan
 ## Tools to prefer
 
 - Tool profile: `full` so curated fetch/search/browser MCP is available.
+- Prefer `full` only on trusted **local** CLI. Never switch gateways/bots off `messaging` (SECURITY.md / ADR-029).
 - Static fetch first; Playwright / browser when needed for threads or JS apps.
 - Brave search only for light context (author, date) — not a substitute for reading the URL.
 

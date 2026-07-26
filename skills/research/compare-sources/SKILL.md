@@ -21,6 +21,7 @@ Use when the operator names two or more sources (URLs, docs, or pasted excerpts)
 ## Tools to prefer
 
 - Tool profile: `full` + Brave (or equivalent) search when discovery or corroboration is needed.
+- Prefer `full` only on trusted **local** CLI. Never switch gateways/bots off `messaging` (SECURITY.md / ADR-029).
 - Playwright / browser when a source is JS-heavy or behind a soft gate the fetch cannot clear.
 - Plain fetch/read for static pages and pasted text.
 

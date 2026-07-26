@@ -20,6 +20,7 @@ Use when the operator wants hands-on exploratory testing of a web UI or local we
 ## Tools to prefer
 
 - Tool profile: `full` + Playwright / browser MCP (preferred).
+- Prefer `full` only on trusted **local** CLI. Never switch gateways/bots off `messaging` (SECURITY.md / ADR-029).
 - Screenshots and console capture for evidence.
 - If only `coding` / no browser MCP: document the gap, use any reachable HTTP checks, and rely on operator-supplied artifacts.
 

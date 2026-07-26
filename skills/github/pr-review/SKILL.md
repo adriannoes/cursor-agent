@@ -25,6 +25,7 @@ Use when the operator wants a review of an open (or draft) pull request: correct
 ## Tools to prefer
 
 - Tool profile: `full` + GitHub MCP (preferred).
+- Prefer `full` only on trusted **local** CLI. Never switch gateways/bots off `messaging` (SECURITY.md / ADR-029).
 - Fall back to `gh` CLI or operator-pasted diff when MCP is unavailable — tell the user to enable `--profile full`.
 - Local workspace reads only for context already checked out; do not invent remote state.
 

@@ -21,8 +21,9 @@ Use when the operator wants help opening or finishing a change as a pull request
 ## Tools to prefer
 
 - Tool profile: `full` + GitHub MCP (preferred) for PR create/update and check status.
+- Prefer `full` only on trusted **local** CLI. Never switch gateways/bots off `messaging` (SECURITY.md / ADR-029).
 - Local `git` for branch/commit; `gh` as a fallback when MCP is unavailable.
-- Never force-push or skip hooks unless the operator explicitly requests it.
+- Never force-push unless the operator explicitly requests it. Do not skip hooks — if hooks block, fix the underlying issue or document a policy exception.
 
 ## Pitfalls
 

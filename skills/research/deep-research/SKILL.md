@@ -21,6 +21,7 @@ Use when the operator needs a grounded answer across the open web: competing cla
 ## Tools to prefer
 
 - Tool profile: `full` (curated MCP).
+- Prefer `full` only on trusted **local** CLI. Never switch gateways/bots off `messaging` (SECURITY.md / ADR-029).
 - Brave (or equivalent) search MCP for discovery.
 - Playwright / browser MCP only when a page needs rendering or interaction.
 - SDK read tools for local notes the operator provides.
