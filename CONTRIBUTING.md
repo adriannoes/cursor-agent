@@ -66,6 +66,7 @@ Also confirm:
 - No secrets in diffs, logs, or example files.
 - No new source or test files above 500 lines without a written exception in the PR.
 - Messaging/gateway changes were exercised with `tool_profile: messaging` where relevant.
+- After bumping `[project].version` / `cursor_agent.__version__`, run **`uv lock`** (then `uv lock --check`) so the editable `cursor-agent` row in `uv.lock` matches — do not hand-edit the lock version string.
 
 ## Code style and conventions
 

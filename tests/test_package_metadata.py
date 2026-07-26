@@ -17,8 +17,10 @@ from cursor_agent.cli.app import app
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _PYPROJECT_TOML = _REPO_ROOT / "pyproject.toml"
+_UV_LOCK = _REPO_ROOT / "uv.lock"
 _EXAMPLES_DIR = _REPO_ROOT / "examples"
 _EXAMPLES_README = _EXAMPLES_DIR / "README.md"
+_EDITABLE_PACKAGE_NAME = "cursor-agent"
 
 
 def _project_version_from_pyproject() -> str:
@@ -35,6 +37,45 @@ def _project_version_from_pyproject() -> str:
         raise AssertionError(
             f"invalid pyproject [project].version: received {version!r}, "
             "expected non-empty string"
+        )
+    return version
+
+
+def _editable_cursor_agent_version_from_uv_lock() -> str:
+    """Return the editable ``cursor-agent`` package version from ``uv.lock``.
+
+    WHY (PR #71 review): version bumps that touch only ``pyproject.toml`` /
+    ``__version__`` can leave the lock stale; ``uv sync --frozen`` still
+    succeeds. Assert the lock package row explicitly.
+    """
+    with _UV_LOCK.open("rb") as handle:
+        loaded: dict[str, Any] = tomllib.load(handle)
+    packages = loaded.get("package")
+    if not isinstance(packages, list):
+        raise AssertionError(
+            f"invalid uv.lock package table: received {type(packages).__name__}, "
+            "expected list of package mappings"
+        )
+    matches: list[dict[str, Any]] = []
+    for entry in packages:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("name") != _EDITABLE_PACKAGE_NAME:
+            continue
+        source = entry.get("source")
+        if not isinstance(source, dict) or source.get("editable") != ".":
+            continue
+        matches.append(entry)
+    if len(matches) != 1:
+        raise AssertionError(
+            f"expected exactly one editable {[_EDITABLE_PACKAGE_NAME]!r} package "
+            f"in uv.lock, received count={len(matches)}"
+        )
+    version = matches[0].get("version")
+    if not isinstance(version, str) or not version:
+        raise AssertionError(
+            f"invalid uv.lock editable {_EDITABLE_PACKAGE_NAME!r} version: "
+            f"received {version!r}, expected non-empty string"
         )
     return version
 
@@ -62,6 +103,22 @@ def test_package_version_matches_pyproject() -> None:
         f"version drift: __version__={cursor_agent.__version__!r}, "
         f"pyproject [project].version={pyproject_version!r}, "
         f"expected identical strings"
+    )
+
+
+def test_uv_lock_editable_package_version_matches_pyproject() -> None:
+    """Editable ``cursor-agent`` row in ``uv.lock`` matches ``[project].version``.
+
+    WHY (PR #71): #70 bumped package metadata to 1.2.1 but left the lock at 1.2.0;
+    a cross-check here fails closed on the next bump without hand-auditing.
+    """
+    pyproject_version = _project_version_from_pyproject()
+    lock_version = _editable_cursor_agent_version_from_uv_lock()
+    assert lock_version == pyproject_version, (
+        f"version drift: uv.lock editable {_EDITABLE_PACKAGE_NAME!r} "
+        f"version={lock_version!r}, pyproject [project].version="
+        f"{pyproject_version!r}, expected identical strings — run `uv lock` "
+        "after bumping [project].version (do not hand-edit the lock version)"
     )
 
 
