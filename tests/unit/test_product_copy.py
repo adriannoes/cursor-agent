@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import cursor_agent.product_copy as product_copy
 from cursor_agent.platforms.base import GATEWAY_BUSY_MESSAGE
@@ -20,6 +21,8 @@ from cursor_agent.product_copy import (
     WELCOME_READY_LINE,
     WELCOME_TAGLINE,
 )
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 PRD_MAX_LINE_WIDTH = 60
 
@@ -158,6 +161,28 @@ def test_first_commands_hint_has_no_setup_command_bullet() -> None:
     """Q7 Accept B: MVP does not add a ``cursor-agent setup`` banner bullet."""
     assert "cursor-agent setup" not in FIRST_COMMANDS_HINT
     assert "cursor-agent setup" not in FIRST_RUN_GETTING_STARTED
+
+
+def test_readme_first_run_banner_includes_first_commands_hint() -> None:
+    """README First-run fenced banner must stay in sync with FIRST_COMMANDS_HINT.
+
+    WHY (PR #69 review): docs and product_copy can drift; lock the shared hint.
+    """
+    readme = (_REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    first_run_heading = "## First run"
+    assert first_run_heading in readme, (
+        f"README must contain {first_run_heading!r} section for banner lock"
+    )
+    section = readme.split(first_run_heading, maxsplit=1)[1]
+    fence_match = re.search(r"```text\n(.*?)```", section, flags=re.DOTALL)
+    assert fence_match is not None, (
+        "README First run section must contain a ```text fenced banner block"
+    )
+    banner = fence_match.group(1)
+    assert FIRST_COMMANDS_HINT.strip() in banner, (
+        "README First run banner must include FIRST_COMMANDS_HINT verbatim: "
+        f"missing from banner={banner!r}"
+    )
 
 
 # --- Task 5.1 / 5.2: SETUP_* wizard + apply success copy (FR-11) -------------

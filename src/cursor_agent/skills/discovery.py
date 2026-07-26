@@ -131,11 +131,15 @@ def _discover_skills_in_root(
     *,
     include_content: bool,
 ) -> dict[str, SkillEntry]:
-    if not skills_root.is_dir():
+    # WHY: seed refuses symlink destinations; discovery must match that policy for
+    # untrusted workspaces (PR #69 Should Fix).
+    if skills_root.is_symlink() or not skills_root.is_dir():
         return {}
 
     entries: dict[str, SkillEntry] = {}
     for skill_path in sorted(skills_root.rglob(SKILL_FILENAME)):
+        if _skill_path_has_dot_component(skill_path, skills_root):
+            continue
         if not is_safe_skill_file(skill_path, skills_root):
             continue
         try:
@@ -170,6 +174,19 @@ def _discover_skills_in_root(
             continue
         entries[entry.name] = entry
     return entries
+
+
+def _skill_path_has_dot_component(skill_path: Path, skills_root: Path) -> bool:
+    """Return True when any relative path component starts with ``.``.
+
+    WHY: seed stages under ``.seed-staging-*`` / ``.seed-backup-*`` inside the
+    discoverable root; leftovers must not become indexed skills (PR #69).
+    """
+    try:
+        relative = skill_path.relative_to(skills_root)
+    except ValueError:
+        return True
+    return any(part.startswith(".") for part in relative.parts)
 
 
 def _load_skill_entry(

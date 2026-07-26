@@ -149,6 +149,8 @@ For bots and gateways, use `tool_profile: messaging` as specified in [SECURITY.m
 
 **v1.2.0** (tagged) ships the **product skills pack**: 14 starter playbooks under repo-root [`skills/`](skills/), CLI `skills path` / `skills list` / `skills seed`, and bring-your-own paste into project or user `.cursor/skills/` — see [`skills/README.md`](skills/README.md) and [Setup — skills](docs/setup.md).
 
+**v1.2.1** (pending tag) hardens skills discovery after the v1.2.0 review follow-up: skip seed staging/backup leftovers, refuse symlinked skills roots, accept CRLF frontmatter, map seed destination `mkdir` failures to clean CLI errors, and tighten package-smoke isolation.
+
 Further roadmap:
 
 - Logging bootstrap + disk persistence (PRD-015).
@@ -160,7 +162,9 @@ Further roadmap:
 
 Thanks to everyone who has improved Cursor Agent:
 
-- [wing-kit](https://github.com/wing-kit) — gateway `model:` key support ([#59](https://github.com/adriannoes/cursor-agent/pull/59))
+- [wing-kit](https://github.com/wing-kit) — first external contributions:
+  - gateway `model:` key support ([#59](https://github.com/adriannoes/cursor-agent/pull/59))
+  - `cursor-agent usage` plan quota snapshot ([#60](https://github.com/adriannoes/cursor-agent/pull/60))
 
 ## Contributing
 
