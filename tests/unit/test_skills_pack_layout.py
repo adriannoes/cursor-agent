@@ -11,9 +11,12 @@ from pathlib import Path
 import pytest
 
 from cursor_agent.cli.command_router import RESERVED_BUILTIN_COMMANDS
-from cursor_agent.skills import discovery as discovery_mod
 from cursor_agent.skills.discovery import SKILL_CONTENT_MAX_BYTES
 from cursor_agent.skills.pack_paths import bundled_skills_pack_root
+from cursor_agent.skills.skill_frontmatter import (
+    parse_yaml_frontmatter,
+    read_frontmatter_text,
+)
 
 # Locked catalog from PRD-016 FR-1 / FR-2 (category → skill name).
 EXPECTED_SKILLS_PACK_ENTRIES: tuple[tuple[str, str], ...] = (
@@ -40,10 +43,8 @@ def _skill_md_path(category: str, skill_name: str) -> Path:
 
 
 def _read_skill_frontmatter(skill_path: Path) -> dict[str, str]:
-    """Parse YAML frontmatter via discovery helpers (same contract as listing)."""
-    return discovery_mod._parse_yaml_frontmatter(
-        discovery_mod._read_frontmatter_text(skill_path)
-    )
+    """Parse YAML frontmatter via public skill_frontmatter helpers."""
+    return parse_yaml_frontmatter(read_frontmatter_text(skill_path))
 
 
 def test_skills_pack_catalog_has_fourteen_unique_names() -> None:
