@@ -192,7 +192,7 @@ def test_documented_cli_commands_are_registered(
         return []
 
     monkeypatch.setattr(
-        "cursor_agent.cli.app._list_sessions_for_config",
+        "cursor_agent.cli.sessions_commands._list_sessions_for_config",
         stub_list_sessions,
     )
     cron_root = tmp_path / "cron"

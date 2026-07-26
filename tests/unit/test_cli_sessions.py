@@ -58,7 +58,10 @@ def test_sessions_list_prints_seeded_sessions(
     ) -> SessionStore:
         return SessionStore(db_path)
 
-    monkeypatch.setattr("cursor_agent.cli.app.create_store", stub_create_store)
+    monkeypatch.setattr(
+        "cursor_agent.cli.sessions_commands.create_store",
+        stub_create_store,
+    )
 
     result = CliRunner().invoke(app, ["sessions", "list"])
     assert result.exit_code == 0
@@ -86,7 +89,10 @@ def test_sessions_list_shows_untitled_placeholder(
     ) -> SessionStore:
         return SessionStore(db_path)
 
-    monkeypatch.setattr("cursor_agent.cli.app.create_store", stub_create_store)
+    monkeypatch.setattr(
+        "cursor_agent.cli.sessions_commands.create_store",
+        stub_create_store,
+    )
 
     result = CliRunner().invoke(app, ["sessions", "list"])
     assert result.exit_code == 0
@@ -114,7 +120,10 @@ def test_sessions_list_empty_store_message(
     ) -> SessionStore:
         return SessionStore(db_path)
 
-    monkeypatch.setattr("cursor_agent.cli.app.create_store", stub_create_store)
+    monkeypatch.setattr(
+        "cursor_agent.cli.sessions_commands.create_store",
+        stub_create_store,
+    )
 
     result = CliRunner().invoke(app, ["sessions", "list"])
     assert result.exit_code == 0
@@ -152,7 +161,10 @@ def test_sessions_list_uses_dotenv_workspace_for_session_key(
     ) -> SessionStore:
         return SessionStore(db_path)
 
-    monkeypatch.setattr("cursor_agent.cli.app.create_store", stub_create_store)
+    monkeypatch.setattr(
+        "cursor_agent.cli.sessions_commands.create_store",
+        stub_create_store,
+    )
 
     result = CliRunner().invoke(app, ["sessions", "list"])
     assert result.exit_code == 0

@@ -24,14 +24,10 @@ from cursor_agent.cli.first_run_marker import (
 from cursor_agent.cli.gateway_check import GatewayConfigPathOpt, gateway_app
 from cursor_agent.cli.repl_session import run_repl
 from cursor_agent.cli.rich_display import RichDisplay
+from cursor_agent.cli.sessions_commands import sessions_app
 from cursor_agent.cli.setup_commands import setup_app
 from cursor_agent.cli.skills_commands import skills_app
-from cursor_agent.cli.startup import (
-    create_store,
-    load_cwd_dotenv,
-    repl_runtime,
-    session_key_for,
-)
+from cursor_agent.cli.startup import load_cwd_dotenv, repl_runtime
 from cursor_agent.cli.stream_renderer import build_display_stream_callbacks
 from cursor_agent.cli.usage_command import usage_command
 from cursor_agent.cli.welcome import render_welcome
@@ -39,11 +35,9 @@ from cursor_agent.config.loader import CursorAgentConfig, ToolProfile, load_conf
 from cursor_agent.errors import CursorAgentError
 from cursor_agent.gateway.runner import run_gateway
 from cursor_agent.sdk_facade import RunStatus
-from cursor_agent.sessions.models import SessionRecord
 
 app = typer.Typer()
 
-sessions_app = typer.Typer(help="Manage sessions")
 app.add_typer(sessions_app, name="sessions")
 app.add_typer(cron_app, name="cron")
 app.add_typer(setup_app, name="setup")
@@ -52,9 +46,6 @@ app.add_typer(auth_app, name="auth")
 app.add_typer(gateway_app, name="gateway")
 app.command("usage")(usage_command)
 app.command("doctor")(doctor_command)
-
-_EMPTY_SESSIONS_MESSAGE = "No sessions found for this workspace."
-_UNTITLED_PLACEHOLDER = "(untitled)"
 
 
 async def _stdin_line_reader() -> AsyncIterator[str]:  # pragma: no cover
@@ -129,37 +120,6 @@ async def run_default(
             stream_writer=_echo_delta,
             stream_callbacks=build_display_stream_callbacks(display),
         )
-
-
-async def _list_sessions_for_config(config: CursorAgentConfig) -> list[SessionRecord]:
-    """Initialize the store and list sessions for the config workspace key."""
-    store = create_store(config)
-    await store.initialize()
-    session_key = session_key_for(config)
-    return await store.list(session_key)
-
-
-def _print_session_row(record: SessionRecord) -> None:
-    """Print one session row as id, title, and updated_at."""
-    title = record.title if record.title is not None else _UNTITLED_PLACEHOLDER
-    typer.echo(f"{record.id}\t{title}\t{record.updated_at}")
-
-
-@sessions_app.command("list")
-def sessions_list() -> None:
-    """List sessions for the current workspace session key."""
-    try:
-        config = load_config()
-    except CursorAgentError as exc:
-        raise typer.Exit(exit_code_for_error(exc)) from exc
-
-    rows = asyncio.run(_list_sessions_for_config(config))
-    if not rows:
-        typer.echo(_EMPTY_SESSIONS_MESSAGE)
-        return
-
-    for row in rows:
-        _print_session_row(row)
 
 
 @gateway_app.callback(invoke_without_command=True)

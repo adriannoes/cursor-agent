@@ -75,7 +75,7 @@ def test_documented_sessions_list_command_exists(
         return []
 
     monkeypatch.setattr(
-        "cursor_agent.cli.app._list_sessions_for_config",
+        "cursor_agent.cli.sessions_commands._list_sessions_for_config",
         stub_list_sessions,
     )
 
