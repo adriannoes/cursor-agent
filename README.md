@@ -147,7 +147,7 @@ For bots and gateways, use `tool_profile: messaging` as specified in [SECURITY.m
 
 **v1.1.0** (tagged) ships the **`full`** tool profile (curated MCP: GitHub, Brave Search, Playwright) — enable it via [Setup](docs/setup.md); see [SECURITY.md](SECURITY.md) and [Architecture](docs/architecture.md) for the three-profile matrix. The unset default model is **Grok 4.5** (`grok-4.5`); pin **Composer 2.5** via setup index `2`, YAML, `CURSOR_AGENT__MODEL`, or `/model`. Interactive setup uses guided step chrome (model + tool profile including `full` when local).
 
-**v1.2.0** (package `1.2.0`; tag pending on `main`) ships the **product skills pack**: 14 starter playbooks under repo-root [`skills/`](skills/), CLI `skills path` / `skills list` / `skills seed`, and bring-your-own paste into project or user `.cursor/skills/` — see [`skills/README.md`](skills/README.md) and [Setup — skills](docs/setup.md).
+**v1.2.0** (tagged) ships the **product skills pack**: 14 starter playbooks under repo-root [`skills/`](skills/), CLI `skills path` / `skills list` / `skills seed`, and bring-your-own paste into project or user `.cursor/skills/` — see [`skills/README.md`](skills/README.md) and [Setup — skills](docs/setup.md).
 
 Further roadmap:
 
