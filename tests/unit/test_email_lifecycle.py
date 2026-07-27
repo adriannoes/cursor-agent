@@ -164,9 +164,7 @@ async def test_email_adapter_skips_own_outbound_echo_not_api_self_send(
     await adapter.stop()
 
     # API self-send processed (/help reply); outbound echo ignored (no second reply).
-    help_replies = [
-        m for m in smtp.sent if "Email commands" in (m.get_content() or "")
-    ]
+    help_replies = [m for m in smtp.sent if "Email commands" in (m.get_content() or "")]
     assert len(help_replies) == 1
 
 
