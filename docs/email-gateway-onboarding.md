@@ -132,7 +132,8 @@ Same Memory v1 path as Telegram/CLI. If `USER.md` / `MEMORY.md` exist under `~/.
 - Attachments are ignored in v1 (body text / HTML-stripped text only).
 - Cron → email delivery is not supported yet (Telegram cron unchanged).
 - **Identity:** allowlisting matches the SMTP `From` address (case-insensitive). Unlike Telegram user IDs, `From` can be spoofed unless your provider rejects failed SPF/DKIM/DMARC before the message reaches INBOX. Use a dedicated bot inbox and a short allowlist.
-- The adapter ignores mail whose `From` is the bot’s own address (prevents SMTP reply loops).
+- The adapter ignores SMTP echoes of its own replies (Message-IDs containing `cursor-agent-`) so self-mail does not loop. Other mail From the bot address (for example AgentMail API sends) is still handled when allowlisted.
+- AgentMail may attach `List-Unsubscribe` on ordinary mail; that header alone does not mark a message as bulk.
 - Sample config: [examples/gateway.yaml.example](../examples/gateway.yaml.example).
 
 ## Related Docs

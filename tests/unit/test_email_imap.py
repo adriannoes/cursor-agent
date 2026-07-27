@@ -83,6 +83,20 @@ def test_parse_rfc822_skips_bulk_precedence() -> None:
     assert parse_rfc822_bytes("4", msg.as_bytes()) is None
 
 
+def test_parse_rfc822_keeps_list_unsubscribe_without_bulk_precedence() -> None:
+    """AgentMail attaches List-Unsubscribe to ordinary one-to-one mail."""
+    msg = EmailMessage()
+    msg["From"] = "you@example.com"
+    msg["To"] = "bot@agentmail.to"
+    msg["Subject"] = "/help"
+    msg["List-Unsubscribe"] = "<https://example.com/unsub>"
+    msg["Message-ID"] = "<user-1@example.com>"
+    msg.set_content("/help")
+    parsed = parse_rfc822_bytes("4b", msg.as_bytes())
+    assert parsed is not None
+    assert parsed.body_text.strip() == "/help"
+
+
 def test_parse_rfc822_skips_empty_body() -> None:
     raw = build_sample_rfc822(
         from_addr="you@example.com",

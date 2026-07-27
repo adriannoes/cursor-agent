@@ -121,6 +121,55 @@ async def test_email_adapter_stop_cancels_poll_task(tmp_path: Path) -> None:
     assert adapter._poll_task is None  # noqa: SLF001
 
 
+async def test_email_adapter_skips_own_outbound_echo_not_api_self_send(
+    tmp_path: Path,
+) -> None:
+    """Own-address mail is kept unless Message-ID marks our SMTP reply echo."""
+    from tests.unit.email_adapter_fakes import DEFAULT_BOT_ADDRESS
+
+    imap = FakeImapClient()
+    smtp = FakeSmtpClient()
+    gateway_cfg = email_gateway_config(
+        workspace=str(tmp_path / "ws"),
+        allowed_users=[DEFAULT_BOT_ADDRESS],
+    )
+    adapter, store, _facade, _cfg = build_email_adapter(
+        tmp_path,
+        gateway_cfg=gateway_cfg,
+        imap_client=imap,
+        smtp_client=smtp,
+    )
+    await store.initialize()
+
+    async def on_inbound(_message: InboundMessage) -> None:
+        return None
+
+    await adapter.start(on_inbound)
+    await asyncio.sleep(0.02)
+    imap.add_message(
+        "20",
+        from_addr=DEFAULT_BOT_ADDRESS,
+        body="/help",
+        message_id="<api-self-send@agentmail.to>",
+        unseen=True,
+    )
+    imap.add_message(
+        "21",
+        from_addr=DEFAULT_BOT_ADDRESS,
+        body="Started a new conversation.",
+        message_id="<cursor-agent-abcdef@agentmail.to>",
+        unseen=True,
+    )
+    await asyncio.sleep(0.08)
+    await adapter.stop()
+
+    # API self-send processed (/help reply); outbound echo ignored (no second reply).
+    help_replies = [
+        m for m in smtp.sent if "Email commands" in (m.get_content() or "")
+    ]
+    assert len(help_replies) == 1
+
+
 async def test_email_adapter_ignores_blocked_sender(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,

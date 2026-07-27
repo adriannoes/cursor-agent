@@ -166,14 +166,16 @@ def build_prompt_text(*, subject: str, body_text: str) -> str:
 
 
 def is_bulk_or_automated(message: Message) -> bool:
-    """Return True for mail that should not start an agent turn."""
+    """Return True for mail that should not start an agent turn.
+
+    ``List-Unsubscribe`` alone is not treated as bulk: AgentMail and other
+    transactional providers attach that header to ordinary one-to-one mail.
+    """
     auto_submitted = (message.get("Auto-Submitted") or "").strip().lower()
     if auto_submitted and auto_submitted != "no":
         return True
     precedence = (message.get("Precedence") or "").strip().lower()
     if precedence in {"bulk", "junk", "list"}:
-        return True
-    if message.get("List-Unsubscribe"):
         return True
     return False
 

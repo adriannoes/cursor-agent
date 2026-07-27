@@ -50,6 +50,13 @@ from cursor_agent.sessions.store import SessionStore
 
 Sleeper = Callable[[float], Awaitable[None]]
 
+_OWN_OUTBOUND_MESSAGE_ID_MARKER = "cursor-agent-"
+
+
+def _is_own_outbound_message_id(message_id: str) -> bool:
+    """Return True when ``message_id`` looks like one we generated for SMTP replies."""
+    return _OWN_OUTBOUND_MESSAGE_ID_MARKER in message_id.lower()
+
 
 class EmailAdapter:
     """Email ``PlatformAdapter`` using IMAP polling and SMTP replies.
@@ -242,7 +249,11 @@ class EmailAdapter:
                 if parsed is None:
                     continue
                 own = normalize_email_address(self._platform_config.address)
-                if parsed.sender == own:
+                # Skip SMTP echoes of our own outbound replies (Message-ID prefix),
+                # but allow other mail From the bot address (e.g. AgentMail API sends).
+                if parsed.sender == own and _is_own_outbound_message_id(
+                    parsed.message_id
+                ):
                     continue
                 parsed_messages.append(parsed)
         finally:
