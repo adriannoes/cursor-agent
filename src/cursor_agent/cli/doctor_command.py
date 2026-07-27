@@ -34,7 +34,7 @@ from cursor_agent.gateway.config import (
     default_gateway_config_path,
     load_gateway_config,
 )
-from cursor_agent.messaging_hooks import (
+from cursor_agent.messaging_hooks_status import (
     MessagingHooksStatusReport,
     messaging_hooks_status,
 )

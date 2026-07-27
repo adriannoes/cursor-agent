@@ -11,7 +11,7 @@ Public API under test:
   → Gateway. Setup reuses shared helpers behind ``run_setup_check``.
 
 - **Messaging hooks** — public ``messaging_hooks_status(...)`` in
-  ``cursor_agent.messaging_hooks``:
+  ``cursor_agent.messaging_hooks_status``:
   - ``messaging`` + missing/incomplete → **error** severity
   - incomplete includes scripts present but project ``hooks.json`` missing
     **any** expected messaging command binding (not merely ``any()``)
@@ -42,7 +42,6 @@ import pytest
 from typer.testing import CliRunner
 
 from cursor_agent.cli.app import app
-from cursor_agent.sdk_facade import FakeSdkFacade
 from cursor_agent.usage import USAGE_TOKEN_ENV_VAR
 
 
@@ -131,7 +130,7 @@ def _write_minimal_gateway_yaml(path: Path, *, workspace: Path) -> None:
 def _spy_probe_api_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> list[object]:
-    """Install probe spies on auth / facade / doctor_command."""
+    """Install probe spies on the real bind sites (auth_status + sdk_facade)."""
     probe_calls: list[object] = []
 
     async def _recording_probe(**kwargs: object) -> bool:
@@ -141,9 +140,8 @@ def _spy_probe_api_key(
     for target in (
         "cursor_agent.auth_status.probe_api_key",
         "cursor_agent.sdk_facade.probe_api_key",
-        "cursor_agent.cli.doctor_command.probe_api_key",
     ):
-        monkeypatch.setattr(target, _recording_probe, raising=False)
+        monkeypatch.setattr(target, _recording_probe, raising=True)
 
     return probe_calls
 
@@ -157,7 +155,7 @@ def test_messaging_hooks_status_messaging_missing_is_error(
     tmp_path: Path,
 ) -> None:
     """Public helper: messaging profile + incomplete hooks → error severity."""
-    from cursor_agent.messaging_hooks import messaging_hooks_status
+    from cursor_agent.messaging_hooks_status import messaging_hooks_status
 
     workspace = tmp_path / "ws"
     workspace.mkdir()
@@ -174,7 +172,7 @@ def test_messaging_hooks_status_coding_not_required_is_ok_not_warning(
     tmp_path: Path,
 ) -> None:
     """Public helper: coding without hooks → ok (not required), never warning."""
-    from cursor_agent.messaging_hooks import messaging_hooks_status
+    from cursor_agent.messaging_hooks_status import messaging_hooks_status
 
     workspace = tmp_path / "ws"
     workspace.mkdir()
@@ -194,7 +192,7 @@ def test_messaging_hooks_status_full_not_required_is_ok_not_warning(
     tmp_path: Path,
 ) -> None:
     """Public helper: full without hooks → ok (not required), never warning."""
-    from cursor_agent.messaging_hooks import messaging_hooks_status
+    from cursor_agent.messaging_hooks_status import messaging_hooks_status
 
     workspace = tmp_path / "ws"
     workspace.mkdir()
@@ -222,10 +220,10 @@ def test_messaging_hooks_status_single_binding_is_incomplete_error(
         MESSAGING_HOOK_FILENAMES,
         WORKSPACE_MESSAGING_HOOK_COMMAND_PREFIX,
         ensure_messaging_hooks,
-        messaging_hooks_status,
         workspace_messaging_hooks_dir,
         workspace_project_hooks_manifest_path,
     )
+    from cursor_agent.messaging_hooks_status import messaging_hooks_status
 
     workspace = tmp_path / "ws"
     workspace.mkdir()
@@ -283,10 +281,10 @@ def test_messaging_hooks_status_wrong_event_bindings_is_incomplete_error(
         MESSAGING_HOOK_FILENAMES,
         WORKSPACE_MESSAGING_HOOK_COMMAND_PREFIX,
         ensure_messaging_hooks,
-        messaging_hooks_status,
         workspace_messaging_hooks_dir,
         workspace_project_hooks_manifest_path,
     )
+    from cursor_agent.messaging_hooks_status import messaging_hooks_status
 
     workspace = tmp_path / "ws"
     workspace.mkdir()
@@ -500,16 +498,6 @@ def test_cli_doctor_default_does_not_call_probe_api_key(
     )
     probe_calls = _spy_probe_api_key(monkeypatch)
 
-    # Also spy FakeSdkFacade.probe_api_key in case doctor injects a facade.
-    facade_probe_calls: list[object] = []
-    original_probe = FakeSdkFacade.probe_api_key
-
-    async def _facade_spy(self: FakeSdkFacade, *args: object, **kwargs: object) -> bool:
-        facade_probe_calls.append({"args": args, "kwargs": kwargs})
-        return await original_probe(self, *args, **kwargs)
-
-    monkeypatch.setattr(FakeSdkFacade, "probe_api_key", _facade_spy)
-
     result = _invoke_doctor(
         "--gateway-config",
         str(tmp_path / "missing-gateway.yaml"),
@@ -517,10 +505,6 @@ def test_cli_doctor_default_does_not_call_probe_api_key(
     assert result.exit_code == 0, result.output
     assert probe_calls == [], (
         f"probe_api_key must not run on default doctor: {probe_calls}"
-    )
-    assert facade_probe_calls == [], (
-        f"FakeSdkFacade.probe_api_key must not run on default doctor: "
-        f"{facade_probe_calls}"
     )
     assert _PLACEHOLDER_API_KEY not in result.output
     assert "oauth-present-but-must-not-probe" not in result.output

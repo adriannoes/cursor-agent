@@ -11,7 +11,6 @@ from typing import Any
 from cursor_agent.facade_logging import LogContext, emit_send_end, emit_send_start
 from cursor_agent.first_party_models import DEFAULT_AGENT_MODEL
 from cursor_agent.sdk_facade_models import (
-    ModelCatalogEntry,
     RunResult,
     RunStatus,
     StreamCallbacks,
@@ -19,10 +18,6 @@ from cursor_agent.sdk_facade_models import (
 from cursor_agent.sdk_streaming import invoke_callback
 
 _MODULE_LOGGER = logging.getLogger(__name__)
-
-_DEFAULT_FAKE_MODEL_CATALOG: tuple[ModelCatalogEntry, ...] = (
-    ModelCatalogEntry(id="grok-4.5", display_name="Grok 4.5"),
-)
 
 
 class FakeSdkFacade:
@@ -35,11 +30,6 @@ class FakeSdkFacade:
         scripted_tool_events: list[tuple[str, dict[str, Any]]] | None = None,
         default_reply: str = "fake reply",
         send_release: asyncio.Event | None = None,
-        model_catalog: list[ModelCatalogEntry] | None = None,
-        probe_ok: bool = True,
-        probe_error: BaseException | None = None,
-        list_models_error: BaseException | None = None,
-        bridge_launch_error: BaseException | None = None,
     ) -> None:
         self._scripted_replies = scripted_replies or {}
         self._scripted_tool_events = scripted_tool_events or []
@@ -51,17 +41,6 @@ class FakeSdkFacade:
         self.send_in_progress = asyncio.Event()
         self._logger = _MODULE_LOGGER
         self._closed = False
-        self._model_catalog: list[ModelCatalogEntry] = (
-            list(model_catalog)
-            if model_catalog is not None
-            else list(_DEFAULT_FAKE_MODEL_CATALOG)
-        )
-        self._probe_ok = probe_ok
-        self._probe_error = probe_error
-        self._list_models_error = list_models_error
-        self._bridge_launch_error = bridge_launch_error
-        # Ephemeral probe/list lifecycle counter (success + call-error paths).
-        self.aclose_call_count = 0
 
     async def create_agent(
         self,
@@ -174,25 +153,3 @@ class FakeSdkFacade:
     async def close(self) -> None:
         """Mark the fake facade as closed."""
         self._closed = True
-
-    async def probe_api_key(self) -> bool:
-        """Fake ephemeral probe: inject launch/auth errors; count aclose."""
-        if self._bridge_launch_error is not None:
-            raise self._bridge_launch_error
-        try:
-            if self._probe_error is not None:
-                raise self._probe_error
-            return self._probe_ok
-        finally:
-            self.aclose_call_count += 1
-
-    async def list_models(self) -> list[ModelCatalogEntry]:
-        """Fake ephemeral catalog: inject launch/auth errors; count aclose."""
-        if self._bridge_launch_error is not None:
-            raise self._bridge_launch_error
-        try:
-            if self._list_models_error is not None:
-                raise self._list_models_error
-            return list(self._model_catalog)
-        finally:
-            self.aclose_call_count += 1

@@ -33,8 +33,8 @@ import logging
 import os
 import time
 import uuid
-from collections.abc import Sequence
-from typing import Any
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Any, TypeVar
 
 from cursor_agent.errors import ConfigError
 from cursor_agent.facade_logging import (
@@ -51,11 +51,7 @@ from cursor_agent.sdk_facade_models import (
     RunStatus,
     StreamCallbacks,
 )
-from cursor_agent.sdk_facade_protocol import (
-    ApiKeyProber,
-    ModelCatalogReader,
-    SdkFacade,
-)
+from cursor_agent.sdk_facade_protocol import SdkFacade
 from cursor_agent.sdk_fake import FakeSdkFacade
 from cursor_agent.sdk_retry import retry_sdk_call
 from cursor_agent.sdk_streaming import (
@@ -85,6 +81,8 @@ _map_sdk_exception = map_sdk_exception
 AUTH_PROBE_TIMEOUT_SECONDS: float = 45.0
 MODELS_LIST_TIMEOUT_SECONDS: float = 60.0
 
+_T = TypeVar("_T")
+
 
 # SDK import boundary (see AGENTS.md).
 from cursor_sdk import (  # noqa: E402
@@ -94,6 +92,28 @@ from cursor_sdk import (  # noqa: E402
     SandboxOptions,
 )
 from cursor_sdk.types import options_to_json  # noqa: E402
+
+
+async def _with_ephemeral_bridge(
+    *,
+    timeout_seconds: float,
+    operation: Callable[[AsyncClient], Awaitable[_T]],
+) -> _T:
+    """Run ``operation`` on a one-shot bridge, always ``aclose``-ing the client."""
+    client: AsyncClient | None = None
+    try:
+        try:
+            client = await AsyncClient.launch_bridge(
+                workspace=os.getcwd(),
+                timeout=timeout_seconds,
+            )
+            return await operation(client)
+        except Exception as exc:
+            # WHY: keep KeyboardInterrupt/CancelledError out of map_sdk_exception.
+            raise map_sdk_exception(exc) from exc
+    finally:
+        if client is not None:
+            await client.aclose()
 
 
 def _model_catalog_entry_from_sdk(raw: Any) -> ModelCatalogEntry:
@@ -132,22 +152,13 @@ async def probe_api_key(
         ok = await probe_api_key(api_key=os.environ["CURSOR_API_KEY"])
     """
     timeout = AUTH_PROBE_TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds
-    client: AsyncClient | None = None
-    try:
-        try:
-            client = await AsyncClient.launch_bridge(
-                workspace=os.getcwd(),
-                timeout=timeout,
-            )
-            # WHY: discard SDKUser identity — ADR-025 boolean-only probe surface.
-            await AsyncCursor.me(client=client, api_key=api_key)
-            return True
-        except Exception as exc:
-            # WHY: keep KeyboardInterrupt/CancelledError out of map_sdk_exception.
-            raise map_sdk_exception(exc) from exc
-    finally:
-        if client is not None:
-            await client.aclose()
+
+    async def _me(client: AsyncClient) -> bool:
+        # WHY: discard SDKUser identity — ADR-025 boolean-only probe surface.
+        await AsyncCursor.me(client=client, api_key=api_key)
+        return True
+
+    return await _with_ephemeral_bridge(timeout_seconds=timeout, operation=_me)
 
 
 async def list_models(
@@ -164,24 +175,15 @@ async def list_models(
     timeout = (
         MODELS_LIST_TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds
     )
-    client: AsyncClient | None = None
-    try:
-        try:
-            client = await AsyncClient.launch_bridge(
-                workspace=os.getcwd(),
-                timeout=timeout,
-            )
-            raw_models = await AsyncCursor.models.list(
-                client=client,
-                api_key=api_key,
-            )
-            return [_model_catalog_entry_from_sdk(row) for row in raw_models]
-        except Exception as exc:
-            # WHY: keep KeyboardInterrupt/CancelledError out of map_sdk_exception.
-            raise map_sdk_exception(exc) from exc
-    finally:
-        if client is not None:
-            await client.aclose()
+
+    async def _catalog(client: AsyncClient) -> list[ModelCatalogEntry]:
+        raw_models = await AsyncCursor.models.list(
+            client=client,
+            api_key=api_key,
+        )
+        return [_model_catalog_entry_from_sdk(row) for row in raw_models]
+
+    return await _with_ephemeral_bridge(timeout_seconds=timeout, operation=_catalog)
 
 
 def _resolve_sandbox_options(tool_profile: str) -> SandboxOptions | None:
@@ -563,13 +565,11 @@ class AsyncSdkFacade:
 
 __all__ = [
     "AUTH_PROBE_TIMEOUT_SECONDS",
-    "ApiKeyProber",
     "AsyncSdkFacade",
     "FakeSdkFacade",
     "LogContext",
     "MODELS_LIST_TIMEOUT_SECONDS",
     "ModelCatalogEntry",
-    "ModelCatalogReader",
     "RunResult",
     "RunStatus",
     "SdkFacade",

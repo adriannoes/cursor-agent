@@ -245,14 +245,6 @@ class SessionStore:
             return None
         return _row_to_session_record(row)
 
-    async def get(self, session_key: str, session_id: str) -> SessionRecord | None:
-        """Return the session when ``session_key`` and ``id`` both match.
-
-        Example:
-            >>> record = await store.get(session_key, session_id)
-        """
-        return await self.resolve(session_key, session_id)
-
     async def delete(self, session_key: str, session_id: str) -> bool:
         """Delete the session when ``session_key`` and ``id`` both match.
 

@@ -6,23 +6,7 @@ from typing import Protocol
 
 from cursor_agent.facade_logging import LogContext
 from cursor_agent.first_party_models import DEFAULT_AGENT_MODEL
-from cursor_agent.sdk_facade_models import ModelCatalogEntry, RunResult, StreamCallbacks
-
-
-class ApiKeyProber(Protocol):
-    """Narrow protocol for API-key probe (PRD-017); boolean only — ADR-025."""
-
-    async def probe_api_key(self) -> bool:
-        """Return True when the credential is accepted; never identity fields."""
-        ...
-
-
-class ModelCatalogReader(Protocol):
-    """Narrow protocol for live model catalog (PRD-017); project DTOs only."""
-
-    async def list_models(self) -> list[ModelCatalogEntry]:
-        """Return catalog rows as ``ModelCatalogEntry`` (not raw SDK types)."""
-        ...
+from cursor_agent.sdk_facade_models import RunResult, StreamCallbacks
 
 
 class SdkFacade(Protocol):

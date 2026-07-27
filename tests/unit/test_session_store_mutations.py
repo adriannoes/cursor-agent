@@ -288,8 +288,10 @@ async def _create_workspace_session(
 
 
 @pytest.mark.asyncio
-async def test_session_store_get_returns_scoped_record(tmp_path: Path) -> None:
-    """get(session_key, session_id) returns the row when scoped to session_key."""
+async def test_session_store_resolve_with_id_returns_scoped_record(
+    tmp_path: Path,
+) -> None:
+    """resolve(session_key, session_id) returns the row when scoped to session_key."""
     t0 = datetime(2026, 6, 16, 12, 0, 0, tzinfo=UTC)
     store = await initialized_store(tmp_path, SteppingClock([t0]))
     session_key = build_cli_session_key(tmp_path)
@@ -301,7 +303,7 @@ async def test_session_store_get_returns_scoped_record(tmp_path: Path) -> None:
         title="Visible",
     )
 
-    found = await store.get(session_key, created.id)
+    found = await store.resolve(session_key, created.id)
 
     assert found is not None
     assert found.id == created.id
@@ -310,10 +312,10 @@ async def test_session_store_get_returns_scoped_record(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_session_store_get_returns_none_for_wrong_session_key(
+async def test_session_store_resolve_with_id_returns_none_for_wrong_session_key(
     tmp_path: Path,
 ) -> None:
-    """get must not leak a row belonging to another session_key."""
+    """resolve with session_id must not leak a row belonging to another session_key."""
     t0 = datetime(2026, 6, 16, 12, 0, 0, tzinfo=UTC)
     store = await initialized_store(tmp_path, SteppingClock([t0, t0]))
     key_a = build_cli_session_key(tmp_path / "ws-a")
@@ -327,17 +329,19 @@ async def test_session_store_get_returns_none_for_wrong_session_key(
         agent_id="agent-a",
     )
 
-    assert await store.get(key_b, created.id) is None
+    assert await store.resolve(key_b, created.id) is None
 
 
 @pytest.mark.asyncio
-async def test_session_store_get_returns_none_for_missing_id(tmp_path: Path) -> None:
-    """get returns None when session_id does not exist under the key."""
+async def test_session_store_resolve_with_id_returns_none_for_missing_id(
+    tmp_path: Path,
+) -> None:
+    """resolve returns None when session_id does not exist under the key."""
     store = await initialized_store(tmp_path, SteppingClock([datetime.now(tz=UTC)]))
     session_key = build_cli_session_key(tmp_path)
     missing_id = str(uuid.uuid4())
 
-    assert await store.get(session_key, missing_id) is None
+    assert await store.resolve(session_key, missing_id) is None
 
 
 @pytest.mark.asyncio
@@ -356,7 +360,7 @@ async def test_session_store_delete_removes_scoped_row(tmp_path: Path) -> None:
     deleted = await store.delete(session_key, created.id)
 
     assert deleted is True
-    assert await store.get(session_key, created.id) is None
+    assert await store.resolve(session_key, created.id) is None
     assert await store.list(session_key) == []
 
 
@@ -381,7 +385,7 @@ async def test_session_store_delete_returns_false_for_wrong_session_key(
     deleted = await store.delete(key_b, created.id)
 
     assert deleted is False
-    surviving = await store.get(key_a, created.id)
+    surviving = await store.resolve(key_a, created.id)
     assert surviving is not None
     assert surviving.id == created.id
 
@@ -540,7 +544,7 @@ async def test_prune_workspace_sessions_isolates_session_key(
     )
 
     assert deleted_ids == [row_a.id]
-    surviving = await store.get(key_b, row_b.id)
+    surviving = await store.resolve(key_b, row_b.id)
     assert surviving is not None
     assert surviving.id == row_b.id
 

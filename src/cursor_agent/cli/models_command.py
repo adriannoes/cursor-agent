@@ -9,6 +9,7 @@ from typing import Annotated, Any
 
 import typer
 
+from cursor_agent.auth_status import API_KEY_ENV_VAR
 from cursor_agent.cli.error_display import format_startup_error
 from cursor_agent.cli.exit_codes import exit_code_for_error
 from cursor_agent.config.effective import REDACTION_TOKEN
@@ -17,7 +18,6 @@ from cursor_agent.first_party_models import recommended_agent_model_ids
 from cursor_agent.sdk_facade import MODELS_LIST_TIMEOUT_SECONDS, list_models
 from cursor_agent.sdk_facade_models import ModelCatalogEntry
 
-_API_KEY_ENV_VAR: str = "CURSOR_API_KEY"
 _DESCRIPTION_MAX_LEN: int = 120
 
 
@@ -27,10 +27,10 @@ def _resolve_models_api_key() -> str:
     Example:
         >>> # _resolve_models_api_key()  # doctest: +SKIP
     """
-    raw = os.environ.get(_API_KEY_ENV_VAR)
+    raw = os.environ.get(API_KEY_ENV_VAR)
     if raw is None or not raw.strip():
         raise AuthError(
-            f"missing {_API_KEY_ENV_VAR}: received {raw!r}, "
+            f"missing {API_KEY_ENV_VAR}: received {raw!r}, "
             "expected non-empty API key string"
         )
     return raw.strip()
