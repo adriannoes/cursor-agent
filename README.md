@@ -56,6 +56,9 @@ uv run cursor-agent                         # REPL (default: coding profile)
 uv run cursor-agent --profile messaging     # validate messaging hooks locally
 uv run cursor-agent --profile full          # curated MCP (local only)
 uv run cursor-agent sessions list           # past sessions for this workspace
+uv run cursor-agent sessions show <id>      # inspect one workspace session
+uv run cursor-agent sessions delete <id> --yes
+uv run cursor-agent sessions prune --older-than 30 --keep 10 --yes
 uv run cursor-agent skills list             # discovered skills
 uv run cursor-agent skills seed             # copy starter pack into .cursor/skills/
 uv run cursor-agent cron list               # scheduled jobs
