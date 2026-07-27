@@ -34,6 +34,7 @@ Get started:
   - /skills          list skills (also: skills list)
   - skills seed      optional starters; skills path
   - sessions list    see past sessions
+  - doctor           check local setup health
 
   Setup & docs: docs/setup.md"""
 

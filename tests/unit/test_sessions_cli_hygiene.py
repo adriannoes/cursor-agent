@@ -234,6 +234,43 @@ def test_sessions_delete_explicit_n_cancels_with_exit_zero(
     assert remaining[0].id == session_id
 
 
+def test_sessions_delete_explicit_no_cancels_with_exit_zero(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit confirm ``no`` exits 0 and leaves the row untouched.
+
+    WHY (PR #76 review): docs list ``no`` alongside ``n``; lock the named answer.
+    """
+    db_path = tmp_path / "sessions.db"
+    monkeypatch.setenv("CURSOR_AGENT__RUNTIME__LOCAL__CWD", str(tmp_path))
+    config = load_config(config_path=Path("/nonexistent/config.yaml"))
+    session_key = session_key_for(config)
+
+    store = SessionStore(db_path)
+    session_id = asyncio.run(
+        _seed_session(
+            store,
+            session_key,
+            workspace=tmp_path,
+            agent_id="agent-keep-no",
+            title="Keep via no",
+        )
+    )
+    _stub_create_store(monkeypatch, db_path)
+
+    result = CliRunner().invoke(
+        app,
+        ["sessions", "delete", session_id],
+        input="no\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    remaining = asyncio.run(SessionStore(db_path).list(session_key))
+    assert len(remaining) == 1
+    assert remaining[0].id == session_id
+
+
 def test_sessions_delete_eof_without_yes_exits_one_and_mentions_yes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -376,6 +413,42 @@ def test_sessions_prune_explicit_n_cancels_with_exit_zero(
         app,
         ["sessions", "prune", "--keep", "0"],
         input="n\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    remaining = asyncio.run(SessionStore(db_path).list(session_key))
+    assert len(remaining) == 1
+
+
+def test_sessions_prune_explicit_no_cancels_with_exit_zero(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit confirm ``no`` on prune exits 0 and leaves rows unchanged.
+
+    WHY (PR #76 review): docs list ``no`` alongside ``n``; lock the named answer.
+    """
+    db_path = tmp_path / "sessions.db"
+    monkeypatch.setenv("CURSOR_AGENT__RUNTIME__LOCAL__CWD", str(tmp_path))
+    config = load_config(config_path=Path("/nonexistent/config.yaml"))
+    session_key = session_key_for(config)
+
+    store = SessionStore(db_path)
+    asyncio.run(
+        _seed_session(
+            store,
+            session_key,
+            workspace=tmp_path,
+            agent_id="agent-prune-keep-no",
+            title="Stay via no",
+        )
+    )
+    _stub_create_store(monkeypatch, db_path)
+
+    result = CliRunner().invoke(
+        app,
+        ["sessions", "prune", "--keep", "0"],
+        input="no\n",
     )
 
     assert result.exit_code == 0, result.output

@@ -1,8 +1,9 @@
 """Package artifact smoke tests for the installed wheel.
 
 Builds the wheel, installs into a fresh virtualenv, and verifies the
-console script (including ``skills --help`` / ``models --help``), bundled
-messaging hook scripts, and skills_pack catalog. No CURSOR_API_KEY.
+console script (operator CLI help including auth/doctor/models/gateway/sessions,
+plus ``skills`` / ``setup``), bundled messaging hook scripts, and skills_pack
+catalog. No CURSOR_API_KEY.
 """
 
 from __future__ import annotations
@@ -20,8 +21,12 @@ from cursor_agent.messaging_hooks import MESSAGING_HOOK_FILENAMES
 pytestmark = pytest.mark.package_smoke
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SMOKE_TIMEOUT_SECONDS = 55
+# WHY (PRD-017 Task 7.2): top-level + auth/doctor/gateway/sessions help adds
+# several subprocesses on top of build/venv/install; 55s was flaky-tight.
+SMOKE_TIMEOUT_SECONDS = 75
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
+_OPERATOR_CLI_TOP_LEVEL_COMMANDS = ("auth", "doctor", "models", "gateway", "sessions")
+_SESSIONS_SUBCOMMANDS = ("show", "delete", "prune")
 
 
 def _strip_ansi(text: str) -> str:
@@ -115,7 +120,11 @@ def _install_wheel(python_bin: Path, wheel_path: Path) -> Path:
 
 
 def _verify_console_help(console_script: Path) -> None:
-    """Installed console script must expose Typer help without API key."""
+    """Installed console script must expose Typer help without API key.
+
+    WHY (PRD-017 FR-6): wheel smoke must list operator commands in top-level
+    ``--help`` so packaging regressions surface before release tags.
+    """
     help_result = _run_command([str(console_script), "--help"])
     _assert_success(help_result, step="cursor-agent --help")
     combined = f"{help_result.stdout}\n{help_result.stderr}".lower()
@@ -123,6 +132,11 @@ def _verify_console_help(console_script: Path) -> None:
         "cursor-agent --help did not print CLI usage text: "
         f"stdout={help_result.stdout!r}, stderr={help_result.stderr!r}"
     )
+    for command in _OPERATOR_CLI_TOP_LEVEL_COMMANDS:
+        assert command in combined, (
+            f"cursor-agent --help must list {command!r}: "
+            f"stdout={help_result.stdout!r}, stderr={help_result.stderr!r}"
+        )
 
 
 def _verify_setup_help(console_script: Path) -> None:
@@ -169,6 +183,100 @@ def _verify_models_help(console_script: Path) -> None:
         "cursor-agent models --help must not document --verbose: "
         f"stdout={help_result.stdout!r}, stderr={help_result.stderr!r}"
     )
+
+
+def _verify_auth_status_help(console_script: Path) -> None:
+    """Installed package must document ``auth status`` flags (PRD-017 FR-1).
+
+    WHY: Rich styles ``--json`` as colored ``-`` tokens; strip ANSI before
+    substring checks (PR #72 / #75 lesson).
+    """
+    help_result = _run_command([str(console_script), "auth", "status", "--help"])
+    _assert_success(help_result, step="cursor-agent auth status --help")
+    combined = _strip_ansi(f"{help_result.stdout}\n{help_result.stderr}")
+    assert "--json" in combined, (
+        "cursor-agent auth status --help must document --json: "
+        f"stdout={help_result.stdout!r}, stderr={help_result.stderr!r}"
+    )
+    has_probe_flag = "--no-probe" in combined or "--probe" in combined
+    assert has_probe_flag, (
+        "cursor-agent auth status --help must document --no-probe or --probe: "
+        f"stdout={help_result.stdout!r}, stderr={help_result.stderr!r}"
+    )
+
+
+def _verify_doctor_help(console_script: Path) -> None:
+    """Installed package must document ``doctor`` flags (PRD-017 FR-2).
+
+    WHY: strip ANSI so ``--json`` / ``--gateway-config`` stay contiguous.
+    """
+    help_result = _run_command([str(console_script), "doctor", "--help"])
+    _assert_success(help_result, step="cursor-agent doctor --help")
+    combined = _strip_ansi(f"{help_result.stdout}\n{help_result.stderr}")
+    assert "--gateway-config" in combined, (
+        "cursor-agent doctor --help must document --gateway-config: "
+        f"stdout={help_result.stdout!r}, stderr={help_result.stderr!r}"
+    )
+    assert "--json" in combined, (
+        "cursor-agent doctor --help must document --json: "
+        f"stdout={help_result.stdout!r}, stderr={help_result.stderr!r}"
+    )
+    assert "--probe" in combined, (
+        "cursor-agent doctor --help must document opt-in --probe: "
+        f"stdout={help_result.stdout!r}, stderr={help_result.stderr!r}"
+    )
+
+
+def _verify_gateway_help(console_script: Path) -> None:
+    """Installed package must keep gateway group options + ``check`` (PRD-017 FR-6).
+
+    WHY: Typer group conversion must not drop gateway's own ``--config`` while
+    registering the ``check`` subcommand.
+    """
+    group_help = _run_command([str(console_script), "gateway", "--help"])
+    _assert_success(group_help, step="cursor-agent gateway --help")
+    combined = _strip_ansi(f"{group_help.stdout}\n{group_help.stderr}")
+    assert "--config" in combined, (
+        "cursor-agent gateway --help must document group --config: "
+        f"stdout={group_help.stdout!r}, stderr={group_help.stderr!r}"
+    )
+    assert "check" in combined.lower(), (
+        "cursor-agent gateway --help must list check subcommand: "
+        f"stdout={group_help.stdout!r}, stderr={group_help.stderr!r}"
+    )
+    check_help = _run_command([str(console_script), "gateway", "check", "--help"])
+    _assert_success(check_help, step="cursor-agent gateway check --help")
+    check_combined = _strip_ansi(f"{check_help.stdout}\n{check_help.stderr}")
+    assert "--config" in check_combined, (
+        "cursor-agent gateway check --help must document --config: "
+        f"stdout={check_help.stdout!r}, stderr={check_help.stderr!r}"
+    )
+
+
+def _verify_sessions_help(console_script: Path) -> None:
+    """Installed package must expose registered ``sessions`` subcommands (PRD-017).
+
+    WHY: same pattern as skills — per-subcommand ``--help`` proves Typer
+    registration beyond prose matches in group help.
+    """
+    group_help = _run_command([str(console_script), "sessions", "--help"])
+    _assert_success(group_help, step="cursor-agent sessions --help")
+    # WHY: Rich may ANSI-style subcommand names; strip before substring checks.
+    group_combined = _strip_ansi(
+        f"{group_help.stdout}\n{group_help.stderr}",
+    ).lower()
+    for subcommand in _SESSIONS_SUBCOMMANDS:
+        assert subcommand in group_combined, (
+            f"cursor-agent sessions --help must list {subcommand!r}: "
+            f"stdout={group_help.stdout!r}, stderr={group_help.stderr!r}"
+        )
+        sub_help = _run_command(
+            [str(console_script), "sessions", subcommand, "--help"],
+        )
+        _assert_success(
+            sub_help,
+            step=f"cursor-agent sessions {subcommand} --help",
+        )
 
 
 def _verify_packaged_hooks(python_bin: Path) -> None:
@@ -226,7 +334,7 @@ def _verify_packaged_skills_pack(python_bin: Path) -> None:
 
 
 def test_installed_wheel_exposes_cli_and_hooks(tmp_path: Path) -> None:
-    """Wheel install smoke: CLI help, setup/skills/models help, hooks, skills pack."""
+    """Wheel install smoke: operator CLI help, hooks, and skills pack."""
     wheel_path = _build_wheel(tmp_path / "dist")
     python_bin = _create_smoke_venv(tmp_path / "smoke-venv")
     console_script = _install_wheel(python_bin, wheel_path)
@@ -234,6 +342,10 @@ def test_installed_wheel_exposes_cli_and_hooks(tmp_path: Path) -> None:
     _verify_setup_help(console_script)
     _verify_skills_help(console_script)
     _verify_models_help(console_script)
+    _verify_auth_status_help(console_script)
+    _verify_doctor_help(console_script)
+    _verify_gateway_help(console_script)
+    _verify_sessions_help(console_script)
     _verify_packaged_hooks(python_bin)
     _verify_packaged_skills_pack(python_bin)
     assert MESSAGING_HOOK_FILENAMES, "expected non-empty hook filename manifest"
