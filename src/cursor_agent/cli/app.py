@@ -29,6 +29,7 @@ from cursor_agent.cli.setup_commands import setup_app
 from cursor_agent.cli.skills_commands import skills_app
 from cursor_agent.cli.startup import load_cwd_dotenv, repl_runtime
 from cursor_agent.cli.stream_renderer import build_display_stream_callbacks
+from cursor_agent.cli.models_command import models_command
 from cursor_agent.cli.usage_command import usage_command
 from cursor_agent.cli.welcome import render_welcome
 from cursor_agent.config.loader import CursorAgentConfig, ToolProfile, load_config
@@ -46,6 +47,7 @@ app.add_typer(auth_app, name="auth")
 app.add_typer(gateway_app, name="gateway")
 app.command("usage")(usage_command)
 app.command("doctor")(doctor_command)
+app.command("models")(models_command)
 
 
 async def _stdin_line_reader() -> AsyncIterator[str]:  # pragma: no cover

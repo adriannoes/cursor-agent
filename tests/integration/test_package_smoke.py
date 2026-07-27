@@ -1,12 +1,13 @@
 """Package artifact smoke tests for the installed wheel.
 
 Builds the wheel, installs into a fresh virtualenv, and verifies the
-console script (including ``skills --help``), bundled messaging hook
-scripts, and skills_pack catalog. No CURSOR_API_KEY.
+console script (including ``skills --help`` / ``models --help``), bundled
+messaging hook scripts, and skills_pack catalog. No CURSOR_API_KEY.
 """
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -20,6 +21,12 @@ pytestmark = pytest.mark.package_smoke
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SMOKE_TIMEOUT_SECONDS = 55
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove Rich/ANSI SGR so flag names are contiguous (PR #72 / #75 lesson)."""
+    return _ANSI_ESCAPE_RE.sub("", text)
 
 
 def _run_command(
@@ -145,6 +152,25 @@ def _verify_skills_help(console_script: Path) -> None:
         )
 
 
+def _verify_models_help(console_script: Path) -> None:
+    """Installed package must expose ``cursor-agent models --help`` (PRD-017 FR-5).
+
+    WHY: Rich help may style ``--json`` as separate ANSI-colored ``-`` tokens, so
+    substring checks must strip SGR first (same lesson as PR #72 auth help).
+    """
+    help_result = _run_command([str(console_script), "models", "--help"])
+    _assert_success(help_result, step="cursor-agent models --help")
+    combined = _strip_ansi(f"{help_result.stdout}\n{help_result.stderr}")
+    assert "--json" in combined, (
+        "cursor-agent models --help must document --json: "
+        f"stdout={help_result.stdout!r}, stderr={help_result.stderr!r}"
+    )
+    assert "--verbose" not in combined, (
+        "cursor-agent models --help must not document --verbose: "
+        f"stdout={help_result.stdout!r}, stderr={help_result.stderr!r}"
+    )
+
+
 def _verify_packaged_hooks(python_bin: Path) -> None:
     """Installed package must ship complete messaging hook sources."""
     probe = "\n".join(
@@ -200,13 +226,14 @@ def _verify_packaged_skills_pack(python_bin: Path) -> None:
 
 
 def test_installed_wheel_exposes_cli_and_hooks(tmp_path: Path) -> None:
-    """Wheel install smoke: CLI help, setup/skills help, hooks, and skills pack."""
+    """Wheel install smoke: CLI help, setup/skills/models help, hooks, skills pack."""
     wheel_path = _build_wheel(tmp_path / "dist")
     python_bin = _create_smoke_venv(tmp_path / "smoke-venv")
     console_script = _install_wheel(python_bin, wheel_path)
     _verify_console_help(console_script)
     _verify_setup_help(console_script)
     _verify_skills_help(console_script)
+    _verify_models_help(console_script)
     _verify_packaged_hooks(python_bin)
     _verify_packaged_skills_pack(python_bin)
     assert MESSAGING_HOOK_FILENAMES, "expected non-empty hook filename manifest"
