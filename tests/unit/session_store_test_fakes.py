@@ -34,9 +34,19 @@ class FrozenClock:
         return self._moment
 
 
+class ControllableClock:
+    """Mutable UTC clock so tests can advance time between create and prune."""
+
+    def __init__(self, moment: datetime) -> None:
+        self.moment = moment
+
+    def __call__(self) -> datetime:
+        return self.moment
+
+
 async def initialized_store(
     tmp_path: Path,
-    clock: SteppingClock | FrozenClock,
+    clock: SteppingClock | FrozenClock | ControllableClock,
 ) -> SessionStore:
     """Return an initialized SessionStore with injected clock."""
     store = SessionStore(tmp_path / "sessions.db", clock=clock)

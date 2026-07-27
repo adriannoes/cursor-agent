@@ -117,7 +117,7 @@ More product examples: [examples/README.md](examples/README.md).
 - **v1.2.0** — product skills pack (`skills/`, `skills path|list|seed`, BYO paste).
 - Earlier: v1.1.0 (`full` profile, Grok default), v1.0 (first-run banner + setup index).
 
-Roadmap: operator CLI hygiene (PRD-017 — Waves 0–3 on integration: facade + `auth status` + `doctor` + `gateway check`; remaining sessions / `models` / docs → suggest `v1.3.0`), logging persistence (PRD-015), Discord/Slack onboarding (PRD-014), Unicode terminal fallback, session search / queueing / TUI when demand justifies.
+Roadmap: operator CLI hygiene (PRD-017 — Waves 0–4 on integration: facade + `auth status` + `doctor` + `gateway check` + `sessions show|delete|prune`; remaining `models` / docs → suggest `v1.3.0`), logging persistence (PRD-015), Discord/Slack onboarding (PRD-014), Unicode terminal fallback, session search / queueing / TUI when demand justifies.
 
 ## Contributing
 
