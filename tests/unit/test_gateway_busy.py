@@ -22,7 +22,11 @@ from tests.unit.gateway_fakes import (
     seed_session,
 )
 
-_BUSY_OUTBOUND_WAIT_ATTEMPTS = 100
+_BUSY_OUTBOUND_WAIT_ATTEMPTS = 300
+# WHY: prove on_inbound returns without awaiting full dispatch; 50ms was too
+# tight under CI Linux + coverage and cancelled the waiter before create_task
+# scheduling completed (flake → stuck at 1 outbound after send_release).
+_ON_INBOUND_RETURN_TIMEOUT_SECONDS = 1.0
 
 
 async def _wait_for_outbound_count(
@@ -33,8 +37,8 @@ async def _wait_for_outbound_count(
     await _wait_for_condition(
         lambda: len(adapter.outbound_messages) >= expected_count,
         description=(
-            f"expected {expected_count} outbound messages, "
-            f"received {len(adapter.outbound_messages)}"
+            f"expected {expected_count} outbound messages "
+            f"(currently {len(adapter.outbound_messages)})"
         ),
         attempts=_BUSY_OUTBOUND_WAIT_ATTEMPTS,
     )
@@ -161,7 +165,7 @@ async def test_sequential_adapter_callback_still_allows_busy_response(
                         text="first serial message",
                     )
                 ),
-                timeout=0.05,
+                timeout=_ON_INBOUND_RETURN_TIMEOUT_SECONDS,
             )
             await facade.send_in_progress.wait()
 
@@ -174,7 +178,7 @@ async def test_sequential_adapter_callback_still_allows_busy_response(
                         text="second serial message",
                     )
                 ),
-                timeout=0.05,
+                timeout=_ON_INBOUND_RETURN_TIMEOUT_SECONDS,
             )
             await _wait_for_outbound_count(adapter, 1)
 
