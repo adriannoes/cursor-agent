@@ -16,9 +16,9 @@ from cursor_agent.messaging_hooks import (
     MESSAGING_HOOK_FILENAMES,
     WORKSPACE_MESSAGING_HOOK_COMMAND_PREFIX,
     HookManifest,
-    _read_manifest,
-    _rewrite_messaging_manifest,
+    read_hook_manifest,
     resolve_messaging_hook_source_dir,
+    rewrite_messaging_manifest,
     workspace_messaging_hooks_dir,
     workspace_project_hooks_manifest_path,
 )
@@ -74,10 +74,10 @@ def _expected_messaging_hook_bindings() -> frozenset[MessagingHookBinding]:
     """
     try:
         source_dir = resolve_messaging_hook_source_dir()
-        source_manifest = _read_manifest(source_dir / "hooks.json")
+        source_manifest = read_hook_manifest(source_dir / "hooks.json")
     except (ConfigError, OSError, ValueError, json.JSONDecodeError):
         return frozenset()
-    rewritten = _rewrite_messaging_manifest(source_manifest)
+    rewritten = rewrite_messaging_manifest(source_manifest)
     return _messaging_hook_bindings(rewritten)
 
 
@@ -99,7 +99,7 @@ def _project_manifest_has_messaging_hooks(manifest_path: Path) -> bool:
     if not manifest_path.is_file():
         return False
     try:
-        manifest = _read_manifest(manifest_path)
+        manifest = read_hook_manifest(manifest_path)
     except (OSError, ValueError, json.JSONDecodeError):
         return False
     expected = _expected_messaging_hook_bindings()

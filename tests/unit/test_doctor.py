@@ -130,7 +130,7 @@ def _write_minimal_gateway_yaml(path: Path, *, workspace: Path) -> None:
 def _spy_probe_api_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> list[object]:
-    """Install probe spies on auth / facade / doctor_command."""
+    """Install probe spies on the real bind sites (auth_status + sdk_facade)."""
     probe_calls: list[object] = []
 
     async def _recording_probe(**kwargs: object) -> bool:
@@ -140,9 +140,8 @@ def _spy_probe_api_key(
     for target in (
         "cursor_agent.auth_status.probe_api_key",
         "cursor_agent.sdk_facade.probe_api_key",
-        "cursor_agent.cli.doctor_command.probe_api_key",
     ):
-        monkeypatch.setattr(target, _recording_probe, raising=False)
+        monkeypatch.setattr(target, _recording_probe, raising=True)
 
     return probe_calls
 

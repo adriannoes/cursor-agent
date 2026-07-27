@@ -316,16 +316,10 @@ def test_cli_auth_status_no_probe_does_not_call_probe_api_key(
     monkeypatch.setenv("CURSOR_API_KEY", "sk-test-present")
     monkeypatch.setenv(USAGE_TOKEN_ENV_VAR, "oauth-token-present")
     monkeypatch.setenv("HOME", str(tmp_path))
-    # Patch at the CLI command module (where 2.2 will import the facade helper).
-    monkeypatch.setattr(
-        "cursor_agent.cli.auth_command.probe_api_key",
-        _spy_probe_api_key,
-        raising=False,
-    )
     monkeypatch.setattr(
         "cursor_agent.auth_status.probe_api_key",
         _spy_probe_api_key,
-        raising=False,
+        raising=True,
     )
 
     fetch_calls: list[object] = []
@@ -335,14 +329,9 @@ def test_cli_auth_status_no_probe_does_not_call_probe_api_key(
         return {}
 
     monkeypatch.setattr(
-        "cursor_agent.cli.auth_command.fetch_current_period_usage",
-        _spy_fetch,
-        raising=False,
-    )
-    monkeypatch.setattr(
         "cursor_agent.auth_status.fetch_current_period_usage",
         _spy_fetch,
-        raising=False,
+        raising=True,
     )
 
     result = _invoke_auth_status("--no-probe")
@@ -373,14 +362,9 @@ def test_cli_auth_status_probe_failure_exits_one(
     monkeypatch.setenv(USAGE_TOKEN_ENV_VAR, "oauth-token-present")
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(
-        "cursor_agent.cli.auth_command.probe_api_key",
-        _failing_probe,
-        raising=False,
-    )
-    monkeypatch.setattr(
         "cursor_agent.auth_status.probe_api_key",
         _failing_probe,
-        raising=False,
+        raising=True,
     )
 
     # Default is probe-on when credentials are present (Q1).
@@ -405,7 +389,7 @@ def test_cli_auth_status_unmapped_probe_exception_exits_one(
     monkeypatch.setattr(
         "cursor_agent.auth_status.probe_api_key",
         _boom_probe,
-        raising=False,
+        raising=True,
     )
 
     result = _invoke_auth_status()
@@ -443,7 +427,7 @@ def test_cli_auth_status_present_oauth_unreadable_token_exits_one(
     monkeypatch.setattr(
         "cursor_agent.auth_status.probe_api_key",
         _ok_probe,
-        raising=False,
+        raising=True,
     )
 
     result = _invoke_auth_status()
@@ -466,24 +450,14 @@ def test_cli_auth_status_usage_oauth_probe_failure_exits_one(
     monkeypatch.setenv(USAGE_TOKEN_ENV_VAR, "oauth-token-present")
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(
-        "cursor_agent.cli.auth_command.probe_api_key",
-        _ok_probe,
-        raising=False,
-    )
-    monkeypatch.setattr(
         "cursor_agent.auth_status.probe_api_key",
         _ok_probe,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        "cursor_agent.cli.auth_command.fetch_current_period_usage",
-        _failing_fetch,
-        raising=False,
+        raising=True,
     )
     monkeypatch.setattr(
         "cursor_agent.auth_status.fetch_current_period_usage",
         _failing_fetch,
-        raising=False,
+        raising=True,
     )
 
     result = _invoke_auth_status()
@@ -512,24 +486,14 @@ def test_cli_auth_status_json_shape_omits_secrets_and_identity(
         return {"planUsage": {"totalPercentUsed": 1.0}}
 
     monkeypatch.setattr(
-        "cursor_agent.cli.auth_command.probe_api_key",
-        _ok_probe,
-        raising=False,
-    )
-    monkeypatch.setattr(
         "cursor_agent.auth_status.probe_api_key",
         _ok_probe,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        "cursor_agent.cli.auth_command.fetch_current_period_usage",
-        _ok_fetch,
-        raising=False,
+        raising=True,
     )
     monkeypatch.setattr(
         "cursor_agent.auth_status.fetch_current_period_usage",
         _ok_fetch,
-        raising=False,
+        raising=True,
     )
 
     result = _invoke_auth_status("--json", "--no-probe")
