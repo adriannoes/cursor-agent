@@ -310,11 +310,12 @@ Reports two channels: **API key** (`CURSOR_API_KEY`) and **usage OAuth** (`CURSO
 | Condition | Exit |
 |-----------|------|
 | API key missing | **1** |
+| Usage OAuth `invalid_store` (malformed / unreadable `auth.json`) | **1** |
 | Usage OAuth missing alone (API key present; no probe failure) | **0** + `warning:` line |
 | Any requested probe fails | **1** |
 | All requested checks pass | **0** |
 
-With `--no-probe`, exit **1** is only possible via the missing-API-key rule.
+With `--no-probe`, exit **1** is still possible via the **missing-API-key** rule **or** usage OAuth **`invalid_store`** (probe failures do not apply because probes are skipped).
 
 ### `doctor`
 

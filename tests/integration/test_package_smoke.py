@@ -221,6 +221,10 @@ def _verify_doctor_help(console_script: Path) -> None:
         "cursor-agent doctor --help must document --json: "
         f"stdout={help_result.stdout!r}, stderr={help_result.stderr!r}"
     )
+    assert "--probe" in combined, (
+        "cursor-agent doctor --help must document opt-in --probe: "
+        f"stdout={help_result.stdout!r}, stderr={help_result.stderr!r}"
+    )
 
 
 def _verify_gateway_help(console_script: Path) -> None:
@@ -257,7 +261,10 @@ def _verify_sessions_help(console_script: Path) -> None:
     """
     group_help = _run_command([str(console_script), "sessions", "--help"])
     _assert_success(group_help, step="cursor-agent sessions --help")
-    group_combined = f"{group_help.stdout}\n{group_help.stderr}".lower()
+    # WHY: Rich may ANSI-style subcommand names; strip before substring checks.
+    group_combined = _strip_ansi(
+        f"{group_help.stdout}\n{group_help.stderr}",
+    ).lower()
     for subcommand in _SESSIONS_SUBCOMMANDS:
         assert subcommand in group_combined, (
             f"cursor-agent sessions --help must list {subcommand!r}: "
