@@ -11,7 +11,7 @@ Public API under test:
   → Gateway. Setup reuses shared helpers behind ``run_setup_check``.
 
 - **Messaging hooks** — public ``messaging_hooks_status(...)`` in
-  ``cursor_agent.messaging_hooks``:
+  ``cursor_agent.messaging_hooks_status``:
   - ``messaging`` + missing/incomplete → **error** severity
   - incomplete includes scripts present but project ``hooks.json`` missing
     **any** expected messaging command binding (not merely ``any()``)
@@ -156,7 +156,7 @@ def test_messaging_hooks_status_messaging_missing_is_error(
     tmp_path: Path,
 ) -> None:
     """Public helper: messaging profile + incomplete hooks → error severity."""
-    from cursor_agent.messaging_hooks import messaging_hooks_status
+    from cursor_agent.messaging_hooks_status import messaging_hooks_status
 
     workspace = tmp_path / "ws"
     workspace.mkdir()
@@ -173,7 +173,7 @@ def test_messaging_hooks_status_coding_not_required_is_ok_not_warning(
     tmp_path: Path,
 ) -> None:
     """Public helper: coding without hooks → ok (not required), never warning."""
-    from cursor_agent.messaging_hooks import messaging_hooks_status
+    from cursor_agent.messaging_hooks_status import messaging_hooks_status
 
     workspace = tmp_path / "ws"
     workspace.mkdir()
@@ -193,7 +193,7 @@ def test_messaging_hooks_status_full_not_required_is_ok_not_warning(
     tmp_path: Path,
 ) -> None:
     """Public helper: full without hooks → ok (not required), never warning."""
-    from cursor_agent.messaging_hooks import messaging_hooks_status
+    from cursor_agent.messaging_hooks_status import messaging_hooks_status
 
     workspace = tmp_path / "ws"
     workspace.mkdir()
@@ -221,10 +221,10 @@ def test_messaging_hooks_status_single_binding_is_incomplete_error(
         MESSAGING_HOOK_FILENAMES,
         WORKSPACE_MESSAGING_HOOK_COMMAND_PREFIX,
         ensure_messaging_hooks,
-        messaging_hooks_status,
         workspace_messaging_hooks_dir,
         workspace_project_hooks_manifest_path,
     )
+    from cursor_agent.messaging_hooks_status import messaging_hooks_status
 
     workspace = tmp_path / "ws"
     workspace.mkdir()
@@ -282,10 +282,10 @@ def test_messaging_hooks_status_wrong_event_bindings_is_incomplete_error(
         MESSAGING_HOOK_FILENAMES,
         WORKSPACE_MESSAGING_HOOK_COMMAND_PREFIX,
         ensure_messaging_hooks,
-        messaging_hooks_status,
         workspace_messaging_hooks_dir,
         workspace_project_hooks_manifest_path,
     )
+    from cursor_agent.messaging_hooks_status import messaging_hooks_status
 
     workspace = tmp_path / "ws"
     workspace.mkdir()
