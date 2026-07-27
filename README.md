@@ -121,6 +121,7 @@ More product examples: [examples/README.md](examples/README.md).
 
 ## Releases
 
+- **v1.3.0** — operator CLI hygiene: `auth status`, `doctor`, `gateway check`, `sessions show|delete|prune`, live `models`; docs, package-smoke, and operator smoke for the release train.
 - **v1.2.1** — skills discovery harden + package-smoke isolation after the v1.2.0 review follow-up.
 - **v1.2.0** — product skills pack (`skills/`, `skills path|list|seed`, BYO paste).
 - Earlier: v1.1.0 (`full` profile, Grok default), v1.0 (first-run banner + setup index).
