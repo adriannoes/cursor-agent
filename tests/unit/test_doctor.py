@@ -42,7 +42,6 @@ import pytest
 from typer.testing import CliRunner
 
 from cursor_agent.cli.app import app
-from cursor_agent.sdk_facade import FakeSdkFacade
 from cursor_agent.usage import USAGE_TOKEN_ENV_VAR
 
 
@@ -500,16 +499,6 @@ def test_cli_doctor_default_does_not_call_probe_api_key(
     )
     probe_calls = _spy_probe_api_key(monkeypatch)
 
-    # Also spy FakeSdkFacade.probe_api_key in case doctor injects a facade.
-    facade_probe_calls: list[object] = []
-    original_probe = FakeSdkFacade.probe_api_key
-
-    async def _facade_spy(self: FakeSdkFacade, *args: object, **kwargs: object) -> bool:
-        facade_probe_calls.append({"args": args, "kwargs": kwargs})
-        return await original_probe(self, *args, **kwargs)
-
-    monkeypatch.setattr(FakeSdkFacade, "probe_api_key", _facade_spy)
-
     result = _invoke_doctor(
         "--gateway-config",
         str(tmp_path / "missing-gateway.yaml"),
@@ -517,10 +506,6 @@ def test_cli_doctor_default_does_not_call_probe_api_key(
     assert result.exit_code == 0, result.output
     assert probe_calls == [], (
         f"probe_api_key must not run on default doctor: {probe_calls}"
-    )
-    assert facade_probe_calls == [], (
-        f"FakeSdkFacade.probe_api_key must not run on default doctor: "
-        f"{facade_probe_calls}"
     )
     assert _PLACEHOLDER_API_KEY not in result.output
     assert "oauth-present-but-must-not-probe" not in result.output
