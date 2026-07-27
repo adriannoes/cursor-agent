@@ -42,6 +42,7 @@ Get started:
   - /skills          list skills (also: skills list)
   - skills seed      optional starters; skills path
   - sessions list    see past sessions
+  - doctor           check local setup health
 
   Setup & docs: docs/setup.md
 ==========================================================
@@ -111,7 +112,7 @@ More product examples: [examples/README.md](examples/README.md).
 
 | Document | Description |
 |----------|-------------|
-| [Setup guide](docs/setup.md) | Install, API key, config, skills, gateway index |
+| [Setup guide](docs/setup.md) | Install, API key, config, operator CLI, skills, gateway index |
 | [AGENTS.md](AGENTS.md) | Conventions and verification for AI agents |
 | [SECURITY.md](SECURITY.md) | Messaging threat model and hooks |
 | [Architecture](docs/architecture.md) | Sessions, facade, concurrency, profiles |
@@ -124,7 +125,7 @@ More product examples: [examples/README.md](examples/README.md).
 - **v1.2.0** — product skills pack (`skills/`, `skills path|list|seed`, BYO paste).
 - Earlier: v1.1.0 (`full` profile, Grok default), v1.0 (first-run banner + setup index).
 
-Roadmap: operator CLI hygiene (PRD-017 — Waves 0–5 on integration: facade + `auth status` + `doctor` + `gateway check` + `sessions show|delete|prune` + `models`; remaining docs / package-smoke / `v1.3.0` closeout), logging persistence (PRD-015), Discord/Slack onboarding (PRD-014), Unicode terminal fallback, session search / queueing / TUI when demand justifies.
+Roadmap: operator CLI hygiene (`auth`/`doctor`/`gateway check`/sessions hygiene/`models`) for v1.3.0 (docs/closeout on this branch; not yet merged to main), logging persistence (PRD-015), Discord/Slack onboarding (PRD-014), Unicode terminal fallback, session search / queueing / TUI when demand justifies.
 
 ## Contributing
 
