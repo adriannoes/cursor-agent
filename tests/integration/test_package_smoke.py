@@ -7,6 +7,7 @@ messaging hook scripts, and skills_pack catalog. No CURSOR_API_KEY.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -20,6 +21,12 @@ pytestmark = pytest.mark.package_smoke
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SMOKE_TIMEOUT_SECONDS = 55
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove Rich/ANSI SGR so flag names are contiguous (PR #72 / #75 lesson)."""
+    return _ANSI_ESCAPE_RE.sub("", text)
 
 
 def _run_command(
@@ -146,10 +153,14 @@ def _verify_skills_help(console_script: Path) -> None:
 
 
 def _verify_models_help(console_script: Path) -> None:
-    """Installed package must expose ``cursor-agent models --help`` (PRD-017 FR-5)."""
+    """Installed package must expose ``cursor-agent models --help`` (PRD-017 FR-5).
+
+    WHY: Rich help may style ``--json`` as separate ANSI-colored ``-`` tokens, so
+    substring checks must strip SGR first (same lesson as PR #72 auth help).
+    """
     help_result = _run_command([str(console_script), "models", "--help"])
     _assert_success(help_result, step="cursor-agent models --help")
-    combined = f"{help_result.stdout}\n{help_result.stderr}"
+    combined = _strip_ansi(f"{help_result.stdout}\n{help_result.stderr}")
     assert "--json" in combined, (
         "cursor-agent models --help must document --json: "
         f"stdout={help_result.stdout!r}, stderr={help_result.stderr!r}"
