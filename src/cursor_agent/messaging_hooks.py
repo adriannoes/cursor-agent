@@ -352,3 +352,31 @@ def ensure_messaging_hooks(
         user_hooks_dir=installed_dir,
         logger=logger,
     )
+
+
+# Compatibility re-export: canonical home is messaging_hooks_status (PRD-017).
+from cursor_agent.messaging_hooks_status import (  # noqa: E402
+    MessagingHooksStatusReport,
+    messaging_hooks_status,
+)
+
+__all__ = [
+    "DEFAULT_USER_MESSAGING_HOOKS_DIR",
+    "HookEntry",
+    "HookManifest",
+    "MESSAGING_HOOK_FILENAMES",
+    "MessagingHooksStatusReport",
+    "WORKSPACE_MESSAGING_HOOK_COMMAND_PREFIX",
+    "WORKSPACE_MESSAGING_HOOKS_RELATIVE",
+    "WORKSPACE_PROJECT_HOOKS_RELATIVE",
+    "deploy_messaging_hooks_to_workspace",
+    "ensure_messaging_hooks",
+    "install_messaging_hooks",
+    "messaging_hook_source_fingerprint",
+    "messaging_hooks_status",
+    "read_hook_manifest",
+    "resolve_messaging_hook_source_dir",
+    "rewrite_messaging_manifest",
+    "workspace_messaging_hooks_dir",
+    "workspace_project_hooks_manifest_path",
+]
