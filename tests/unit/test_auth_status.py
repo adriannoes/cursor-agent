@@ -433,12 +433,8 @@ def test_cli_auth_status_present_oauth_unreadable_token_exits_one(
         lambda **_: ApiKeyStatus.PRESENT,
     )
     monkeypatch.setattr(
-        "cursor_agent.auth_status.resolve_usage_oauth_local_status",
-        lambda **_: UsageOauthStatus.PRESENT,
-    )
-    monkeypatch.setattr(
-        "cursor_agent.auth_status._read_usage_oauth_token",
-        lambda **_: None,
+        "cursor_agent.auth_status._load_usage_oauth",
+        lambda **_: (UsageOauthStatus.PRESENT, None),
     )
 
     async def _ok_probe(**kwargs: object) -> bool:

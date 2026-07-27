@@ -97,55 +97,44 @@ def resolve_usage_oauth_local_status(
         status = resolve_usage_oauth_local_status(env={}, auth_json_path=path)
     """
     environ: Mapping[str, str] = os.environ if env is None else env
-    env_token = (environ.get(USAGE_TOKEN_ENV_VAR) or "").strip()
-    if env_token:
-        return UsageOauthStatus.PRESENT
-
     path = (
         auth_json_path if auth_json_path is not None else default_cursor_cli_auth_path()
     )
-    return _inspect_auth_json_oauth_status(path)
+    status, _token = _load_usage_oauth(env=environ, auth_json_path=path)
+    return status
 
 
-def _inspect_auth_json_oauth_status(path: Path) -> UsageOauthStatus:
-    """Classify the auth store by path existence and JSON structure."""
-    if not path.is_file():
-        return UsageOauthStatus.MISSING
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except OSError:
-        return UsageOauthStatus.INVALID_STORE
-    try:
-        data: object = json.loads(raw)
-    except json.JSONDecodeError:
-        return UsageOauthStatus.INVALID_STORE
-    if not isinstance(data, dict):
-        return UsageOauthStatus.INVALID_STORE
-    access = str(data.get("accessToken") or "").strip()
-    if not access:
-        return UsageOauthStatus.INVALID_STORE
-    return UsageOauthStatus.PRESENT
-
-
-def _read_usage_oauth_token(
+def _load_usage_oauth(
     *,
     env: Mapping[str, str],
     auth_json_path: Path,
-) -> str | None:
-    """Return a non-empty OAuth token when structurally present, else ``None``."""
+) -> tuple[UsageOauthStatus, str | None]:
+    """Load usage-OAuth status and token from env or ``auth.json`` once.
+
+    Returns:
+        ``(PRESENT, token)`` when env or store has a non-empty token;
+        ``(MISSING, None)`` when the auth store file is absent;
+        ``(INVALID_STORE, None)`` when the store is unreadable or malformed.
+    """
     env_token = (env.get(USAGE_TOKEN_ENV_VAR) or "").strip()
     if env_token:
-        return env_token
+        return UsageOauthStatus.PRESENT, env_token
     if not auth_json_path.is_file():
-        return None
+        return UsageOauthStatus.MISSING, None
     try:
-        data: object = json.loads(auth_json_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
+        raw = auth_json_path.read_text(encoding="utf-8")
+    except OSError:
+        return UsageOauthStatus.INVALID_STORE, None
+    try:
+        data: object = json.loads(raw)
+    except json.JSONDecodeError:
+        return UsageOauthStatus.INVALID_STORE, None
     if not isinstance(data, dict):
-        return None
+        return UsageOauthStatus.INVALID_STORE, None
     access = str(data.get("accessToken") or "").strip()
-    return access or None
+    if not access:
+        return UsageOauthStatus.INVALID_STORE, None
+    return UsageOauthStatus.PRESENT, access
 
 
 def _probe_api_key_channel(api_key: str) -> bool:
@@ -185,7 +174,7 @@ def collect_auth_channel_report(
         auth_json_path if auth_json_path is not None else default_cursor_cli_auth_path()
     )
     api_key_status = resolve_api_key_local_status(env=environ)
-    oauth_status = resolve_usage_oauth_local_status(env=environ, auth_json_path=path)
+    oauth_status, oauth_token = _load_usage_oauth(env=environ, auth_json_path=path)
 
     api_key_probe_ok: bool | None = None
     usage_oauth_probe_ok: bool | None = None
@@ -200,12 +189,11 @@ def collect_auth_channel_report(
             api_key_probe_ok = False
 
     if probe and oauth_status is UsageOauthStatus.PRESENT:
-        token = _read_usage_oauth_token(env=environ, auth_json_path=path)
-        if token is None:
+        if oauth_token is None:
             usage_oauth_probe_ok = False
         else:
             try:
-                usage_oauth_probe_ok = _probe_usage_oauth_channel(token)
+                usage_oauth_probe_ok = _probe_usage_oauth_channel(oauth_token)
             except Exception:
                 usage_oauth_probe_ok = False
 
