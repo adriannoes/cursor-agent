@@ -71,6 +71,8 @@ uv run cursor-agent doctor --gateway-config ~/.cursor-agent/gateway.yaml
 uv run cursor-agent gateway check           # offline gateway.yaml validate (no Telegram)
 uv run cursor-agent gateway                 # ~/.cursor-agent/gateway.yaml
 uv run cursor-agent gateway --config /path/to/gateway.yaml
+uv run cursor-agent models                  # live model catalog (needs CURSOR_API_KEY)
+uv run cursor-agent models --json
 ```
 
 Runtime data lives under `~/.cursor-agent/`. Overrides: [Setup — Configuration](docs/setup.md#configuration) and [.env.example](.env.example).
@@ -80,6 +82,8 @@ Runtime data lives under `~/.cursor-agent/`. Overrides: [Setup — Configuration
 `cursor-agent auth status` reports both channels without printing secrets. Use `--no-probe` for a fast/air-gapped local check; default probes when a credential is present (API-key probe launches the SDK bridge).
 
 `cursor-agent doctor` aggregates setup, auth, messaging hooks, and offline gateway YAML (when present). Local by default; `--probe` opt-in. Prefer `--gateway-config` (not `--config`). `gateway check` validates YAML without starting the long-lived process.
+
+`cursor-agent models` lists the live Cursor catalog via the SDK bridge (needs `CURSOR_API_KEY`). Soft-catalog ids are marked `(recommended)`; use `--json` for scripts.
 
 ## Skills
 
@@ -120,7 +124,7 @@ More product examples: [examples/README.md](examples/README.md).
 - **v1.2.0** — product skills pack (`skills/`, `skills path|list|seed`, BYO paste).
 - Earlier: v1.1.0 (`full` profile, Grok default), v1.0 (first-run banner + setup index).
 
-Roadmap: operator CLI hygiene (PRD-017 — Waves 0–4 on integration: facade + `auth status` + `doctor` + `gateway check` + `sessions show|delete|prune`; remaining `models` / docs → suggest `v1.3.0`), logging persistence (PRD-015), Discord/Slack onboarding (PRD-014), Unicode terminal fallback, session search / queueing / TUI when demand justifies.
+Roadmap: operator CLI hygiene (PRD-017 — Waves 0–5 on integration: facade + `auth status` + `doctor` + `gateway check` + `sessions show|delete|prune` + `models`; remaining docs / package-smoke / `v1.3.0` closeout), logging persistence (PRD-015), Discord/Slack onboarding (PRD-014), Unicode terminal fallback, session search / queueing / TUI when demand justifies.
 
 ## Contributing
 

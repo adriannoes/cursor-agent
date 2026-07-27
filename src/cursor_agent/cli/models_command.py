@@ -48,11 +48,17 @@ def _redact_api_key_in_text(message: str, *, api_key: str) -> str:
     return message.replace(api_key, REDACTION_TOKEN)
 
 
+def _collapse_description_whitespace(description: str) -> str:
+    """Collapse embedded newlines/whitespace so human rows stay single-line."""
+    return " ".join(description.split())
+
+
 def _truncate_description(description: str) -> str:
     """Truncate a long model description for human one-line display."""
-    if len(description) <= _DESCRIPTION_MAX_LEN:
-        return description
-    return description[: _DESCRIPTION_MAX_LEN - 1] + "…"
+    collapsed = _collapse_description_whitespace(description)
+    if len(collapsed) <= _DESCRIPTION_MAX_LEN:
+        return collapsed
+    return collapsed[: _DESCRIPTION_MAX_LEN - 1] + "…"
 
 
 def _format_models_human_line(
@@ -115,8 +121,12 @@ def models_command(
             )
         )
     except CursorAgentError as exc:
+        # WHY: redact before exit; from None so a traceback cannot re-surface
+        # the original AuthError/ConfigError text that may embed the raw key
+        # (ADR-025; same posture as gateway redaction follow-up).
+        exit_code = exit_code_for_error(exc)
         _echo_models_cli_error(exc, api_key=api_key)
-        raise typer.Exit(exit_code_for_error(exc)) from exc
+        raise typer.Exit(exit_code) from None
 
     recommended_ids = frozenset(recommended_agent_model_ids())
     if json_output:

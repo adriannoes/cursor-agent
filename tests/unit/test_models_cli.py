@@ -1,6 +1,4 @@
-"""Unit tests for PRD-017 ``cursor-agent models`` (Wave 5 / task 6.1 — red until 6.2).
-
-Intended public API (implemented in task 6.2 — these tests must fail until then):
+"""Unit tests for PRD-017 ``cursor-agent models`` (Wave 5 / FR-5).
 
 - **CLI** ``cursor-agent models [--json]`` registered on the root Typer app.
 - Live catalog via facade module-level ``list_models`` (never ``cursor_sdk``
@@ -14,14 +12,14 @@ Intended public API (implemented in task 6.2 — these tests must fail until the
   (``format_startup_error`` / ``CURSOR_API_KEY_SETUP_HINT``), exit 1.
 - Bridge launch failure → ``ConfigError``, exit 1.
 - ``AuthError`` from ``list_models`` → exit 1 with setup hint.
+- Hermeticity: stub ``load_cwd_dotenv`` so a developer CWD ``.env`` cannot
+  re-inject ``CURSOR_API_KEY`` into CliRunner invokes.
 
-Pattern: ``tests/unit/test_auth_status.py`` / ``test_usage.py`` CliRunner +
-monkeypatch at the command module bind site.
+Pattern: ``tests/unit/test_skills_cli.py`` CliRunner + monkeypatch.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import re
 from typing import Any
@@ -33,6 +31,7 @@ from cursor_agent.cli.app import app
 from cursor_agent.errors import AuthError, ConfigError
 from cursor_agent.first_party_models import recommended_agent_model_ids
 from cursor_agent.product_copy import CURSOR_API_KEY_SETUP_HINT
+from cursor_agent.sdk_facade import MODELS_LIST_TIMEOUT_SECONDS
 from cursor_agent.sdk_facade_models import ModelCatalogEntry
 
 
@@ -67,6 +66,13 @@ def _sample_model_catalog() -> list[ModelCatalogEntry]:
     ]
 
 
+def _stub_load_cwd_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prevent root Typer callback from reloading CWD ``.env`` into the process env."""
+    # WHY: ``load_cwd_dotenv(override=False)`` can re-inject CURSOR_API_KEY from a
+    # developer ``.env`` after tests ``delenv`` / set controlled values.
+    monkeypatch.setattr("cursor_agent.cli.app.load_cwd_dotenv", lambda: None)
+
+
 def _invoke_models(*args: str) -> Any:
     """Invoke the ``models`` subcommand via the root Typer app."""
     return CliRunner().invoke(app, ["models", *args])
@@ -78,14 +84,7 @@ def _install_fake_list_models(
     catalog: list[ModelCatalogEntry] | None = None,
     error: BaseException | None = None,
 ) -> list[dict[str, object]]:
-    """Monkeypatch facade ``list_models`` (and CLI bind site when present).
-
-    Always patches ``cursor_agent.sdk_facade.list_models``. When task 6.2 adds
-    ``cli/models_command.py``, also patches that module's ``list_models`` bind
-    so ``from cursor_agent.sdk_facade import list_models`` stays fakeable.
-    During red (module missing), skip the CLI path so failures stay
-    ``No such command 'models'`` rather than monkeypatch ImportError.
-    """
+    """Monkeypatch facade ``list_models`` at the CLI bind site and module path."""
     calls: list[dict[str, object]] = []
     rows = catalog if catalog is not None else _sample_model_catalog()
 
@@ -103,14 +102,10 @@ def _install_fake_list_models(
         "cursor_agent.sdk_facade.list_models",
         _fake_list_models,
     )
-    # WHY: pytest monkeypatch cannot resolve a dotted path whose module is
-    # absent; find_spec avoids ImportError so red stays "command not found".
-    if importlib.util.find_spec("cursor_agent.cli.models_command") is not None:
-        monkeypatch.setattr(
-            "cursor_agent.cli.models_command.list_models",
-            _fake_list_models,
-            raising=False,
-        )
+    monkeypatch.setattr(
+        "cursor_agent.cli.models_command.list_models",
+        _fake_list_models,
+    )
     return calls
 
 
@@ -121,6 +116,7 @@ def _install_fake_list_models(
 
 def test_models_help_exposes_json_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     """``models --help`` documents ``--json`` (no ``--verbose``)."""
+    _stub_load_cwd_dotenv(monkeypatch)
     monkeypatch.setenv("TERM", "xterm-256color")
     monkeypatch.setenv("COLUMNS", "80")
     monkeypatch.delenv("NO_COLOR", raising=False)
@@ -141,12 +137,20 @@ def test_cli_models_human_list_marks_recommended_ids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Human output marks soft-catalog ids with ``(recommended)``; others stay plain."""
+    _stub_load_cwd_dotenv(monkeypatch)
     monkeypatch.setenv("CURSOR_API_KEY", _FAKE_API_KEY)
-    _install_fake_list_models(monkeypatch)
+    calls = _install_fake_list_models(monkeypatch)
 
     result = _invoke_models()
     assert result.exit_code == 0, result.output
     output = result.output
+
+    assert calls == [
+        {
+            "api_key": _FAKE_API_KEY,
+            "timeout_seconds": MODELS_LIST_TIMEOUT_SECONDS,
+        }
+    ]
 
     recommended = set(recommended_agent_model_ids())
     assert "grok-4.5" in recommended
@@ -172,6 +176,7 @@ def test_cli_models_human_includes_id_and_display_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Each human line includes model id and display_name."""
+    _stub_load_cwd_dotenv(monkeypatch)
     monkeypatch.setenv("CURSOR_API_KEY", _FAKE_API_KEY)
     _install_fake_list_models(monkeypatch)
 
@@ -180,6 +185,31 @@ def test_cli_models_human_includes_id_and_display_name(
     for entry in _sample_model_catalog():
         assert entry.id in result.output
         assert entry.display_name in result.output
+
+
+def test_cli_models_human_collapses_multiline_description(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Human one-line rows collapse embedded newlines in SDK descriptions."""
+    _stub_load_cwd_dotenv(monkeypatch)
+    monkeypatch.setenv("CURSOR_API_KEY", _FAKE_API_KEY)
+    _install_fake_list_models(
+        monkeypatch,
+        catalog=[
+            ModelCatalogEntry(
+                id="multiline-demo",
+                display_name="Multiline Demo",
+                description="first line\nsecond line\nthird",
+            ),
+        ],
+    )
+
+    result = _invoke_models()
+    assert result.exit_code == 0, result.output
+    matching = [line for line in result.output.splitlines() if "multiline-demo" in line]
+    assert len(matching) == 1, result.output
+    assert "first line second line third" in matching[0]
+    assert "\n" not in matching[0]
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +221,7 @@ def test_cli_models_json_shape_includes_recommended_bool(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``--json`` is a list of objects with id/display_name/description/recommended."""
+    _stub_load_cwd_dotenv(monkeypatch)
     monkeypatch.setenv("CURSOR_API_KEY", _FAKE_API_KEY)
     _install_fake_list_models(monkeypatch)
 
@@ -229,6 +260,7 @@ def test_cli_models_missing_api_key_exits_one_with_setup_hint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Unset ``CURSOR_API_KEY`` → exit 1 + AuthError setup hint; never prints a key."""
+    _stub_load_cwd_dotenv(monkeypatch)
     monkeypatch.delenv("CURSOR_API_KEY", raising=False)
     calls = _install_fake_list_models(monkeypatch)
 
@@ -245,6 +277,7 @@ def test_cli_models_empty_api_key_exits_one_with_setup_hint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Empty/whitespace ``CURSOR_API_KEY`` → exit 1 + setup hint path."""
+    _stub_load_cwd_dotenv(monkeypatch)
     monkeypatch.setenv("CURSOR_API_KEY", "   ")
     calls = _install_fake_list_models(monkeypatch)
 
@@ -265,6 +298,7 @@ def test_cli_models_config_error_from_list_models_exits_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Bridge launch failure (``ConfigError`` from ``list_models``) → exit 1."""
+    _stub_load_cwd_dotenv(monkeypatch)
     monkeypatch.setenv("CURSOR_API_KEY", _FAKE_API_KEY)
     _install_fake_list_models(
         monkeypatch,
@@ -289,6 +323,7 @@ def test_cli_models_auth_error_from_list_models_exits_one_with_setup_hint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``AuthError`` from ``list_models`` → exit 1 with API-key setup hint."""
+    _stub_load_cwd_dotenv(monkeypatch)
     monkeypatch.setenv("CURSOR_API_KEY", _FAKE_API_KEY)
     _install_fake_list_models(
         monkeypatch,
@@ -306,6 +341,7 @@ def test_cli_models_redacts_api_key_embedded_in_facade_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """ADR-025: error text that embeds the resolved API key must not reach stdout/stderr."""
+    _stub_load_cwd_dotenv(monkeypatch)
     monkeypatch.setenv("CURSOR_API_KEY", _FAKE_API_KEY)
     _install_fake_list_models(
         monkeypatch,
