@@ -1,5 +1,5 @@
 # Gateway configuration example (PRD-006).
-# Copy to ~/.cursor-agent/gateway.yaml and set TELEGRAM_BOT_TOKEN in the environment.
+# Copy to ~/.cursor-agent/gateway.yaml and set secrets in the environment.
 #
 # CLI override (Wave 4): cursor-agent gateway --config /path/to/gateway.yaml
 
@@ -19,3 +19,15 @@ platforms:
     allowed_users:
       - 123456789
       - 987654321
+  # Optional — IMAP/SMTP email channel (AgentMail, Gmail, Fastmail, …)
+  # email:
+  #   enabled: true
+  #   address: bot@agentmail.to
+  #   password: ${EMAIL_PASSWORD}
+  #   imap_host: imap.agentmail.to
+  #   imap_port: 993
+  #   smtp_host: smtp.agentmail.to
+  #   smtp_port: 465
+  #   poll_interval_seconds: 15
+  #   allowed_users:
+  #     - you@example.com

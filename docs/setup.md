@@ -280,22 +280,27 @@ Start from [AGENTS.md](../AGENTS.md) for repository conventions, then use this t
 | [docs/decisions/README.md](decisions/README.md) | Recorded architecture decisions (ADRs) | — |
 | [docs/cursor-api-key-onboarding.md](cursor-api-key-onboarding.md) | Create or export `CURSOR_API_KEY` | `test -n "$CURSOR_API_KEY" && echo "CURSOR_API_KEY is set"` |
 | [docs/telegram-gateway-onboarding.md](telegram-gateway-onboarding.md) | BotFather, `TELEGRAM_BOT_TOKEN`, gateway config, cron setup | `uv run cursor-agent gateway --config ~/.cursor-agent/gateway.yaml` (after config) |
+| [docs/email-gateway-onboarding.md](email-gateway-onboarding.md) | IMAP/SMTP email channel (AgentMail, Gmail, …), allowlist, `/new` | `uv run cursor-agent gateway --config ~/.cursor-agent/gateway.yaml` (after config) |
 | [README.md](../README.md) | Project overview, first-run banner shape, usage examples | `uv run cursor-agent --help` |
 | [examples/README.md](../examples/README.md) | Product-facing CLI, gateway, profiles, memory, cron, and skills examples | `uv run cursor-agent --help` |
 | [SECURITY.md](../SECURITY.md) | Messaging threat model, `messaging` profile, hook policy | `uv run pytest tests/unit/test_messaging_profile.py -v` |
 | [.env.example](../.env.example) | Canonical `CURSOR_AGENT__*` and `CURSOR_API_KEY` placeholders | `grep CURSOR_AGENT .env.example` |
 
-## Gateway (Telegram)
+## Gateway (Telegram and email)
 
-The CLI welcome banner is local-only. Telegram has its own first-contact flow — do not expect `/skills`, `sessions list`, or CLI slash commands on Telegram.
+The CLI welcome banner is local-only. Messaging platforms have their own first-contact flow — do not expect `/skills`, `sessions list`, or CLI slash commands on Telegram or email.
 
-**First contact:** In a private chat, click Telegram's Start button or send `/start`. The bot replies with a short hint to send `/new` — this is onboarding UX, not an active session.
+**Telegram — first contact:** In a private chat, click Telegram's Start button or send `/start`. The bot replies with a short hint to send `/new` — this is onboarding UX, not an active session.
+
+**Email — first contact:** From an allowlisted address, send a message with `/new` in the body (or subject). See [Email Gateway Onboarding](email-gateway-onboarding.md).
 
 **Start a conversation:** Send `/new`. The bot confirms a fresh session; then send free-text questions about the configured workspace.
 
-**Formatting:** Assistant replies use a small Markdown subset rendered to Telegram HTML. GitHub-flavored tables appear as compact bullet lines or labeled row blocks — not raw pipe syntax (`| col |`). For supported syntax, limitations, and manual checks, see [Markdown formatting troubleshooting](telegram-gateway-onboarding.md#markdown-formatting-looks-wrong) in the gateway onboarding guide.
+**Formatting (Telegram):** Assistant replies use a small Markdown subset rendered to Telegram HTML. GitHub-flavored tables appear as compact bullet lines or labeled row blocks — not raw pipe syntax (`| col |`). For supported syntax, limitations, and manual checks, see [Markdown formatting troubleshooting](telegram-gateway-onboarding.md#markdown-formatting-looks-wrong) in the gateway onboarding guide. Email replies are plain text.
 
 Full BotFather steps, allowlist setup, gateway YAML, and end-to-end Telegram tests: [Telegram Gateway Onboarding](telegram-gateway-onboarding.md).
+
+IMAP/SMTP setup (including AgentMail): [Email Gateway Onboarding](email-gateway-onboarding.md).
 
 ## Cron operator notes
 

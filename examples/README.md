@@ -51,7 +51,7 @@ Override on the CLI with `--profile messaging` or `--profile full`, or set `CURS
 
 ## Gateway configuration
 
-Copy [gateway.yaml.example](gateway.yaml.example) to `~/.cursor-agent/gateway.yaml`, set `TELEGRAM_BOT_TOKEN` in the environment, and run:
+Copy [gateway.yaml.example](gateway.yaml.example) to `~/.cursor-agent/gateway.yaml`, set platform secrets in the environment (`TELEGRAM_BOT_TOKEN` and/or `EMAIL_PASSWORD`), and run:
 
 ```bash
 uv run cursor-agent gateway
@@ -63,7 +63,10 @@ Override the config path:
 uv run cursor-agent gateway --config /path/to/gateway.yaml
 ```
 
-Step-by-step Telegram onboarding: [docs/telegram-gateway-onboarding.md](../docs/telegram-gateway-onboarding.md).
+Step-by-step onboarding:
+
+- Telegram: [docs/telegram-gateway-onboarding.md](../docs/telegram-gateway-onboarding.md)
+- Email (IMAP/SMTP): [docs/email-gateway-onboarding.md](../docs/email-gateway-onboarding.md)
 
 ## Memory files
 

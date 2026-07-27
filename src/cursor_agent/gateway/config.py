@@ -24,7 +24,7 @@ MESSAGING_TOOL_PROFILE: ToolProfile = "messaging"
 _DEFAULT_SETTING_SOURCES: list[str] = ["project", "user"]
 _DEFAULT_RUNTIME_MODE: RuntimeMode = "local"
 _REDACTED_SECRET = "[REDACTED]"
-_SENSITIVE_PLATFORM_FIELDS = frozenset({"bot_token"})
+_SENSITIVE_PLATFORM_FIELDS = frozenset({"bot_token", "password"})
 
 
 class TelegramPlatformConfig(BaseModel):
@@ -37,12 +37,29 @@ class TelegramPlatformConfig(BaseModel):
     allowed_users: list[int] = Field(default_factory=list)
 
 
+class EmailPlatformConfig(BaseModel):
+    """Email (IMAP/SMTP) platform block in gateway.yaml."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+    address: str = ""
+    password: str = ""
+    imap_host: str = ""
+    imap_port: int = 993
+    smtp_host: str = ""
+    smtp_port: int = 465
+    poll_interval_seconds: float = Field(default=15.0, gt=0)
+    allowed_users: list[str] = Field(default_factory=list)
+
+
 class PlatformsConfig(BaseModel):
     """Per-platform configuration blocks under ``platforms``."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     telegram: TelegramPlatformConfig = Field(default_factory=TelegramPlatformConfig)
+    email: EmailPlatformConfig = Field(default_factory=EmailPlatformConfig)
 
 
 class GatewayConfig(BaseModel):
@@ -77,6 +94,8 @@ def enabled_platform_names(gateway_config: GatewayConfig) -> list[str]:
     names: list[str] = []
     if gateway_config.platforms.telegram.enabled:
         names.append("telegram")
+    if gateway_config.platforms.email.enabled:
+        names.append("email")
     return names
 
 

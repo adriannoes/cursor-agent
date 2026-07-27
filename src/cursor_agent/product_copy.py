@@ -16,6 +16,10 @@ GATEWAY_BUSY_MESSAGE: Final[str] = (
 
 TELEGRAM_NO_SESSION_HINT: Final[str] = "Send /new to start a conversation."
 
+EMAIL_NO_SESSION_HINT: Final[str] = (
+    "Send an email with /new in the body (or subject) to start a conversation."
+)
+
 _WELCOME_BORDER: Final[str] = "=" * 58
 
 WELCOME_LOGO: Final[str] = (
@@ -167,6 +171,7 @@ __all__ = [
     "SETUP_TITLE_WORKSPACE",
     "SETUP_TOOL_PROFILE_OPTIONS",
     "TELEGRAM_NO_SESSION_HINT",
+    "EMAIL_NO_SESSION_HINT",
     "WELCOME_LOGO",
     "WELCOME_READY_LINE",
     "WELCOME_TAGLINE",

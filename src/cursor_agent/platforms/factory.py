@@ -8,6 +8,7 @@ from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.errors import ConfigError
 from cursor_agent.gateway.config import GatewayConfig, enabled_platform_names
 from cursor_agent.platforms.base import PlatformAdapter
+from cursor_agent.platforms.email import EmailAdapter
 from cursor_agent.platforms.telegram import TelegramAdapter
 from cursor_agent.pool import SessionAgentPool
 from cursor_agent.sdk_facade import SdkFacade
@@ -44,6 +45,41 @@ def _warn_if_telegram_allowlist_empty(
     )
 
 
+def _validate_email_credentials(gateway_config: GatewayConfig) -> None:
+    """Require non-empty IMAP/SMTP credentials when email is enabled."""
+    email_cfg = gateway_config.platforms.email
+    missing: list[str] = []
+    if not email_cfg.address.strip():
+        missing.append("address")
+    if not email_cfg.password.strip():
+        missing.append("password")
+    if not email_cfg.imap_host.strip():
+        missing.append("imap_host")
+    if not email_cfg.smtp_host.strip():
+        missing.append("smtp_host")
+    if not missing:
+        return
+    raise ConfigError(
+        "gateway startup: platforms.email.enabled is true but required fields "
+        f"are empty or missing: {missing!r}; set them in gateway.yaml "
+        "(password may expand from ${EMAIL_PASSWORD})",
+    )
+
+
+def _warn_if_email_allowlist_empty(
+    gateway_config: GatewayConfig,
+    logger: logging.Logger,
+) -> None:
+    """Warn when email is enabled but no sender is allowlisted."""
+    if gateway_config.platforms.email.allowed_users:
+        return
+    logger.warning(
+        "gateway startup: platforms.email.enabled is true but allowed_users is "
+        "empty; all senders will be blocked and the adapter will appear online "
+        "while ignoring every message",
+    )
+
+
 def build_platform_adapters(
     *,
     gateway_config: GatewayConfig,
@@ -76,6 +112,19 @@ def build_platform_adapters(
             adapters.append(
                 TelegramAdapter(
                     platform_config=gateway_config.platforms.telegram,
+                    gateway_config=gateway_config,
+                    config=config,
+                    store=store,
+                    facade=facade,
+                    logger=logger,
+                ),
+            )
+        elif platform_name == "email":
+            _validate_email_credentials(gateway_config)
+            _warn_if_email_allowlist_empty(gateway_config, logger)
+            adapters.append(
+                EmailAdapter(
+                    platform_config=gateway_config.platforms.email,
                     gateway_config=gateway_config,
                     config=config,
                     store=store,

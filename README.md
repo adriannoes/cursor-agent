@@ -86,6 +86,7 @@ For bots and gateways, always use `messaging`. Threat model: [SECURITY.md](SECUR
 ## Gateway, cron, and memory
 
 - **Telegram gateway:** long-running bot with `tool_profile: messaging`. Setup: [Telegram Gateway Onboarding](docs/telegram-gateway-onboarding.md). Sample: [examples/gateway.yaml.example](examples/gateway.yaml.example).
+- **Email gateway:** IMAP/SMTP channel (AgentMail, Gmail, …) with the same messaging profile. Setup: [Email Gateway Onboarding](docs/email-gateway-onboarding.md).
 - **Cron:** `~/.cursor-agent/cron/jobs.yaml`, managed by `cursor-agent cron list|add|remove`, runs inside the gateway. Demo: [Telegram guide — cron](docs/telegram-gateway-onboarding.md#9-optional-scheduled-cron-jobs).
 - **Memory (v1):** injects `USER.md` + `MEMORY.md` on the first turn of a session (frozen afterward until `/new`). Inspect with `/memory show`. Details: [Setup](docs/setup.md).
 

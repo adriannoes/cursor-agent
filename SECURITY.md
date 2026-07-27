@@ -38,7 +38,8 @@ Threat model and capability matrix for gateway bots (Telegram and future channel
 | Arbitrary MCP | `mcp_servers: {}` + `beforeMCPExecution` deny |
 | Read secrets | `beforeReadFile` denies `.env`, `~/.ssh`, `*.pem` |
 | Network exfiltration | `sandbox_options.enabled: true` |
-| Access without allowlist | Gateway auth — e.g. Telegram `allowed_users` (PRD-006) |
+| Access without allowlist | Gateway auth — Telegram numeric `allowed_users`; email case-insensitive address allowlist (deny-by-default when empty) |
+| Spoofed email `From` | Email identity is the SMTP `From` header (unlike Telegram user IDs). Use a dedicated bot inbox, a tight allowlist, and prefer providers that drop failed DMARC/SPF before the poller sees mail. See [email gateway onboarding](docs/email-gateway-onboarding.md). |
 
 ---
 

@@ -3,6 +3,7 @@
 from cursor_agent.gateway.config import (
     DEFAULT_GATEWAY_CONFIG_PATH,
     MESSAGING_TOOL_PROFILE,
+    EmailPlatformConfig,
     GatewayConfig,
     PlatformsConfig,
     TelegramPlatformConfig,
@@ -13,6 +14,7 @@ from cursor_agent.gateway.config import (
 
 __all__ = [
     "DEFAULT_GATEWAY_CONFIG_PATH",
+    "EmailPlatformConfig",
     "GatewayConfig",
     "MESSAGING_TOOL_PROFILE",
     "PlatformsConfig",

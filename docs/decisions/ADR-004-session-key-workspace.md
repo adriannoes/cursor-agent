@@ -13,6 +13,7 @@ Use a composite key format:
 ```text
 cli:{profile}:{workspace_hash}
 telegram:{chat_id}:{workspace_hash}
+email:{sender}:{workspace_hash}
 ```
 
 - `workspace_hash = sha256(abs(cwd))[:8]`

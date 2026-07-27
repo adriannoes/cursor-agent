@@ -11,6 +11,7 @@ from cursor_agent.config import CursorAgentConfig
 from cursor_agent.errors import ConfigError
 from cursor_agent.gateway import (
     DEFAULT_GATEWAY_CONFIG_PATH,
+    EmailPlatformConfig,
     GatewayConfig,
     TelegramPlatformConfig,
     load_gateway_config,
@@ -69,6 +70,8 @@ def test_gateway_config_models_are_pydantic() -> None:
     )
     assert isinstance(config, GatewayConfig)
     assert isinstance(config.platforms.telegram, TelegramPlatformConfig)
+    assert isinstance(config.platforms.email, EmailPlatformConfig)
+    assert config.platforms.email.enabled is False
     assert issubclass(GatewayConfig, BaseModel)
 
 
@@ -375,4 +378,105 @@ def test_load_gateway_config_error_redacts_bot_token(
 
     message = str(exc_info.value)
     assert "super-secret-token-value" not in message
+    assert "[REDACTED]" in message
+
+
+def test_load_gateway_config_email_shape(tmp_path: Path) -> None:
+    """Email platform block exposes IMAP/SMTP fields and allowed_users."""
+    config_file = tmp_path / "gateway.yaml"
+    _write_gateway_yaml(
+        config_file,
+        _minimal_gateway_yaml(telegram_enabled=False)
+        + "  email:\n"
+        + "    enabled: true\n"
+        + "    address: bot@agentmail.to\n"
+        + "    password: am_secret\n"
+        + "    imap_host: imap.agentmail.to\n"
+        + "    imap_port: 993\n"
+        + "    smtp_host: smtp.agentmail.to\n"
+        + "    smtp_port: 465\n"
+        + "    poll_interval_seconds: 20\n"
+        + "    allowed_users:\n"
+        + "      - you@example.com\n",
+    )
+    config = load_gateway_config(config_path=config_file)
+    email = config.platforms.email
+    assert email.enabled is True
+    assert email.address == "bot@agentmail.to"
+    assert email.password == "am_secret"
+    assert email.imap_host == "imap.agentmail.to"
+    assert email.smtp_host == "smtp.agentmail.to"
+    assert email.poll_interval_seconds == 20.0
+    assert email.allowed_users == ["you@example.com"]
+
+
+def test_load_gateway_config_rejects_non_positive_email_poll_interval(
+    tmp_path: Path,
+) -> None:
+    """poll_interval_seconds must be > 0 to avoid a busy IMAP loop."""
+    config_file = tmp_path / "gateway.yaml"
+    _write_gateway_yaml(
+        config_file,
+        _minimal_gateway_yaml(telegram_enabled=False)
+        + "  email:\n"
+        + "    enabled: true\n"
+        + "    address: bot@agentmail.to\n"
+        + "    password: am_secret\n"
+        + "    imap_host: imap.agentmail.to\n"
+        + "    smtp_host: smtp.agentmail.to\n"
+        + "    poll_interval_seconds: 0\n"
+        + "    allowed_users:\n"
+        + "      - you@example.com\n",
+    )
+    with pytest.raises(ConfigError) as exc_info:
+        load_gateway_config(config_path=config_file)
+    assert "poll_interval_seconds" in str(exc_info.value)
+
+
+def test_load_gateway_config_expands_email_password(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """${EMAIL_PASSWORD} expands in the email platform password field."""
+    monkeypatch.setenv("EMAIL_PASSWORD", "expanded-email-secret")
+    config_file = tmp_path / "gateway.yaml"
+    _write_gateway_yaml(
+        config_file,
+        _minimal_gateway_yaml(telegram_enabled=False)
+        + "  email:\n"
+        + "    enabled: true\n"
+        + "    address: bot@agentmail.to\n"
+        + "    password: ${EMAIL_PASSWORD}\n"
+        + "    imap_host: imap.agentmail.to\n"
+        + "    smtp_host: smtp.agentmail.to\n"
+        + "    allowed_users:\n"
+        + "      - you@example.com\n",
+    )
+    config = load_gateway_config(config_path=config_file)
+    assert config.platforms.email.password == "expanded-email-secret"
+
+
+def test_load_gateway_config_error_redacts_email_password(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Validation errors must not echo expanded email password values."""
+    monkeypatch.setenv("EMAIL_PASSWORD", "super-secret-email-password")
+    config_file = tmp_path / "gateway.yaml"
+    _write_gateway_yaml(
+        config_file,
+        _minimal_gateway_yaml(telegram_enabled=False)
+        + "  email:\n"
+        + "    enabled: true\n"
+        + "    address: bot@agentmail.to\n"
+        + "    password: ${EMAIL_PASSWORD}\n"
+        + "    imap_host: imap.agentmail.to\n"
+        + "    smtp_host: smtp.agentmail.to\n"
+        + "    allowed_users: not-a-list\n",
+    )
+    with pytest.raises(ConfigError) as exc_info:
+        load_gateway_config(config_path=config_file)
+
+    message = str(exc_info.value)
+    assert "super-secret-email-password" not in message
     assert "[REDACTED]" in message

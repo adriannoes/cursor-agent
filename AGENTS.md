@@ -115,6 +115,7 @@ For install, API key, and gateway setup without prior context, start at [docs/se
 | [SECURITY.md](SECURITY.md) | Messaging threat model and hook acceptance |
 | [docs/cursor-api-key-onboarding.md](docs/cursor-api-key-onboarding.md) | Local `CURSOR_API_KEY` setup |
 | [docs/telegram-gateway-onboarding.md](docs/telegram-gateway-onboarding.md) | Telegram bot and gateway setup |
+| [docs/email-gateway-onboarding.md](docs/email-gateway-onboarding.md) | Email IMAP/SMTP gateway setup |
 | [.env.example](.env.example) | Environment variable reference |
 | [pyproject.toml](pyproject.toml) | Package metadata and quality gates |
 | [hooks/messaging/](hooks/messaging/) | Versioned deny-hook scripts |

@@ -6,7 +6,7 @@ from collections.abc import Callable
 
 from cursor_agent.gateway.config import GatewayConfig
 
-_SUPPORTED_PLATFORMS: frozenset[str] = frozenset({"telegram"})
+_SUPPORTED_PLATFORMS: frozenset[str] = frozenset({"telegram", "email"})
 
 
 def normalize_sender_id(user_id: str | int) -> str:
@@ -26,6 +26,11 @@ def normalize_sender_id(user_id: str | int) -> str:
     )
 
 
+def normalize_email_sender_id(user_id: str | int) -> str:
+    """Normalize an email sender address for allowlist matching (case-insensitive)."""
+    return normalize_sender_id(user_id).lower()
+
+
 def is_allowed_sender(
     platform: str,
     user_id: str | int,
@@ -36,7 +41,10 @@ def is_allowed_sender(
     if normalized_platform not in _SUPPORTED_PLATFORMS:
         return False
 
-    normalized_user_id = normalize_sender_id(user_id)
+    if normalized_platform == "email":
+        normalized_user_id = normalize_email_sender_id(user_id)
+    else:
+        normalized_user_id = normalize_sender_id(user_id)
     if normalized_user_id == "":
         return False
 
@@ -54,8 +62,16 @@ def _telegram_allowlist(config: GatewayConfig) -> set[str]:
     }
 
 
+def _email_allowlist(config: GatewayConfig) -> set[str]:
+    return {
+        normalize_email_sender_id(entry)
+        for entry in config.platforms.email.allowed_users
+    }
+
+
 _PLATFORM_ALLOWLIST_GETTERS: dict[str, Callable[[GatewayConfig], set[str]]] = {
     "telegram": _telegram_allowlist,
+    "email": _email_allowlist,
 }
 
 

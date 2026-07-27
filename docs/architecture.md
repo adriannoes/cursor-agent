@@ -27,7 +27,7 @@ Reference projects may inform **behavior patterns** — reimplement in `cursor_a
                              ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  Config │ SessionStore │ Commands │ SessionAgentPool         │
-│  PlatformAdapter (Telegram, …)                               │
+│  PlatformAdapter (Telegram, Email, …)                        │
 └────────────────────────────┬─────────────────────────────────┘
                              ▼
                     AsyncSdkFacade  ← cursor_sdk via sdk_facade + sdk_error_mapping
@@ -57,7 +57,7 @@ session_key  →  SessionStore (SQLite)  →  agent_id  →  SDK (history + chec
 
 | Concept | Role |
 |---------|------|
-| `session_key` | Logical identity — e.g. `cli:{profile}:{workspace_hash}`, `telegram:{chat_id}:{workspace_hash}` ([ADR-004](decisions/ADR-004-session-key-workspace.md)) |
+| `session_key` | Logical identity — e.g. `cli:{profile}:{workspace_hash}`, `telegram:{chat_id}:{workspace_hash}`, `email:{sender}:{workspace_hash}` ([ADR-004](decisions/ADR-004-session-key-workspace.md)) |
 | Session id (UUID) | Primary key in SQLite; exposed to users via `/resume` |
 | `agent_id` | Cursor identifier (`agent-*` / `bc-*`); internal, not primary UX |
 | Conversation history | **Source of truth: SDK** via `agent_id` |
