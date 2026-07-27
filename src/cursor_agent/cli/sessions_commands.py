@@ -18,6 +18,7 @@ from cursor_agent.cli.startup import create_store, session_key_for
 from cursor_agent.config.loader import CursorAgentConfig, load_config
 from cursor_agent.errors import CursorAgentError
 from cursor_agent.sessions.models import SessionRecord
+from cursor_agent.sessions.store import SessionStore
 from cursor_agent.sessions.workspace_session_prune import (
     validate_prune_workspace_params,
 )
@@ -59,11 +60,18 @@ def confirm_session_mutation(*, yes: bool, prompt: str) -> None:
     raise typer.Exit(0)
 
 
-async def _list_sessions_for_config(config: CursorAgentConfig) -> list[SessionRecord]:
-    """Initialize the store and list sessions for the config workspace key."""
+async def _initialized_store_for_config(
+    config: CursorAgentConfig,
+) -> tuple[SessionStore, str]:
+    """Create, initialize, and key the store for this CLI config workspace."""
     store = create_store(config)
     await store.initialize()
-    session_key = session_key_for(config)
+    return store, session_key_for(config)
+
+
+async def _list_sessions_for_config(config: CursorAgentConfig) -> list[SessionRecord]:
+    """Initialize the store and list sessions for the config workspace key."""
+    store, session_key = await _initialized_store_for_config(config)
     return await store.list(session_key)
 
 
@@ -118,10 +126,8 @@ def sessions_show(
     config = _load_cli_config()
 
     async def _show() -> SessionRecord | None:
-        store = create_store(config)
-        await store.initialize()
-        session_key = session_key_for(config)
-        return await store.get(session_key, session_id)
+        store, session_key = await _initialized_store_for_config(config)
+        return await store.resolve(session_key, session_id)
 
     record = asyncio.run(_show())
     if record is None:
@@ -156,9 +162,7 @@ def sessions_delete(
     config = _load_cli_config()
 
     async def _delete() -> bool:
-        store = create_store(config)
-        await store.initialize()
-        session_key = session_key_for(config)
+        store, session_key = await _initialized_store_for_config(config)
         return await store.delete(session_key, session_id)
 
     removed = asyncio.run(_delete())
@@ -219,9 +223,7 @@ def sessions_prune(
     config = _load_cli_config()
 
     async def _prune() -> tuple[int, int]:
-        store = create_store(config)
-        await store.initialize()
-        session_key = session_key_for(config)
+        store, session_key = await _initialized_store_for_config(config)
         deleted_ids = await store.prune_workspace_sessions(
             session_key,
             older_than_days=older_than,
