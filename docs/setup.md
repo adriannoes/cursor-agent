@@ -159,6 +159,8 @@ cursor-agent setup show
 
 These commands validate offline readiness and print effective settings with the API key redacted.
 
+For a broader operator health pass (auth channels, messaging hooks, gateway YAML), see [Operator CLI hygiene](#operator-cli-hygiene).
+
 ### AI agents (headless)
 
 Non-interactive apply uses value-bearing flags and never prompts. `--yes` is
@@ -275,7 +277,7 @@ Start from [AGENTS.md](../AGENTS.md) for repository conventions, then use this t
 
 | Document | When to use | Verify command |
 |----------|-------------|----------------|
-| [docs/setup.md](setup.md) | Install, API key, config contract, gateway index, cron and skills operator notes | `uv run pytest -m "not integration and not package_smoke" -v` |
+| [docs/setup.md](setup.md) | Install, API key, config contract, operator CLI hygiene, gateway index, cron and skills operator notes | `uv run pytest -m "not integration and not package_smoke" -v` |
 | [docs/architecture.md](architecture.md) | System design, sessions, facade, tool profiles | — |
 | [docs/decisions/README.md](decisions/README.md) | Recorded architecture decisions (ADRs) | — |
 | [docs/cursor-api-key-onboarding.md](cursor-api-key-onboarding.md) | Create or export `CURSOR_API_KEY` | `test -n "$CURSOR_API_KEY" && echo "CURSOR_API_KEY is set"` |
@@ -284,6 +286,98 @@ Start from [AGENTS.md](../AGENTS.md) for repository conventions, then use this t
 | [examples/README.md](../examples/README.md) | Product-facing CLI, gateway, profiles, memory, cron, and skills examples | `uv run cursor-agent --help` |
 | [SECURITY.md](../SECURITY.md) | Messaging threat model, `messaging` profile, hook policy | `uv run pytest tests/unit/test_messaging_profile.py -v` |
 | [.env.example](../.env.example) | Canonical `CURSOR_AGENT__*` and `CURSOR_API_KEY` placeholders | `grep CURSOR_AGENT .env.example` |
+
+## Operator CLI hygiene
+
+Operator commands for diagnosing auth, aggregating local readiness, validating gateway YAML offline, managing workspace session rows, and listing live models. None of these commands print API keys, OAuth tokens, Telegram `bot_token`, or `me` identity fields (`api_key_name`, `user_email`, …). See [SECURITY.md](../SECURITY.md) for the messaging threat model.
+
+`setup check` stays the narrow offline gate for scripts; use `doctor` when you want setup **plus** auth, hooks, and gateway in one pass.
+
+### `auth status`
+
+```bash
+cursor-agent auth status --no-probe   # local / offline only (fast, air-gapped)
+cursor-agent auth status              # local + live probes when credentials present
+cursor-agent auth status --json
+```
+
+Reports two channels: **API key** (`CURSOR_API_KEY`) and **usage OAuth** (`CURSOR_AGENT_USAGE_TOKEN` or `~/.config/cursor/auth.json` from the official `agent login`). Human lines are labeled (`api_key: …`, `usage_oauth: …`); `--json` emits status enums and optional probe booleans only.
+
+**`--no-probe` is the only offline/fast path.** It performs zero SDK bridge launches and zero dashboard HTTP probes. Default is `--probe`: when a credential is locally present, the API-key probe launches the SDK bridge (`Cursor.me`); the usage probe reuses the dashboard fetch (no usage numbers — `usage` owns that output).
+
+**Exit matrix (FR-1):**
+
+| Condition | Exit |
+|-----------|------|
+| API key missing | **1** |
+| Usage OAuth `invalid_store` (malformed / unreadable `auth.json`) | **1** |
+| Usage OAuth missing alone (API key present; no probe failure) | **0** + `warning:` line |
+| Any requested probe fails | **1** |
+| All requested checks pass | **0** |
+
+With `--no-probe`, exit **1** is still possible via the **missing-API-key** rule **or** usage OAuth **`invalid_store`** (probe failures do not apply because probes are skipped).
+
+### `doctor`
+
+```bash
+cursor-agent doctor
+cursor-agent doctor --gateway-config ~/.cursor-agent/gateway.yaml
+cursor-agent doctor --probe
+cursor-agent doctor --json
+```
+
+Aggregates **setup**, **auth** (local by default), **messaging hooks**, and **gateway YAML** (when the file is present). Local by default; `--probe` is opt-in and forwards to the same auth probes as `auth status` (pays the bridge cost).
+
+Flag is **`--gateway-config PATH`** — not `--config` — so it does not collide with the cursor-agent config mental model (`CURSOR_AGENT__*` / `~/.cursor-agent/config.yaml`). Default path: `~/.cursor-agent/gateway.yaml`. Absent gateway YAML is `ok` (not an error). Any **error** line → exit **1**; warnings alone → **0**.
+
+### `gateway check`
+
+```bash
+cursor-agent gateway check
+cursor-agent gateway check --config ~/.cursor-agent/gateway.yaml
+```
+
+Offline YAML validation only: load, expand vars, enforce `tool_profile: messaging`, print `ok:` / `error:` lines with tokens redacted. **No** Telegram network / `getMe`.
+
+The `gateway` group still starts the long-lived process when invoked without a subcommand:
+
+```bash
+cursor-agent gateway
+cursor-agent gateway --config /path/to/gateway.yaml
+```
+
+### `sessions show` / `delete` / `prune`
+
+```bash
+cursor-agent sessions show <id>
+cursor-agent sessions delete <id> --yes
+cursor-agent sessions prune --older-than 30 --keep 10 --yes
+cursor-agent sessions prune --keep 5 --yes
+```
+
+Scoped to the current workspace `session_key`. Mutations touch **SQLite only** (no SDK agent dispose). Require at least one of `--older-than` / `--keep` for prune.
+
+**Prune OR caveat:** when both flags are set, a row is deleted if it matches **either** rule — `--keep` does **not** protect rows that also match `--older-than`. Worked example: `--older-than 7 --keep 5` on a workspace whose 5 newest sessions are all 30 days old deletes **all 5**. Operators who want “keep the newest N no matter what” must use `--keep` alone.
+
+**Confirmation** (`delete` and `prune`):
+
+| Situation | Result |
+|-----------|--------|
+| `--yes` | Proceed, no prompt |
+| Prompt answered `y` / `yes` | Proceed |
+| Prompt answered explicit `n` / `no` / empty Enter | Exit **0**, no mutation |
+| EOF / closed pipe / empty stdin without `--yes` | Exit **1**, no mutation; error names `--yes` |
+
+Prefer `--yes` in CI and scripts so a missing confirm answer cannot hang or surprise.
+
+### `models`
+
+```bash
+cursor-agent models
+cursor-agent models --json
+```
+
+Live catalog via the SDK bridge (`Cursor.models.list`). Requires `CURSOR_API_KEY` (no offline mode). Soft-catalog ids from `first_party_models` are marked `(recommended)` in human output and `recommended: true` in JSON. There is no `--verbose` flag.
 
 ## Gateway (Telegram)
 

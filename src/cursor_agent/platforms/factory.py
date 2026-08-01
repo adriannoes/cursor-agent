@@ -14,8 +14,17 @@ from cursor_agent.sdk_facade import SdkFacade
 from cursor_agent.sessions.store import SessionStore
 
 
-def _validate_telegram_bot_token(gateway_config: GatewayConfig) -> None:
-    """Require a non-empty Telegram bot token when the platform is enabled."""
+def validate_telegram_bot_token(gateway_config: GatewayConfig) -> None:
+    """Require a non-empty Telegram bot token when the platform is enabled.
+
+    Shared by gateway startup (``build_platform_adapters``) and offline
+    ``gateway check`` so empty/whitespace tokens fail before process start.
+
+    Example:
+        >>> validate_telegram_bot_token(gateway_config)  # doctest: +SKIP
+    """
+    if not gateway_config.platforms.telegram.enabled:
+        return
     token = gateway_config.platforms.telegram.bot_token
     if token.strip():
         return
@@ -71,7 +80,7 @@ def build_platform_adapters(
     adapters: list[PlatformAdapter] = []
     for platform_name in enabled_platform_names(gateway_config):
         if platform_name == "telegram":
-            _validate_telegram_bot_token(gateway_config)
+            validate_telegram_bot_token(gateway_config)
             _warn_if_telegram_allowlist_empty(gateway_config, logger)
             adapters.append(
                 TelegramAdapter(
@@ -86,4 +95,4 @@ def build_platform_adapters(
     return adapters
 
 
-__all__ = ["build_platform_adapters"]
+__all__ = ["build_platform_adapters", "validate_telegram_bot_token"]

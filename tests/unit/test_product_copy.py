@@ -101,6 +101,7 @@ def test_first_commands_hint_includes_onboarding_discoverability_items() -> None
     assert "/new" in FIRST_COMMANDS_HINT
     assert "/skills" in FIRST_COMMANDS_HINT
     assert "sessions list" in FIRST_COMMANDS_HINT
+    assert "doctor" in FIRST_COMMANDS_HINT
     assert "docs/setup.md" in FIRST_COMMANDS_HINT
 
 

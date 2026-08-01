@@ -14,7 +14,7 @@ from cursor_agent.sdk_facade import (
     StreamCallbacks,
 )
 
-__version__ = "1.2.1"
+__version__ = "1.3.0"
 
 __all__ = [
     "AsyncSdkFacade",

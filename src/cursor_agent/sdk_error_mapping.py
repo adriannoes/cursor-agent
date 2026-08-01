@@ -63,4 +63,12 @@ def map_sdk_exception(exc: BaseException) -> BaseException:
         return NetworkError(message)
     if isinstance(exc, TypeError):
         return ConfigError(f"SDK request serialization failed: {message}")
+    # WHY (PR #80): bridge spawn/close raises OSError/FileNotFoundError; facade
+    # docs promise ConfigError so CLI paths that only catch CursorAgentError
+    # stay on the domain exit path (no empty-stderr raw exception).
+    if isinstance(exc, OSError):
+        return ConfigError(
+            "SDK bridge launch/spawn failed: "
+            f"received {exc!r}, expected running cursor-sdk bridge"
+        )
     return exc

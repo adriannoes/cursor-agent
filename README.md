@@ -42,6 +42,7 @@ Get started:
   - /skills          list skills (also: skills list)
   - skills seed      optional starters; skills path
   - sessions list    see past sessions
+  - doctor           check local setup health
 
   Setup & docs: docs/setup.md
 ==========================================================
@@ -56,18 +57,34 @@ uv run cursor-agent                         # REPL (default: coding profile)
 uv run cursor-agent --profile messaging     # validate messaging hooks locally
 uv run cursor-agent --profile full          # curated MCP (local only)
 uv run cursor-agent sessions list           # past sessions for this workspace
+uv run cursor-agent sessions show <id>      # inspect one workspace session
+uv run cursor-agent sessions delete <id> --yes
+uv run cursor-agent sessions prune --older-than 30 --keep 10 --yes
 uv run cursor-agent skills list             # discovered skills
 uv run cursor-agent skills seed             # copy starter pack into .cursor/skills/
 uv run cursor-agent cron list               # scheduled jobs
 uv run cursor-agent usage                   # plan usage snapshot (total / auto / API)
 uv run cursor-agent usage --json
+uv run cursor-agent auth status --no-probe  # local API key + usage OAuth (offline)
+uv run cursor-agent auth status             # same + live probes when credentials present
+uv run cursor-agent doctor                  # aggregate setup / auth / hooks / gateway (local)
+uv run cursor-agent doctor --gateway-config ~/.cursor-agent/gateway.yaml
+uv run cursor-agent gateway check           # offline gateway.yaml validate (no Telegram)
 uv run cursor-agent gateway                 # ~/.cursor-agent/gateway.yaml
 uv run cursor-agent gateway --config /path/to/gateway.yaml
+uv run cursor-agent models                  # live model catalog (needs CURSOR_API_KEY)
+uv run cursor-agent models --json
 ```
 
 Runtime data lives under `~/.cursor-agent/`. Overrides: [Setup — Configuration](docs/setup.md#configuration) and [.env.example](.env.example).
 
 `cursor-agent usage` hits Cursor's dashboard endpoint (best-effort; not the SDK). Auth: OAuth token from `~/.config/cursor/auth.json` (via official `agent login`) or `CURSOR_AGENT_USAGE_TOKEN` — not `CURSOR_API_KEY`.
+
+`cursor-agent auth status` reports both channels without printing secrets. Use `--no-probe` for a fast/air-gapped local check; default probes when a credential is present (API-key probe launches the SDK bridge).
+
+`cursor-agent doctor` aggregates setup, auth, messaging hooks, and offline gateway YAML (when present). Local by default; `--probe` opt-in. Prefer `--gateway-config` (not `--config`). `gateway check` validates YAML without starting the long-lived process.
+
+`cursor-agent models` lists the live Cursor catalog via the SDK bridge (needs `CURSOR_API_KEY`). Soft-catalog ids are marked `(recommended)`; use `--json` for scripts.
 
 ## Skills
 
@@ -95,7 +112,8 @@ More product examples: [examples/README.md](examples/README.md).
 
 | Document | Description |
 |----------|-------------|
-| [Setup guide](docs/setup.md) | Install, API key, config, skills, gateway index |
+| [Setup guide](docs/setup.md) | Install, API key, config, operator CLI, skills, gateway index |
+| [CHANGELOG.md](CHANGELOG.md) | Release history (Keep a Changelog) |
 | [AGENTS.md](AGENTS.md) | Conventions and verification for AI agents |
 | [SECURITY.md](SECURITY.md) | Messaging threat model and hooks |
 | [Architecture](docs/architecture.md) | Sessions, facade, concurrency, profiles |
@@ -104,11 +122,14 @@ More product examples: [examples/README.md](examples/README.md).
 
 ## Releases
 
+See [CHANGELOG.md](CHANGELOG.md) for the full history.
+
+- **v1.3.0** *(not yet tagged on `main`)* — operator CLI hygiene (`auth`/`doctor`/`gateway check`/sessions hygiene/`models`); library trim drops `SessionStore.get` (use `resolve`). Details in the changelog.
 - **v1.2.1** — skills discovery harden + package-smoke isolation after the v1.2.0 review follow-up.
 - **v1.2.0** — product skills pack (`skills/`, `skills path|list|seed`, BYO paste).
 - Earlier: v1.1.0 (`full` profile, Grok default), v1.0 (first-run banner + setup index).
 
-Roadmap: logging persistence (PRD-015), Discord/Slack onboarding (PRD-014), Unicode terminal fallback, session search / queueing / TUI when demand justifies.
+Roadmap: logging persistence (PRD-015), Discord/Slack onboarding (PRD-014), Unicode terminal fallback, session search / grouping / TUI when demand justifies.
 
 ## Contributing
 

@@ -10,11 +10,20 @@ import shutil
 import stat
 from importlib import resources
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from cursor_agent.errors import ConfigError
 from cursor_agent.facade_logging import emit_hook_deploy
+
+if TYPE_CHECKING:
+    # WHY: satisfy ``__all__`` / type checkers for lazy ``__getattr__`` re-exports
+    # without importing ``messaging_hooks_status`` at module load (PR #80 cycle).
+    from cursor_agent.messaging_hooks_status import (
+        MessagingHooksStatusReport,
+        messaging_hooks_status,
+    )
 
 MESSAGING_HOOK_FILENAMES: tuple[str, ...] = (
     "hooks.json",
@@ -194,8 +203,14 @@ def _copy_hook_scripts(source_dir: Path, target_dir: Path) -> None:
         dst.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
-def _read_manifest(path: Path) -> HookManifest:
-    """Read a hooks.json manifest or return an empty schema v1 manifest."""
+def read_hook_manifest(path: Path) -> HookManifest:
+    """Read a hooks.json manifest or return an empty schema v1 manifest.
+
+    Public so deploy and status completeness share one parser.
+
+    Example:
+        >>> manifest = read_hook_manifest(Path("hooks.json"))
+    """
     if not path.is_file():
         return HookManifest()
     loaded = json.loads(path.read_text(encoding="utf-8"))
@@ -210,8 +225,14 @@ def _messaging_command_path(script_name: str) -> str:
     return f"{WORKSPACE_MESSAGING_HOOK_COMMAND_PREFIX}/{script_name}"
 
 
-def _rewrite_messaging_manifest(source_manifest: HookManifest) -> HookManifest:
-    """Rewrite source hook commands for Cursor project hook execution."""
+def rewrite_messaging_manifest(source_manifest: HookManifest) -> HookManifest:
+    """Rewrite source hook commands for Cursor project hook execution.
+
+    Public so deploy and status completeness share one rewriter.
+
+    Example:
+        >>> rewritten = rewrite_messaging_manifest(source_manifest)
+    """
     rewritten_hooks: dict[str, list[HookEntry]] = {}
     for event, entries in source_manifest.hooks.items():
         rewritten_entries: list[HookEntry] = []
@@ -244,8 +265,10 @@ def _without_existing_messaging_hooks(manifest: HookManifest) -> HookManifest:
 
 def _write_project_manifest(source_dir: Path, manifest_path: Path) -> None:
     """Write project-level hooks.json with messaging entries using project paths."""
-    existing = _without_existing_messaging_hooks(_read_manifest(manifest_path))
-    messaging = _rewrite_messaging_manifest(_read_manifest(source_dir / "hooks.json"))
+    existing = _without_existing_messaging_hooks(read_hook_manifest(manifest_path))
+    messaging = rewrite_messaging_manifest(
+        read_hook_manifest(source_dir / "hooks.json")
+    )
     merged_hooks = dict(existing.hooks)
     for event, entries in messaging.hooks.items():
         merged_hooks.setdefault(event, [])
@@ -338,3 +361,48 @@ def ensure_messaging_hooks(
         user_hooks_dir=installed_dir,
         logger=logger,
     )
+
+
+# Compatibility re-export: canonical home is messaging_hooks_status (PRD-017).
+# WHY (PR #80): lazy __getattr__ avoids the cycle where status imports this
+# module while this module imported status at module load time.
+_STATUS_REEXPORT_NAMES = frozenset(
+    {"MessagingHooksStatusReport", "messaging_hooks_status"}
+)
+
+
+def __getattr__(name: str) -> object:
+    """Lazy-load status API so ``messaging_hooks_status`` can import this module."""
+    if name in _STATUS_REEXPORT_NAMES:
+        from cursor_agent import messaging_hooks_status as _status_mod
+
+        return getattr(_status_mod, name)
+    msg = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(msg)
+
+
+def __dir__() -> list[str]:
+    """Expose lazy status re-exports alongside static ``__all__`` names."""
+    return sorted({*_STATUS_REEXPORT_NAMES, *__all__})
+
+
+__all__ = [
+    "DEFAULT_USER_MESSAGING_HOOKS_DIR",
+    "HookEntry",
+    "HookManifest",
+    "MESSAGING_HOOK_FILENAMES",
+    "MessagingHooksStatusReport",
+    "WORKSPACE_MESSAGING_HOOK_COMMAND_PREFIX",
+    "WORKSPACE_MESSAGING_HOOKS_RELATIVE",
+    "WORKSPACE_PROJECT_HOOKS_RELATIVE",
+    "deploy_messaging_hooks_to_workspace",
+    "ensure_messaging_hooks",
+    "install_messaging_hooks",
+    "messaging_hook_source_fingerprint",
+    "messaging_hooks_status",
+    "read_hook_manifest",
+    "resolve_messaging_hook_source_dir",
+    "rewrite_messaging_manifest",
+    "workspace_messaging_hooks_dir",
+    "workspace_project_hooks_manifest_path",
+]
