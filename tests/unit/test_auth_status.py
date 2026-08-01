@@ -53,8 +53,17 @@ def _write_auth_json(path: Path, data: object) -> None:
     path.write_text(json.dumps(data), encoding="utf-8")
 
 
-def _invoke_auth_status(*args: str) -> Any:
-    """Invoke the ``auth status`` subcommand via the root Typer app."""
+def _stub_load_cwd_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prevent root Typer callback from reloading CWD ``.env`` into the process env."""
+    # WHY: ``load_cwd_dotenv(override=False)`` can re-inject CURSOR_API_KEY from a
+    # developer ``.env`` after tests ``delenv`` / set controlled values
+    # (same pattern as ``test_models_cli`` / ``test_skills_cli``).
+    monkeypatch.setattr("cursor_agent.cli.app.load_cwd_dotenv", lambda: None)
+
+
+def _invoke_auth_status(monkeypatch: pytest.MonkeyPatch, *args: str) -> Any:
+    """Invoke ``auth status`` with hermetic dotenv (no CWD ``.env`` reinjection)."""
+    _stub_load_cwd_dotenv(monkeypatch)
     return CliRunner().invoke(app, ["auth", "status", *args])
 
 
@@ -242,7 +251,7 @@ def test_cli_auth_status_missing_api_key_exits_one(
     monkeypatch.delenv("CURSOR_API_KEY", raising=False)
     monkeypatch.delenv(USAGE_TOKEN_ENV_VAR, raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
-    result = _invoke_auth_status("--no-probe")
+    result = _invoke_auth_status(monkeypatch, "--no-probe")
     assert result.exit_code == 1
     assert "api_key" in result.output.lower()
 
@@ -256,7 +265,7 @@ def test_cli_auth_status_oauth_missing_alone_exits_zero_with_warning(
     monkeypatch.delenv(USAGE_TOKEN_ENV_VAR, raising=False)
     # Point home away from a real auth.json so OAuth resolves as missing.
     monkeypatch.setenv("HOME", str(tmp_path))
-    result = _invoke_auth_status("--no-probe")
+    result = _invoke_auth_status(monkeypatch, "--no-probe")
     assert result.exit_code == 0, result.output
     assert "warning:" in result.output.lower()
     assert "api_key:" in result.output
@@ -271,7 +280,7 @@ def test_cli_auth_status_all_local_channels_present_exits_zero(
     monkeypatch.setenv("CURSOR_API_KEY", "sk-test-present")
     monkeypatch.setenv(USAGE_TOKEN_ENV_VAR, "oauth-token-present")
     monkeypatch.setenv("HOME", str(tmp_path))
-    result = _invoke_auth_status("--no-probe")
+    result = _invoke_auth_status(monkeypatch, "--no-probe")
     assert result.exit_code == 0, result.output
     assert "api_key:" in result.output
     assert "usage_oauth:" in result.output
@@ -289,7 +298,7 @@ def test_cli_auth_status_invalid_store_exits_one(
     monkeypatch.setenv("HOME", str(tmp_path))
     auth = tmp_path / ".config" / "cursor" / "auth.json"
     _write_auth_json(auth, {"refreshToken": "only-refresh-no-access"})
-    result = _invoke_auth_status("--no-probe")
+    result = _invoke_auth_status(monkeypatch, "--no-probe")
     assert result.exit_code == 1, result.output
     assert "usage_oauth:" in result.output
     assert "invalid_store" in result.output
@@ -334,7 +343,7 @@ def test_cli_auth_status_no_probe_does_not_call_probe_api_key(
         raising=True,
     )
 
-    result = _invoke_auth_status("--no-probe")
+    result = _invoke_auth_status(monkeypatch, "--no-probe")
     assert result.exit_code == 0, result.output
     assert probe_calls == [], (
         f"probe_api_key must not run under --no-probe: {probe_calls}"
@@ -368,7 +377,7 @@ def test_cli_auth_status_probe_failure_exits_one(
     )
 
     # Default is probe-on when credentials are present (Q1).
-    result = _invoke_auth_status()
+    result = _invoke_auth_status(monkeypatch)
     assert result.exit_code == 1, result.output
     assert "sk-test-present" not in result.output
     assert "oauth-token-present" not in result.output
@@ -392,7 +401,7 @@ def test_cli_auth_status_unmapped_probe_exception_exits_one(
         raising=True,
     )
 
-    result = _invoke_auth_status()
+    result = _invoke_auth_status(monkeypatch)
     assert result.exit_code == 1, result.output
     assert "AttributeError" not in result.output
     assert "Traceback" not in result.output
@@ -430,7 +439,7 @@ def test_cli_auth_status_present_oauth_unreadable_token_exits_one(
         raising=True,
     )
 
-    result = _invoke_auth_status()
+    result = _invoke_auth_status(monkeypatch)
     assert result.exit_code == 1, result.output
 
 
@@ -460,7 +469,7 @@ def test_cli_auth_status_usage_oauth_probe_failure_exits_one(
         raising=True,
     )
 
-    result = _invoke_auth_status()
+    result = _invoke_auth_status(monkeypatch)
     assert result.exit_code == 1, result.output
     assert "oauth-token-present" not in result.output
 
@@ -496,7 +505,7 @@ def test_cli_auth_status_json_shape_omits_secrets_and_identity(
         raising=True,
     )
 
-    result = _invoke_auth_status("--json", "--no-probe")
+    result = _invoke_auth_status(monkeypatch, "--json", "--no-probe")
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     assert isinstance(data, dict)
