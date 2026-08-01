@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.3.0] — 2026-07-27
+## [1.3.0] — 2026-08-01
 
-Operator CLI hygiene (PRD-017) on the integration train — not yet tagged on `main`.
+Operator CLI hygiene (PRD-017) — shipped on `main` @ tag **`v1.3.0`** ([#80](https://github.com/adriannoes/cursor-agent/pull/80)).
 
 ### Added
 
