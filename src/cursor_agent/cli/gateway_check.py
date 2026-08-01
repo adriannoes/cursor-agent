@@ -67,6 +67,13 @@ def collect_gateway_check_lines(config_path: Path) -> tuple[list[str], bool]:
         # Defense in depth: load_gateway_config already sanitizes; keep public API.
         safe_message = redact_gateway_secrets_in_text(str(exc))
         return ([f"error: gateway.yaml — {safe_message}"], True)
+    except OSError as exc:
+        # WHY (PR #80): present-but-unreadable YAML must stay diagnostic, not traceback.
+        safe_message = redact_gateway_secrets_in_text(str(exc))
+        return (
+            [f"error: gateway.yaml — unreadable file {str(path)!r}: {safe_message}"],
+            True,
+        )
 
     lines: list[str] = [f"ok: gateway.yaml — {path}"]
     failed = False

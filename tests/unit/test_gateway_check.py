@@ -126,6 +126,34 @@ def test_collect_gateway_check_lines_missing_file_returns_error(
     assert GATEWAY_ABSENT_OK_LINE not in lines
 
 
+def test_collect_gateway_check_lines_unreadable_file_returns_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Present but unreadable gateway.yaml → error line, not traceback (PR #80)."""
+    config_path = tmp_path / "gateway.yaml"
+    _write_minimal_gateway_yaml(config_path, workspace=tmp_path / "ws")
+    (tmp_path / "ws").mkdir()
+    original_read_text = Path.read_text
+
+    def _boom(self: Path, *args: object, **kwargs: object) -> str:
+        if self == config_path:
+            raise PermissionError(
+                f"permission denied: simulated unreadable {config_path!r}"
+            )
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", _boom)
+
+    lines, failed = collect_gateway_check_lines(config_path)
+
+    assert failed is True
+    joined = "\n".join(lines)
+    assert any(line.startswith("error: gateway.yaml —") for line in lines)
+    assert "Traceback" not in joined
+    assert "Permission" in joined or "permission" in joined.lower()
+
+
 def test_collect_gateway_check_lines_missing_workspace_dir_returns_error(
     tmp_path: Path,
 ) -> None:

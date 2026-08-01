@@ -8,6 +8,7 @@ catalog. No CURSOR_API_KEY.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -227,6 +228,37 @@ def _verify_doctor_help(console_script: Path) -> None:
     )
 
 
+def _verify_doctor_probe_runs(console_script: Path) -> None:
+    """Installed ``doctor --probe`` must stay on the domain exit path (PR #80).
+
+    Hermetic: strip ``CURSOR_API_KEY`` so the wheel smoke never spawns a live
+    bridge. Expect exit 0 or 1 with greppable auth/setup lines — never a traceback.
+    """
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {"CURSOR_API_KEY", "CURSOR_AGENT_USAGE_TOKEN"}
+    }
+    result = _run_command(
+        [str(console_script), "doctor", "--probe"],
+        env=env,
+    )
+    combined = _strip_ansi(f"{result.stdout}\n{result.stderr}")
+    assert result.returncode in {0, 1}, (
+        "cursor-agent doctor --probe must exit 0 or 1: "
+        f"received {result.returncode}, stdout={result.stdout!r}, "
+        f"stderr={result.stderr!r}"
+    )
+    assert "Traceback" not in combined, (
+        "cursor-agent doctor --probe must not dump a traceback: "
+        f"stdout={result.stdout!r}, stderr={result.stderr!r}"
+    )
+    assert "api_key" in combined.lower() or combined.lower().startswith("ok:"), (
+        "cursor-agent doctor --probe must print diagnostic lines: "
+        f"stdout={result.stdout!r}, stderr={result.stderr!r}"
+    )
+
+
 def _verify_gateway_help(console_script: Path) -> None:
     """Installed package must keep gateway group options + ``check`` (PRD-017 FR-6).
 
@@ -344,6 +376,7 @@ def test_installed_wheel_exposes_cli_and_hooks(tmp_path: Path) -> None:
     _verify_models_help(console_script)
     _verify_auth_status_help(console_script)
     _verify_doctor_help(console_script)
+    _verify_doctor_probe_runs(console_script)
     _verify_gateway_help(console_script)
     _verify_sessions_help(console_script)
     _verify_packaged_hooks(python_bin)

@@ -7,6 +7,7 @@ checks do not grow the install module past the preferred size band.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -41,14 +42,22 @@ class MessagingHooksStatusReport:
 
 
 def _workspace_messaging_scripts_complete(scripts_dir: Path) -> bool:
-    """Return True when every messaging ``.sh`` script is present under scripts_dir."""
+    """Return True when every messaging ``.sh`` script is present and executable.
+
+    WHY (PR #80): deploy sets execute bits; ``is_file()`` alone would report
+    ``complete=True`` after ``chmod 0644``, even though Cursor cannot run hooks.
+    """
     if not scripts_dir.is_dir():
         return False
-    return all(
-        (scripts_dir / filename).is_file()
-        for filename in MESSAGING_HOOK_FILENAMES
-        if filename.endswith(".sh")
-    )
+    for filename in MESSAGING_HOOK_FILENAMES:
+        if not filename.endswith(".sh"):
+            continue
+        script_path = scripts_dir / filename
+        if not script_path.is_file():
+            return False
+        if not os.access(script_path, os.X_OK):
+            return False
+    return True
 
 
 # WHY: Completeness must be event-aware — same script under the wrong Cursor

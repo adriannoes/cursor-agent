@@ -268,6 +268,30 @@ def test_messaging_hooks_status_single_binding_is_incomplete_error(
     assert any(line.startswith("error:") for line in report.lines)
 
 
+def test_messaging_hooks_status_non_executable_script_is_incomplete_error(
+    tmp_path: Path,
+) -> None:
+    """Deployed scripts without execute bit → incomplete for messaging (PR #80)."""
+    from cursor_agent.messaging_hooks import (
+        ensure_messaging_hooks,
+        workspace_messaging_hooks_dir,
+    )
+    from cursor_agent.messaging_hooks_status import messaging_hooks_status
+
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    ensure_messaging_hooks(workspace, user_hooks_dir=tmp_path / "user-hooks")
+    scripts_dir = workspace_messaging_hooks_dir(workspace)
+    gate = scripts_dir / "shell-gate.sh"
+    assert gate.is_file()
+    gate.chmod(0o644)
+
+    report = messaging_hooks_status(workspace=workspace, tool_profile="messaging")
+    assert report.complete is False
+    assert report.severity == "error"
+    assert any(line.startswith("error:") for line in report.lines)
+
+
 def test_messaging_hooks_status_wrong_event_bindings_is_incomplete_error(
     tmp_path: Path,
 ) -> None:

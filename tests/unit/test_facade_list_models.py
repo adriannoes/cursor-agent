@@ -217,6 +217,65 @@ async def test_module_list_models_bridge_launch_failure_raises_config_error(
 
 
 @pytest.mark.asyncio
+async def test_module_list_models_file_not_found_spawn_maps_to_config_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Raw FileNotFoundError from launch_bridge must become ConfigError (PR #80)."""
+    from cursor_agent.sdk_facade import list_models
+
+    async def _missing_bridge(*_args: Any, **_kwargs: Any) -> Any:
+        raise FileNotFoundError("cursor-sdk-bridge")
+
+    monkeypatch.setattr(
+        "cursor_agent.sdk_facade.AsyncClient.launch_bridge",
+        _missing_bridge,
+    )
+
+    with pytest.raises(ConfigError, match="cursor-sdk-bridge"):
+        await list_models(api_key="test-key")
+
+
+@pytest.mark.asyncio
+async def test_module_list_models_aclose_failure_maps_to_config_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Successful list_models still maps aclose OSError to ConfigError."""
+    from cursor_agent.sdk_facade import list_models
+
+    class _Row:
+        id = "grok-4.5"
+        display_name = "Grok 4.5"
+        description = None
+
+    class _EphemeralBridge:
+        async def aclose(self) -> None:
+            raise OSError("aclose failed: bridge already dead")
+
+    async def _launch(*_args: Any, **_kwargs: Any) -> Any:
+        return _EphemeralBridge()
+
+    async def _fake_models_list(
+        *,
+        client: Any,
+        api_key: str | None = None,
+    ) -> list[Any]:
+        _ = client, api_key
+        return [_Row()]
+
+    monkeypatch.setattr(
+        "cursor_agent.sdk_facade.AsyncClient.launch_bridge",
+        _launch,
+    )
+    monkeypatch.setattr(
+        "cursor_agent.sdk_facade.AsyncCursor.models.list",
+        _fake_models_list,
+    )
+
+    with pytest.raises(ConfigError, match="aclose failed|bridge already dead"):
+        await list_models(api_key="test-key")
+
+
+@pytest.mark.asyncio
 async def test_module_probe_aclose_called_on_auth_error_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

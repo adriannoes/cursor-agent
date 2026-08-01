@@ -34,6 +34,22 @@ def test_map_sdk_exception_passthrough_existing_cursor_agent_error() -> None:
     assert map_sdk_exception(original) is original
 
 
+def test_map_sdk_exception_maps_file_not_found_to_config_error() -> None:
+    """Bridge spawn FileNotFoundError must become ConfigError (PR #80)."""
+    mapped = map_sdk_exception(FileNotFoundError("cursor-sdk-bridge"))
+
+    assert isinstance(mapped, ConfigError)
+    assert "cursor-sdk-bridge" in str(mapped)
+
+
+def test_map_sdk_exception_maps_oserror_to_config_error() -> None:
+    """Generic OSError from bridge spawn/close must become ConfigError."""
+    mapped = map_sdk_exception(OSError(13, "Permission denied"))
+
+    assert isinstance(mapped, ConfigError)
+    assert "Permission denied" in str(mapped)
+
+
 def test_map_sdk_exception_maps_retryable_sdk_cursor_agent_error_to_network_error() -> (
     None
 ):

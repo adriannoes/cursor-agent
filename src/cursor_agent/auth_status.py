@@ -131,7 +131,11 @@ def _load_usage_oauth(
         return UsageOauthStatus.INVALID_STORE, None
     if not isinstance(data, dict):
         return UsageOauthStatus.INVALID_STORE, None
-    access = str(data.get("accessToken") or "").strip()
+    # WHY (PR #80): str([...]) / str(12345) must not count as a present token.
+    access_raw = data.get("accessToken")
+    if not isinstance(access_raw, str):
+        return UsageOauthStatus.INVALID_STORE, None
+    access = access_raw.strip()
     if not access:
         return UsageOauthStatus.INVALID_STORE, None
     return UsageOauthStatus.PRESENT, access

@@ -179,6 +179,24 @@ def test_resolve_usage_oauth_invalid_store_for_missing_access_token_field(
     assert status == UsageOauthStatus.INVALID_STORE
 
 
+def test_resolve_usage_oauth_invalid_store_for_non_string_access_token(
+    tmp_path: Path,
+) -> None:
+    """Non-string accessToken (list/int) → invalid_store, never PRESENT (PR #80)."""
+    from cursor_agent.auth_status import (
+        UsageOauthStatus,
+        resolve_usage_oauth_local_status,
+    )
+
+    for bad_token in (["secret"], 12345, {"nested": "x"}):
+        auth = tmp_path / f"auth-{type(bad_token).__name__}.json"
+        _write_auth_json(auth, {"accessToken": bad_token})
+        status = resolve_usage_oauth_local_status(env={}, auth_json_path=auth)
+        assert status == UsageOauthStatus.INVALID_STORE, (
+            f"expected invalid_store for accessToken={bad_token!r}, received {status!r}"
+        )
+
+
 def test_resolve_usage_oauth_invalid_store_for_non_dict_json(tmp_path: Path) -> None:
     """JSON array/root non-object → invalid_store (structural)."""
     from cursor_agent.auth_status import (  # noqa: PLC0415

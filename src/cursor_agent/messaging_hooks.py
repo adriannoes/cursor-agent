@@ -10,11 +10,20 @@ import shutil
 import stat
 from importlib import resources
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from cursor_agent.errors import ConfigError
 from cursor_agent.facade_logging import emit_hook_deploy
+
+if TYPE_CHECKING:
+    # WHY: satisfy ``__all__`` / type checkers for lazy ``__getattr__`` re-exports
+    # without importing ``messaging_hooks_status`` at module load (PR #80 cycle).
+    from cursor_agent.messaging_hooks_status import (
+        MessagingHooksStatusReport,
+        messaging_hooks_status,
+    )
 
 MESSAGING_HOOK_FILENAMES: tuple[str, ...] = (
     "hooks.json",
@@ -355,10 +364,27 @@ def ensure_messaging_hooks(
 
 
 # Compatibility re-export: canonical home is messaging_hooks_status (PRD-017).
-from cursor_agent.messaging_hooks_status import (  # noqa: E402
-    MessagingHooksStatusReport,
-    messaging_hooks_status,
+# WHY (PR #80): lazy __getattr__ avoids the cycle where status imports this
+# module while this module imported status at module load time.
+_STATUS_REEXPORT_NAMES = frozenset(
+    {"MessagingHooksStatusReport", "messaging_hooks_status"}
 )
+
+
+def __getattr__(name: str) -> object:
+    """Lazy-load status API so ``messaging_hooks_status`` can import this module."""
+    if name in _STATUS_REEXPORT_NAMES:
+        from cursor_agent import messaging_hooks_status as _status_mod
+
+        return getattr(_status_mod, name)
+    msg = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(msg)
+
+
+def __dir__() -> list[str]:
+    """Expose lazy status re-exports alongside static ``__all__`` names."""
+    return sorted({*_STATUS_REEXPORT_NAMES, *__all__})
+
 
 __all__ = [
     "DEFAULT_USER_MESSAGING_HOOKS_DIR",

@@ -101,6 +101,7 @@ async def _with_ephemeral_bridge(
 ) -> _T:
     """Run ``operation`` on a one-shot bridge, always ``aclose``-ing the client."""
     client: AsyncClient | None = None
+    mapped_error: BaseException | None = None
     try:
         try:
             client = await AsyncClient.launch_bridge(
@@ -110,10 +111,18 @@ async def _with_ephemeral_bridge(
             return await operation(client)
         except Exception as exc:
             # WHY: keep KeyboardInterrupt/CancelledError out of map_sdk_exception.
-            raise map_sdk_exception(exc) from exc
+            mapped_error = map_sdk_exception(exc)
+            raise mapped_error from exc
     finally:
         if client is not None:
-            await client.aclose()
+            try:
+                await client.aclose()
+            except Exception as close_exc:
+                # WHY (PR #80): aclose OSError must not escape as a raw exception
+                # when the operation succeeded; when operation already failed,
+                # keep the primary mapped error and suppress secondary close noise.
+                if mapped_error is None:
+                    raise map_sdk_exception(close_exc) from close_exc
 
 
 def _model_catalog_entry_from_sdk(raw: Any) -> ModelCatalogEntry:
