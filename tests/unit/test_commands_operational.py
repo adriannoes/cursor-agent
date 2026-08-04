@@ -8,14 +8,23 @@ from cursor_agent.cli.command_router import BuiltinMatch
 from cursor_agent.cli.slash_commands import build_repl_command_router
 from cursor_agent.cli.startup import session_key_for
 from cursor_agent.config.loader import CursorAgentConfig
+from cursor_agent.errors import ConfigError
 from cursor_agent.first_party_models import format_first_party_model_help
 from cursor_agent.pool import SessionAgentPool
-from cursor_agent.sdk_facade import FakeSdkFacade, RunStatus
+from cursor_agent.sdk_facade import (
+    FakeSdkFacade,
+    LogContext,
+    RunResult,
+    RunStatus,
+    StreamCallbacks,
+)
 from cursor_agent.sessions.store import SessionStore
 
 from tests.unit.cli_repl_helpers import (
     CreateAgentTrackingFacade,
+    FakeThinkingDisplay,
     SendSpyPool,
+    TimelineSendSpyPool,
     drive_repl,
     seed_session,
 )
@@ -27,6 +36,37 @@ from tests.unit.command_handler_fakes import (
     _CompressSendSpyFacade,
     _SUMMARY_REPLY,
 )
+
+
+class _RaiseOnNthSendFacade(FakeSdkFacade):
+    """FakeSdkFacade that raises on the Nth send (retry finally-path coverage)."""
+
+    def __init__(self, *, raise_on_send: int = 2, **kwargs: object) -> None:
+        super().__init__(**kwargs)  # type: ignore[arg-type]
+        self._raise_on_send = raise_on_send
+        self._send_count = 0
+
+    async def send(
+        self,
+        agent_id: str,
+        message: str,
+        *,
+        callbacks: StreamCallbacks | None = None,
+        log_context: LogContext | None = None,
+    ) -> RunResult:
+        """Raise on the configured send count; otherwise delegate to the parent."""
+        self._send_count += 1
+        if self._send_count == self._raise_on_send:
+            raise ConfigError(
+                f"send failed: received send_count={self._send_count}, "
+                f"expected raise_on_send={self._raise_on_send}"
+            )
+        return await super().send(
+            agent_id,
+            message,
+            callbacks=callbacks,
+            log_context=log_context,
+        )
 
 
 def test_build_repl_command_router_registers_p1_p2_handlers() -> None:
@@ -438,3 +478,123 @@ async def test_usage_shows_last_turn_usage(
     usage_line = next(line for line in output if "duration_ms" in line)
     assert "120" in usage_line
     assert "tokens" in usage_line
+
+
+async def test_retry_starts_thinking_before_send_and_stops_in_finally(
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """FR-1 / Q6: /retry uses ctx.thinking — start before send, stop in finally."""
+    events: list[str] = []
+    thinking = FakeThinkingDisplay(events)
+    facade = FakeSdkFacade(scripted_replies={"default": "ok"})
+    store = SessionStore(tmp_path / "sessions.db")
+    await store.initialize()
+    session_key = session_key_for(config)
+    await seed_session(store, facade, session_key)
+    pool = TimelineSendSpyPool(store=store, facade=facade, config=config, events=events)
+    output: list[str] = []
+
+    await drive_repl(
+        pool,
+        session_key,
+        store,
+        config,
+        facade,
+        lines=("hello agent", "/retry", "/quit"),
+        writer=output.append,
+        auto_resume=True,
+        thinking=thinking,
+    )
+
+    # Free-text + /retry each wrap pool.send with start/finally stop.
+    assert events == [
+        "start_thinking",
+        "pool.send",
+        "stop_thinking",
+        "start_thinking",
+        "pool.send",
+        "stop_thinking",
+    ]
+    assert len(pool.send_calls) == 2
+    assert pool.send_calls[0]["message"] == "hello agent"
+    assert pool.send_calls[1]["message"] == "hello agent"
+
+
+async def test_retry_stops_thinking_when_send_raises(
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """FR-1 / Q6: /retry stops thinking in finally even when pool.send raises."""
+    events: list[str] = []
+    thinking = FakeThinkingDisplay(events)
+    facade = _RaiseOnNthSendFacade(raise_on_send=2, scripted_replies={"default": "ok"})
+    store = SessionStore(tmp_path / "sessions.db")
+    await store.initialize()
+    session_key = session_key_for(config)
+    await seed_session(store, facade, session_key)
+    pool = TimelineSendSpyPool(store=store, facade=facade, config=config, events=events)
+    output: list[str] = []
+
+    await drive_repl(
+        pool,
+        session_key,
+        store,
+        config,
+        facade,
+        lines=("hello agent", "/retry", "/quit"),
+        writer=output.append,
+        auto_resume=True,
+        thinking=thinking,
+    )
+
+    assert events == [
+        "start_thinking",
+        "pool.send",
+        "stop_thinking",
+        "start_thinking",
+        "pool.send",
+        "stop_thinking",
+    ]
+
+
+async def test_compress_does_not_start_thinking(
+    config: CursorAgentConfig,
+    tmp_path: Path,
+) -> None:
+    """Q5: /compress must not call start_thinking (no thinking double-stack)."""
+    events: list[str] = []
+    thinking = FakeThinkingDisplay(events)
+    store = SessionStore(tmp_path / "sessions.db")
+    await store.initialize()
+    session_key = session_key_for(config)
+    facade = _CompressSendSpyFacade(
+        scripted_replies={"default": _SUMMARY_REPLY},
+        store=store,
+        session_key=session_key,
+        session_id=None,
+    )
+    session_id = await seed_session(
+        store,
+        facade,
+        session_key,
+        workspace=str(tmp_path),
+    )
+    facade._status_session_id = session_id
+    pool = TimelineSendSpyPool(store=store, facade=facade, config=config, events=events)
+    output: list[str] = []
+
+    await drive_repl(
+        pool,
+        session_key,
+        store,
+        config,
+        facade,
+        lines=("/compress", "/quit"),
+        writer=output.append,
+        auto_resume=True,
+        thinking=thinking,
+    )
+
+    assert "start_thinking" not in events
+    assert thinking.events == events

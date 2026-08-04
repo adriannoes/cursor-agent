@@ -19,6 +19,7 @@ from cursor_agent.cli.command_router import (
     execute_builtin_command,
 )
 from cursor_agent.cli.error_display import format_error
+from cursor_agent.cli.rich_display import ThinkingDisplay
 from cursor_agent.facade_logging import emit_skill_invoked
 from cursor_agent.cli.slash_commands import (
     _make_skill_resolver,
@@ -60,6 +61,7 @@ async def run_repl(
     writer: Callable[[str], None],
     stream_writer: Callable[[str], None] | None = None,
     stream_callbacks: StreamCallbacks | None = None,
+    thinking: ThinkingDisplay | None = None,
     auto_resume: bool = True,
     logger: logging.Logger | None = None,
     memory_root: Path | None = None,
@@ -101,6 +103,7 @@ async def run_repl(
         state=state,
         stream_callbacks=send_callbacks,
         stream_writer=stream_sink,
+        thinking=thinking,
         logger=logger,
         memory_root=memory_root,
         user_skills_root=user_skills_root,
@@ -146,6 +149,8 @@ async def run_repl(
                 resolved.entry,
                 resolved.arg,
             )
+            if thinking is not None:
+                thinking.start_thinking()
             try:
                 send_result = await pool.send(
                     session_key,
@@ -158,6 +163,9 @@ async def run_repl(
             except CursorAgentError as exc:
                 writer(format_error(exc))
                 continue
+            finally:
+                if thinking is not None:
+                    thinking.stop_thinking()
             skill_logger = logger if logger is not None else logging.getLogger(__name__)
             emit_skill_invoked(
                 skill_logger,
@@ -176,6 +184,8 @@ async def run_repl(
         if state.active_session_id is None:
             writer(_NO_ACTIVE_SESSION_GUIDANCE)
             continue
+        if thinking is not None:
+            thinking.start_thinking()
         try:
             send_result = await pool.send(
                 session_key,
@@ -188,6 +198,9 @@ async def run_repl(
         except CursorAgentError as exc:
             writer(format_error(exc))
             continue
+        finally:
+            if thinking is not None:
+                thinking.stop_thinking()
         state.last_user_message = stripped
         state.last_status = send_result.status
         state.last_usage = send_result.usage

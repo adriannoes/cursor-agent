@@ -283,6 +283,9 @@ async def _route_retry(
     if ctx.state.active_session_id is None:
         writer(_NO_ACTIVE_SESSION)
         return CommandHandled()
+    thinking = ctx.thinking
+    if thinking is not None:
+        thinking.start_thinking()
     try:
         send_result = await ctx.pool.send(
             ctx.session_key,
@@ -295,6 +298,9 @@ async def _route_retry(
     except CursorAgentError as exc:
         writer(format_error(exc))
         return CommandFailed()
+    finally:
+        if thinking is not None:
+            thinking.stop_thinking()
     ctx.state.last_status = send_result.status
     ctx.state.last_usage = send_result.usage
     if ctx.stream_writer is not None:
@@ -335,6 +341,7 @@ async def _route_compress(
         writer(_NO_ACTIVE_SESSION)
         return CommandHandled()
     session_id = ctx.state.active_session_id
+    # WHY (Q5): static status only — never start_thinking (no double-stack).
     writer(_COMPRESSING_MESSAGE)
     try:
         result = await run_compress_session(
