@@ -7,9 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] — 2026-08-01
+
+### Added
+
+- CLI thinking indicator (PRD-018): TTY-only `Thinking… · Ns` during free-text, skill, and `/retry` streaming sends; suppressed in CI and non-TTY pipes.
+
 ## [1.3.0] — 2026-07-27
 
-Operator CLI hygiene (PRD-017) on the integration train — not yet tagged on `main`.
+Operator CLI hygiene (PRD-017) — tagged on `main` as `v1.3.0` (`e22d2a0`).
 
 ### Added
 
@@ -43,7 +49,8 @@ Operator CLI hygiene (PRD-017) on the integration train — not yet tagged on `m
 
 - First-run banner and setup index.
 
-[Unreleased]: https://github.com/adriannoes/cursor-agent/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/adriannoes/cursor-agent/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/adriannoes/cursor-agent/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/adriannoes/cursor-agent/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/adriannoes/cursor-agent/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/adriannoes/cursor-agent/compare/v1.1.0...v1.2.0

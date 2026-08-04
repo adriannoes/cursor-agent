@@ -261,6 +261,8 @@ uv run cursor-agent
 
 This command starts the interactive REPL with the default `coding` profile. On first launch you see the welcome banner (see [README.md — First run](../README.md#first-run)); type a plain-language request or `/help` to explore commands.
 
+On an interactive TTY, the REPL shows a thinking indicator (`Thinking… · Ns`) while waiting for the first stream event on free-text turns, skills, and `/retry`. It is suppressed in CI and when stdout is not a TTY (pipes).
+
 Verify the project without an API key:
 
 ```bash
@@ -301,7 +303,7 @@ cursor-agent auth status              # local + live probes when credentials pre
 cursor-agent auth status --json
 ```
 
-Reports two channels: **API key** (`CURSOR_API_KEY`) and **usage OAuth** (`CURSOR_AGENT_USAGE_TOKEN` or `~/.config/cursor/auth.json` from the official `agent login`). Human lines are labeled (`api_key: …`, `usage_oauth: …`); `--json` emits status enums and optional probe booleans only.
+Reports two channels: **API key** (`CURSOR_API_KEY`, required for the REPL) and **usage OAuth** (`CURSOR_AGENT_USAGE_TOKEN` or `~/.config/cursor/auth.json` from the official `agent login` — **optional**, required only for `cursor-agent usage`). Human lines are labeled (`api_key: …`, `usage_oauth: …`); `--json` emits status enums and optional probe booleans only. When OAuth is missing, the warning states that the channel is optional and not needed for the REPL.
 
 **`--no-probe` is the only offline/fast path.** It performs zero SDK bridge launches and zero dashboard HTTP probes. Default is `--probe`: when a credential is locally present, the API-key probe launches the SDK bridge (`Cursor.me`); the usage probe reuses the dashboard fetch (no usage numbers — `usage` owns that output).
 

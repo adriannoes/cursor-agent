@@ -124,7 +124,7 @@ More product examples: [examples/README.md](examples/README.md).
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
-- **v1.3.0** *(not yet tagged on `main`)* — operator CLI hygiene (`auth`/`doctor`/`gateway check`/sessions hygiene/`models`); library trim drops `SessionStore.get` (use `resolve`). Details in the changelog.
+- **v1.3.0** — operator CLI hygiene (`auth`/`doctor`/`gateway check`/sessions hygiene/`models`); library trim drops `SessionStore.get` (use `resolve`). Details in the changelog.
 - **v1.2.1** — skills discovery harden + package-smoke isolation after the v1.2.0 review follow-up.
 - **v1.2.0** — product skills pack (`skills/`, `skills path|list|seed`, BYO paste).
 - Earlier: v1.1.0 (`full` profile, Grok default), v1.0 (first-run banner + setup index).
