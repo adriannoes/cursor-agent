@@ -330,8 +330,19 @@ class RichDisplay:
         return f"{_THINKING_LABEL_PREFIX}{self._elapsed_seconds()}s"
 
     def _console_supports_live_status(self) -> bool:
-        """Return True when Rich Live/Status will actually refresh frames."""
-        return self._console.is_terminal and not self._console.is_dumb_terminal
+        """Return True when Rich Live/Status will actually refresh on a real TTY.
+
+        WHY: ``force_terminal=True`` with a ``StringIO`` (unit/CI) makes Rich
+        report ``is_terminal`` while Status only emits cursor-hide ANSI and
+        never writes the label into the capture buffer. Require ``isatty()``.
+        """
+        if not self._console.is_terminal or self._console.is_dumb_terminal:
+            return False
+        console_file = self._console.file
+        isatty = getattr(console_file, "isatty", None)
+        if not callable(isatty):
+            return False
+        return bool(isatty())
 
     def _make_thinking_label_renderable(self) -> _DynamicThinkingLabel:
         """Return a Live-frame renderable bound to this display's clock."""

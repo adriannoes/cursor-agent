@@ -80,6 +80,9 @@ def test_start_thinking_on_tty_shows_live_status() -> None:
         is_tty=True,
         is_ci=False,
         elapsed_seconds=lambda: 0,
+        # CI regression: force_terminal + StringIO must still show the label
+        # via CR fallback (Rich Status alone only emits cursor-hide ANSI).
+        force_terminal=True,
     )
 
     display.start_thinking()
