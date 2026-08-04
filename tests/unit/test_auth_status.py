@@ -288,6 +288,10 @@ def test_cli_auth_status_oauth_missing_alone_exits_zero_with_warning(
     assert "warning:" in result.output.lower()
     assert "api_key:" in result.output
     assert "usage_oauth:" in result.output
+    # Optional-channel copy: missing OAuth must not read like a broken install.
+    assert "optional" in result.output.lower(), result.output
+    assert "cursor-agent usage" in result.output, result.output
+    assert "repl" in result.output.lower(), result.output
 
 
 def test_cli_auth_status_all_local_channels_present_exits_zero(

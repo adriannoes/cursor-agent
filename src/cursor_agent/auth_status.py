@@ -27,8 +27,9 @@ from cursor_agent.usage import (
 API_KEY_ENV_VAR = "CURSOR_API_KEY"
 
 _OAUTH_MISSING_WARNING = (
-    "warning: usage OAuth missing — run `agent login` (official Cursor Agent CLI) "
-    f"or set {USAGE_TOKEN_ENV_VAR} for `cursor-agent usage`"
+    "warning: usage OAuth missing (optional) — required only for "
+    f"`cursor-agent usage`, not for the REPL; run `agent login` "
+    f"(official Cursor Agent CLI) or set {USAGE_TOKEN_ENV_VAR}"
 )
 
 
