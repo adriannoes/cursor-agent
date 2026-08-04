@@ -26,7 +26,6 @@ from cursor_agent.agent_cleanup import cancel_agent_quietly
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.errors import ConfigError, CursorAgentError
 from cursor_agent.first_party_models import format_first_party_model_help
-from cursor_agent.product_copy import FIRST_COMMANDS_HINT
 from cursor_agent.memory import (
     MEMORY_FILENAME,
     USER_FILENAME,
@@ -44,28 +43,28 @@ from cursor_agent.skills.discovery import (
 )
 from cursor_agent.tool_profile_policy import effective_tool_profile
 
-_HELP_TEXT = f"""\
+_HELP_TEXT = """\
 Slash commands:
 
-{FIRST_COMMANDS_HINT}
-
-P0 — session control:
+Session:
   /new            Start a new session
   /reset          Alias of /new
   /resume [id]    Resume a session (latest or by id)
   /help           List available commands
-  /quit           Exit the REPL
+  /quit           Exit
 
-P1 — operational:
+Ops:
   /stop           Cancel the current run
   /model [id]     Set model override for next send
 
-P2 — advanced:
+Advanced:
   /retry          Resend the last user message
   /usage          Show usage from the last run
   /compress       Compress session context
   /skills         List discovered workspace skills
   /memory show    Inspect effective Memory v1 payload
+
+Also useful: doctor · sessions list · skills path|list|seed — docs/setup.md
 """
 
 _NO_ACTIVE_SESSION = "No active session. Use /new or /resume to continue."
@@ -139,7 +138,7 @@ async def handle_resume(
 
 
 def handle_help(*, writer: Callable[[str], None]) -> None:
-    """Write static help listing P0/P1/P2 commands and the /reset alias."""
+    """Write slash-command help grouped as Session / Ops / Advanced."""
     writer(_HELP_TEXT.strip())
 
 
