@@ -124,6 +124,7 @@ More product examples: [examples/README.md](examples/README.md).
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
+- **v1.3.1** — CLI thinking indicator (`Thinking… · Ns` on free-text, skill, `/retry`; TTY-only). [#82](https://github.com/adriannoes/cursor-agent/pull/82).
 - **v1.3.0** — operator CLI hygiene (`auth`/`doctor`/`gateway check`/sessions hygiene/`models`); library trim drops `SessionStore.get` (use `resolve`). Details in the changelog.
 - **v1.2.1** — skills discovery harden + package-smoke isolation after the v1.2.0 review follow-up.
 - **v1.2.0** — product skills pack (`skills/`, `skills path|list|seed`, BYO paste).
