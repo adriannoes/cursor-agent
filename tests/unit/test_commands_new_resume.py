@@ -149,11 +149,11 @@ async def test_p0_resume_with_id_activates_session(
     assert any("Resumed session" in line for line in output)
 
 
-async def test_help_lists_p0_p1_p2_commands(
+async def test_help_lists_session_ops_advanced_commands(
     config: CursorAgentConfig,
     tmp_path: Path,
 ) -> None:
-    """/help lists built-in commands grouped by P0, P1, and P2 priority."""
+    """/help lists built-in commands grouped as Session / Ops / Advanced."""
     facade = FakeSdkFacade()
     store = SessionStore(tmp_path / "sessions.db")
     await store.initialize()
@@ -173,19 +173,21 @@ async def test_help_lists_p0_p1_p2_commands(
     )
 
     help_text = "\n".join(output)
-    assert "P0" in help_text
+    assert "Session:" in help_text
     assert "/new" in help_text
     assert "/resume" in help_text
     assert "/help" in help_text
     assert "/quit" in help_text
-    assert "P1" in help_text
+    assert "Ops:" in help_text
     assert "/stop" in help_text
     assert "/model" in help_text
-    assert "P2" in help_text
+    assert "Advanced:" in help_text
     assert "/retry" in help_text
     assert "/usage" in help_text
     assert "/compress" in help_text
     assert "/memory show" in help_text
+    assert "Also useful:" in help_text
+    assert "P0" not in help_text
     assert "Command not available yet" not in help_text
 
 

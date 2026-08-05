@@ -26,7 +26,6 @@ from cursor_agent.agent_cleanup import cancel_agent_quietly
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.errors import ConfigError, CursorAgentError
 from cursor_agent.first_party_models import format_first_party_model_help
-from cursor_agent.product_copy import FIRST_COMMANDS_HINT
 from cursor_agent.memory import (
     MEMORY_FILENAME,
     USER_FILENAME,
@@ -44,28 +43,28 @@ from cursor_agent.skills.discovery import (
 )
 from cursor_agent.tool_profile_policy import effective_tool_profile
 
-_HELP_TEXT = f"""\
+_HELP_TEXT = """\
 Slash commands:
 
-{FIRST_COMMANDS_HINT}
-
-P0 — session control:
+Session:
   /new            Start a new session
   /reset          Alias of /new
   /resume [id]    Resume a session (latest or by id)
   /help           List available commands
-  /quit           Exit the REPL
+  /quit           Exit
 
-P1 — operational:
+Ops:
   /stop           Cancel the current run
   /model [id]     Set model override for next send
 
-P2 — advanced:
+Advanced:
   /retry          Resend the last user message
   /usage          Show usage from the last run
   /compress       Compress session context
   /skills         List discovered workspace skills
   /memory show    Inspect effective Memory v1 payload
+
+Also useful: doctor · sessions list · skills path|list|seed — docs/setup.md
 """
 
 _NO_ACTIVE_SESSION = "No active session. Use /new or /resume to continue."
@@ -139,7 +138,7 @@ async def handle_resume(
 
 
 def handle_help(*, writer: Callable[[str], None]) -> None:
-    """Write static help listing P0/P1/P2 commands and the /reset alias."""
+    """Write slash-command help grouped as Session / Ops / Advanced."""
     writer(_HELP_TEXT.strip())
 
 
@@ -283,6 +282,9 @@ async def _route_retry(
     if ctx.state.active_session_id is None:
         writer(_NO_ACTIVE_SESSION)
         return CommandHandled()
+    thinking = ctx.thinking
+    if thinking is not None:
+        thinking.start_thinking()
     try:
         send_result = await ctx.pool.send(
             ctx.session_key,
@@ -295,6 +297,9 @@ async def _route_retry(
     except CursorAgentError as exc:
         writer(format_error(exc))
         return CommandFailed()
+    finally:
+        if thinking is not None:
+            thinking.stop_thinking()
     ctx.state.last_status = send_result.status
     ctx.state.last_usage = send_result.usage
     if ctx.stream_writer is not None:
@@ -335,6 +340,7 @@ async def _route_compress(
         writer(_NO_ACTIVE_SESSION)
         return CommandHandled()
     session_id = ctx.state.active_session_id
+    # WHY (Q5): static status only — never start_thinking (no double-stack).
     writer(_COMPRESSING_MESSAGE)
     try:
         result = await run_compress_session(

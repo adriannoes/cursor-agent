@@ -110,6 +110,8 @@ async def run_default(
         display = RichDisplay(
             stream_writer=_echo_delta,
             status_writer=typer.echo,
+            is_tty=tty,
+            is_ci=ci,
         )
         return await run_repl(
             pool,
@@ -121,6 +123,7 @@ async def run_default(
             writer=typer.echo,
             stream_writer=_echo_delta,
             stream_callbacks=build_display_stream_callbacks(display),
+            thinking=display,
         )
 
 

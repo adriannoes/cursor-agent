@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from cursor_agent.cli.rich_display import ThinkingDisplay
 from cursor_agent.config.loader import CursorAgentConfig
 from cursor_agent.errors import CursorAgentError
 from cursor_agent.facade_logging import emit_command_end, emit_command_start
@@ -66,6 +67,7 @@ class CommandContext:
     state: ReplState
     stream_callbacks: StreamCallbacks | None = None
     stream_writer: Callable[[str], None] | None = None
+    thinking: ThinkingDisplay | None = None
     logger: logging.Logger | None = None
     memory_root: Path | None = None
     user_skills_root: Path | None = None
