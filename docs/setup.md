@@ -303,7 +303,7 @@ cursor-agent auth status              # local + live probes when credentials pre
 cursor-agent auth status --json
 ```
 
-Reports two channels: **API key** (`CURSOR_API_KEY`, required for the REPL) and **usage OAuth** (`CURSOR_AGENT_USAGE_TOKEN` or `~/.config/cursor/auth.json` from the official `agent login` — **optional**, required only for `cursor-agent usage`). Human lines are labeled (`api_key: …`, `usage_oauth: …`); `--json` emits status enums and optional probe booleans only. When OAuth is missing, the warning states that the channel is optional and not needed for the REPL.
+Reports two channels: **API key** (`CURSOR_API_KEY`, required for interactive turns) and **usage OAuth** (`CURSOR_AGENT_USAGE_TOKEN` or `~/.config/cursor/auth.json` from the official `agent login` — **optional**, required only for `cursor-agent usage`). Human lines are labeled (`api_key: …`, `usage_oauth: …`); `--json` emits status enums and optional probe booleans only. When OAuth is missing, the warning states that the channel is optional and not needed for interactive turns.
 
 **`--no-probe` is the only offline/fast path.** It performs zero SDK bridge launches and zero dashboard HTTP probes. Default is `--probe`: when a credential is locally present, the API-key probe launches the SDK bridge (`Cursor.me`); the usage probe reuses the dashboard fetch (no usage numbers — `usage` owns that output).
 
