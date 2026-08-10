@@ -34,8 +34,10 @@ Reference projects may inform **behavior patterns** — reimplement in `cursor_a
                              ▼
                     Cursor SDK (Grok 4.5 / Composer 2.5 + tools)
                              ▼
-                  Local cwd  |  Cloud VM
+                  Local cwd (cloud runtime not supported)
 ```
+
+> **Cron note:** Jobs may still store `runtime: cloud` until **v1.3.2**; execution uses the same local facade path above — not an isolated VM.
 
 **CLI flow:** input → `CommandRouter` → `SessionStore.resolve(session_key)` → `SessionAgentPool.send` → `AsyncSdkFacade` → stream → display → `SessionStore.touch()`.
 

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.3.1] — 2026-08-05
 
+CLI thinking indicator (PRD-018) — shipped on `main` @ tag **`v1.3.1`** ([#82](https://github.com/adriannoes/cursor-agent/pull/82)).
+
 ### Added
 
 - CLI thinking indicator (PRD-018): TTY-only `Thinking… · Ns` during free-text, skill, and `/retry` streaming sends; suppressed in CI and non-TTY pipes.

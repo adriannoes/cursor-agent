@@ -401,6 +401,7 @@ Scheduled jobs run inside the long-running gateway process. These notes are for 
 - `cursor-agent cron list --strict` — same listing, but fail fast on any invalid entry.
 - `cursor-agent cron show <job_id>` — load the full prompt body for one job.
 - Jobs live in `~/.cursor-agent/cron/jobs.yaml` and reload when the file mtime changes. After fixing a YAML parse error, save or touch the file so the scheduler picks up the correction.
+- Use `--runtime local` for new jobs. In **v1.3.1** the CLI still accepts `--runtime cloud`, but jobs run with local SDK options — not an isolated VM. **v1.3.2** will reject cloud before side effects. See [SECURITY.md](../SECURITY.md) and [ADR-003](decisions/ADR-003-cross-runtime-resume.md).
 - Full setup, demo flow, and delivery behavior: [Optional scheduled cron jobs](telegram-gateway-onboarding.md#9-optional-scheduled-cron-jobs) (section 9 of the gateway onboarding guide).
 
 ## Skills operator notes

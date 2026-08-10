@@ -133,10 +133,12 @@ uv run cursor-agent cron list
 This command lists configured jobs with schedule, next run, runtime, and Telegram chat ID metadata. It is metadata-only and skips invalid per-job entries with warnings; use `cron show <job_id>` for the full prompt body, or `cron list --strict` to fail on any invalid entry.
 
 ```bash
-uv run cursor-agent cron add telegram-demo-report --schedule "*/1 * * * *" --prompt "Create a concise status update with a Markdown table, one link to https://example.com, and a short fenced code block." --runtime cloud --chat-id "123456789"
+uv run cursor-agent cron add telegram-demo-report --schedule "*/1 * * * *" --prompt "Create a concise status update with a Markdown table, one link to https://example.com, and a short fenced code block." --runtime local --chat-id "123456789"
 ```
 
 This command writes a demo job to `~/.cursor-agent/cron/jobs.yaml`; replace `123456789` with the destination Telegram chat ID and remove the job after testing to avoid recurring SDK usage.
+
+Cloud cron execution is not supported: current releases can persist `runtime: cloud` while still constructing local SDK options. The CLI still accepts `--runtime cloud` until **v1.3.2**, which will reject that value before side effects. A future cloud-specific design must define repository and SDK contracts.
 
 ```bash
 uv run cursor-agent gateway --config ~/.cursor-agent/gateway.yaml
