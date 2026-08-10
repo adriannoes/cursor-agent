@@ -130,7 +130,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history.
 - **v1.2.0** — product skills pack (`skills/`, `skills path|list|seed`, BYO paste).
 - Earlier: v1.1.0 (`full` profile, Grok default), v1.0 (first-run banner + setup index).
 
-Roadmap: logging persistence (PRD-015), Discord/Slack onboarding (PRD-014), Unicode terminal fallback, session search / grouping / TUI when demand justifies.
+Roadmap: operational safety hardening (`v1.3.2`), logging persistence (`v1.4.0`), automation reliability (`v1.5.0`), durable Telegram delivery (`v1.6.0`), and deterministic one-shot/timezone scheduling (`v1.7.0`). A second gateway adapter remains conditional on selecting Discord or Slack; conversational scheduling, approvals, webhooks, session search, and TUI remain demand-driven.
 
 ## Contributing
 
