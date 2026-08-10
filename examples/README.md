@@ -81,6 +81,8 @@ uv run cursor-agent cron list --strict
 uv run cursor-agent cron show <job_id>
 ```
 
+When adding jobs, use `--runtime local`. In **v1.3.1** the CLI still accepts `--runtime cloud`, but execution uses local SDK options — **v1.3.2** will reject cloud before side effects. See [docs/setup.md — Cron operator notes](../docs/setup.md#cron-operator-notes).
+
 Jobs are stored in `~/.cursor-agent/cron/jobs.yaml`. Full operator notes: [docs/setup.md — Cron operator notes](../docs/setup.md#cron-operator-notes).
 
 ## Skills

@@ -12,7 +12,7 @@ The Cursor SDK detects runtime from the `agent_id` prefix (`bc-` = cloud, otherw
 
 - **Mismatch** → clear error message; suggest `/new`.
 - Legacy cloud rows never share a `session_key` with chat, but cloud execution is not supported because the current facade constructs local SDK options.
-- PRD-019 makes `v1.3.2` reject new cloud configuration before SDK or persistence side effects; a future ADR must define real cloud repositories and SDK options.
+- **`v1.3.2`** will reject new cloud configuration before SDK or persistence side effects; a future ADR must define real cloud repositories and SDK options.
 - `agent_id` is immutable for a session row; changing runtime requires `/new`.
 
 ## Consequences
@@ -25,7 +25,7 @@ The Cursor SDK detects runtime from the `agent_id` prefix (`bc-` = cloud, otherw
 
 **Negative**
 
-- Existing cloud-tagged rows cannot execute or resume until a future cloud-specific design is implemented.
+- Interactive `/resume` blocks runtime mismatches. Cron jobs may still run with a persisted `runtime: cloud` label because the executor skips the resume guard and the facade constructs local SDK options — do not treat the label as an isolated VM.
 
 ## See also
 

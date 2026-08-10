@@ -138,7 +138,7 @@ uv run cursor-agent cron add telegram-demo-report --schedule "*/1 * * * *" --pro
 
 This command writes a demo job to `~/.cursor-agent/cron/jobs.yaml`; replace `123456789` with the destination Telegram chat ID and remove the job after testing to avoid recurring SDK usage.
 
-Cloud cron execution is not supported: current releases can persist `runtime: cloud` while still constructing local SDK options. PRD-019 makes `v1.3.2` reject that value until a future cloud-specific design defines repository and SDK contracts.
+Cloud cron execution is not supported: current releases can persist `runtime: cloud` while still constructing local SDK options. The CLI still accepts `--runtime cloud` until **v1.3.2**, which will reject that value before side effects. A future cloud-specific design must define repository and SDK contracts.
 
 ```bash
 uv run cursor-agent gateway --config ~/.cursor-agent/gateway.yaml

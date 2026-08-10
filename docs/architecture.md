@@ -37,6 +37,8 @@ Reference projects may inform **behavior patterns** — reimplement in `cursor_a
                   Local cwd (cloud runtime not supported)
 ```
 
+> **Cron note:** Jobs may still store `runtime: cloud` until **v1.3.2**; execution uses the same local facade path above — not an isolated VM.
+
 **CLI flow:** input → `CommandRouter` → `SessionStore.resolve(session_key)` → `SessionAgentPool.send` → `AsyncSdkFacade` → stream → display → `SessionStore.touch()`.
 
 User data lives under `~/.cursor-agent/` (`config.yaml`, `sessions.db`, `MEMORY.md`, `USER.md`, `gateway.yaml`, logs).
