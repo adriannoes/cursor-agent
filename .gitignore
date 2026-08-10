@@ -34,9 +34,7 @@ htmlcov/
 
 # Internal planning artifacts and local agent workflows (not part of the public repo)
 internal-docs/
-.cursor/*
-!.cursor/rules/
-!.cursor/rules/**
+.cursor/
 
 # Git worktrees
 .worktrees/
