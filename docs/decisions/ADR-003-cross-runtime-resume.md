@@ -11,7 +11,8 @@ The Cursor SDK detects runtime from the `agent_id` prefix (`bc-` = cloud, otherw
 `/resume` succeeds only when `session.runtime == config.runtime.mode` at resume time.
 
 - **Mismatch** → clear error message; suggest `/new`.
-- Cloud cron jobs record `runtime: cloud` and **never** share a `session_key` with chat.
+- Legacy cloud rows never share a `session_key` with chat, but cloud execution is not supported because the current facade constructs local SDK options.
+- PRD-019 makes `v1.3.2` reject new cloud configuration before SDK or persistence side effects; a future ADR must define real cloud repositories and SDK options.
 - `agent_id` is immutable for a session row; changing runtime requires `/new`.
 
 ## Consequences
@@ -24,7 +25,7 @@ The Cursor SDK detects runtime from the `agent_id` prefix (`bc-` = cloud, otherw
 
 **Negative**
 
-- A user cannot continue a cloud session on a local CLI without starting a new local session.
+- Existing cloud-tagged rows cannot execute or resume until a future cloud-specific design is implemented.
 
 ## See also
 

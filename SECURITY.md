@@ -11,7 +11,7 @@ Threat model and capability matrix for gateway bots (Telegram and future channel
 | CLI `coding` | SDK auto-approve; trusted local operator only; project/user MCP preserved |
 | CLI `full` | SDK auto-approve; curated MCP allowlist (`mcp_registry`); **local-only** — never on gateway; default `github` transport is remote HTTPS with PAT Bearer |
 | Gateway `messaging` | Allowlist + deny hooks + sandbox (network off) + empty MCP (`{}`) |
-| Cron `cloud` | Isolated VM; secrets via `env_vars` |
+| Cron runtime | Local only; `cloud` is not safe in `v1.3.1` and PRD-019 makes `v1.3.2` reject it before side effects |
 
 **Principle:** `messaging` is **read-only over the workspace** — Q&A about code, no mutation. Curated MCP under `full` never reaches the gateway; messaging empty-MCP policy is unchanged ([ADR-029](docs/decisions/ADR-029-mcp-registry-full-profile.md)).
 

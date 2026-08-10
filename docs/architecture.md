@@ -34,7 +34,7 @@ Reference projects may inform **behavior patterns** — reimplement in `cursor_a
                              ▼
                     Cursor SDK (Grok 4.5 / Composer 2.5 + tools)
                              ▼
-                  Local cwd  |  Cloud VM
+                  Local cwd (cloud runtime not supported)
 ```
 
 **CLI flow:** input → `CommandRouter` → `SessionStore.resolve(session_key)` → `SessionAgentPool.send` → `AsyncSdkFacade` → stream → display → `SessionStore.touch()`.
